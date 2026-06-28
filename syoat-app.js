@@ -336,7 +336,8 @@ function Badge({
 // ─────────────────────────────────────────────────────────────
 function LoginScreen({
   onLogin,
-  staffDB
+  staffDB,
+  staffLoadError
 }) {
   const [selected, setSelected] = React.useState(null);
   const [pin, setPin] = React.useState("");
@@ -456,7 +457,18 @@ function LoginScreen({
         letterSpacing: 0.8,
         marginBottom: 10
       }
-    }, "Who are you?"), /*#__PURE__*/React.createElement("div", {
+    }, "Who are you?"), staffLoadError && /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: "#fff3cd",
+        border: "1px solid #ffc107",
+        borderRadius: 8,
+        padding: "8px 12px",
+        fontSize: 12,
+        color: "#856404",
+        marginBottom: 10,
+        lineHeight: 1.5
+      }
+    }, /*#__PURE__*/React.createElement("strong", null, "⚠️ Sheet not connected"), /*#__PURE__*/React.createElement("br", null), staffLoadError), /*#__PURE__*/React.createElement("div", {
       style: {
         position: "relative"
       }
@@ -3461,6 +3473,7 @@ function App() {
   const [lastSync, setLastSync] = React.useState(null);
   const [alertThresholds, setAlertThresholds] = React.useState({}); // from Products.ReorderLevel
   const [staffDB, setStaffDB] = React.useState(null); // null = not yet loaded
+  const [staffLoadError, setStaffLoadError] = React.useState(null);
   const [stockCounts, setStockCounts] = React.useState([]);
   const [showCountModal, setShowCountModal] = React.useState(false);
   const [countsLoading, setCountsLoading] = React.useState(false);
@@ -3556,11 +3569,18 @@ function App() {
           return { ...s, ...perms };
         });
         setStaffDB(enriched);
+      } else if (data && data.error) {
+        setStaffDB(STAFF_DB_FALLBACK);
+        setStaffLoadError("Sheet error: " + data.error);
       } else {
         // Sheet not set up yet - use fallback
         setStaffDB(STAFF_DB_FALLBACK);
+        setStaffLoadError("App_Logins sheet is empty or not yet set up.");
       }
-    }).catch(() => setStaffDB(STAFF_DB_FALLBACK));
+    }).catch(err => {
+      setStaffDB(STAFF_DB_FALLBACK);
+      setStaffLoadError("Cannot reach Apps Script — using offline data. Check your deployment.");
+    });
   }, []);
   React.useEffect(() => {
     if (!user) return;
@@ -3665,6 +3685,7 @@ function App() {
   }, "Connecting to Google Sheet"));
   if (!user) return /*#__PURE__*/React.createElement(LoginScreen, {
     staffDB: staffDB,
+      staffLoadError: staffLoadError,
     onLogin: async u => {
       setUser(u);
       // Check stock immediately after login — alert if anything is critical
