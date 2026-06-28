@@ -337,7 +337,8 @@ function Badge({
 function LoginScreen({
   onLogin,
   staffDB,
-  staffLoadError
+  staffLoadError,
+  staffSource
 }) {
   const [selected, setSelected] = React.useState(null);
   const [pin, setPin] = React.useState("");
@@ -506,6 +507,17 @@ function LoginScreen({
         fontSize: 12
       }
     }, "▼")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: staffSource === "sheet" ? "#6b9e6b" : "#c4733a",
+        marginTop: 6,
+        marginBottom: 2,
+        textAlign: "right"
+      }
+    }, staffSource === "sheet"
+      ? "✓ " + staffDB.length + " staff from sheet"
+      : "⚠ offline — sheet not connected"
+    ), /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 16,
         color: "#c8bfb0",
@@ -3575,11 +3587,11 @@ function App() {
       } else {
         // Sheet not set up yet - use fallback
         setStaffDB(STAFF_DB_FALLBACK);
-        setStaffLoadError("App_Logins sheet is empty or not yet set up.");
+        setStaffLoadError("App_Logins sheet has no Active rows. Add staff rows with Status = Active.");
       }
     }).catch(err => {
       setStaffDB(STAFF_DB_FALLBACK);
-      setStaffLoadError("Cannot reach Apps Script — using offline data. Check your deployment.");
+      setStaffLoadError("API error: " + (err && err.message ? err.message : String(err)));
     });
   }, []);
   React.useEffect(() => {
@@ -3686,6 +3698,7 @@ function App() {
   if (!user) return /*#__PURE__*/React.createElement(LoginScreen, {
     staffDB: staffDB,
       staffLoadError: staffLoadError,
+      staffSource: staffLoadError ? "offline" : "sheet",
     onLogin: async u => {
       setUser(u);
       // Check stock immediately after login — alert if anything is critical
