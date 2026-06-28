@@ -1454,6 +1454,9 @@ function MovListModal({
   const [msg, setMsg] = React.useState("");
   const [pageLimit, setPageLimit] = React.useState(10);
   const [hasMore, setHasMore] = React.useState(false);
+  const [reverseModal, setReverseModal] = React.useState(null); // movementID to reverse
+  const [reverseReason, setReverseReason] = React.useState("");
+  const [reverseBusy, setReverseBusy] = React.useState(false);
   const load = React.useCallback(async lim => {
     setLoading(true);
     try {
@@ -1489,6 +1492,22 @@ function MovListModal({
       setMsg("❌ " + e.message);
     }
     setBusy(null);
+  }
+  async function reverse(movID, reason) {
+    if (!user.canReverse) { setMsg("❌ Your role cannot reverse movements."); return; }
+    if (!reason.trim()) { setMsg("❌ Please enter a reason for the reversal."); return; }
+    setReverseBusy(true);
+    try {
+      const res = await apiWrite("reverseMovement", user.email, { movementID: movID, reason: reason.trim() });
+      setMsg("✅ Reversed " + movID + " → " + res.reversalMovementID);
+      setReverseModal(null);
+      setReverseReason("");
+      load();
+      if (onApproveSuccess) onApproveSuccess();
+    } catch (e) {
+      setMsg("❌ " + e.message);
+    }
+    setReverseBusy(false);
   }
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1657,7 +1676,20 @@ function MovListModal({
       color: "#9aaa9b",
       fontSize: 11
     }
-  }, "Awaiting approval"))))), /*#__PURE__*/React.createElement("div", {
+  }, "Awaiting approval"),
+  m.Status === "Approved" && user.canReverse && /*#__PURE__*/React.createElement("button", {
+    onClick: () => { setReverseModal(m.MovementID); setReverseReason(""); setMsg(""); },
+    style: {
+      background: "none",
+      border: "1px solid #c4733a",
+      color: "#c4733a",
+      borderRadius: 7,
+      padding: "5px 11px",
+      fontSize: 11,
+      cursor: "pointer",
+      fontWeight: 600
+    }
+  }, "↩ Reverse"))))), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "12px 18px",
       borderTop: "1px solid #ede6dc",
@@ -1692,7 +1724,37 @@ function MovListModal({
       fontSize: 11,
       color: "#c8bfb0"
     }
-  }, "All movements loaded"))));
+  }, "All movements loaded")),
+  reverseModal && React.createElement("div", {
+    style: { position:"fixed", inset:0, background:"rgba(45,74,47,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, padding:16 }
+  }, React.createElement("div", {
+    style: { background:"#fefcf9", borderRadius:16, padding:28, width:400, maxWidth:"100%", border:"1px solid #ddd5c8" }
+  },
+    React.createElement("div", { style:{ fontWeight:800, fontSize:16, color:"#c4733a", marginBottom:6 } }, "↩ Reverse Movement"),
+    React.createElement("div", { style:{ fontSize:13, color:"#6b7f6c", marginBottom:16 } },
+      "You are about to reverse ", React.createElement("strong", null, reverseModal),
+      ". This creates an equal and opposite approved movement, restoring the original stock. This action cannot be undone."
+    ),
+    React.createElement("div", { style:{ fontSize:12, fontWeight:700, color:"#2d4a2f", marginBottom:6 } }, "Reason for reversal *"),
+    React.createElement("textarea", {
+      value: reverseReason,
+      onChange: e => setReverseReason(e.target.value),
+      placeholder: "e.g. Entered wrong product, wrong quantity, duplicate entry...",
+      rows: 3,
+      style: { width:"100%", borderRadius:8, border:"1px solid #ddd5c8", padding:"9px 12px", fontSize:13, fontFamily:"inherit", resize:"vertical", background:"#faf8f4", color:"#2d4a2f" }
+    }),
+    React.createElement("div", { style:{ display:"flex", gap:10, marginTop:16, justifyContent:"flex-end" } },
+      React.createElement("button", {
+        onClick: () => { setReverseModal(null); setReverseReason(""); },
+        style: { ...ghost, padding:"9px 18px" }
+      }, "Cancel"),
+      React.createElement("button", {
+        onClick: () => reverse(reverseModal, reverseReason),
+        disabled: reverseBusy || !reverseReason.trim(),
+        style: { background: reverseBusy || !reverseReason.trim() ? "#ccc" : "#c4733a", color:"#fff", border:"none", borderRadius:9, padding:"9px 20px", fontWeight:700, cursor: reverseBusy || !reverseReason.trim() ? "not-allowed" : "pointer", fontSize:13 }
+      }, reverseBusy ? "Reversing…" : "Confirm Reversal")
+    )
+  ))));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -3395,6 +3457,8 @@ function App() {
   const [showCountModal, setShowCountModal] = React.useState(false);
   const [countsLoading, setCountsLoading] = React.useState(false);
   const [editingCount, setEditingCount] = React.useState(null);
+  const [showLowStockAlert, setShowLowStockAlert] = React.useState(false);
+  const [lowStockItems, setLowStockItems] = React.useState([]);
   const notify = msg => {
     setToast(msg);
     setTimeout(() => setToast(""), 5000);
@@ -3583,8 +3647,41 @@ function App() {
   }, "Connecting to Google Sheet"));
   if (!user) return /*#__PURE__*/React.createElement(LoginScreen, {
     staffDB: staffDB,
-    onLogin: u => {
+    onLogin: async u => {
       setUser(u);
+      // Check stock immediately after login — alert if anything is critical
+      try {
+        const [prods, stk] = await Promise.all([api("getProducts"), api("getStock")]);
+        const alertMap = {};
+        prods.forEach(p => {
+          const lvl = parseInt(p.ReorderLevel);
+          if (p.ProductID && !isNaN(lvl) && lvl > 0) alertMap[p.ProductID] = lvl;
+        });
+        const totals = {};
+        stk.forEach(row => {
+          const VIRTUAL = ["SUPPLIER","CUSTOMER","WEBSITE_SALES","FLIPKART_SALES","SAMPLES","DAMAGE"];
+          if (!VIRTUAL.includes(row.LocationID)) {
+            totals[row.ProductID] = (totals[row.ProductID] || 0) + (parseFloat(row.Quantity) || 0);
+          }
+        });
+        const alerts = prods
+          .filter(p => alertMap[p.ProductID] !== undefined)
+          .map(p => {
+            const qty = totals[p.ProductID] || 0;
+            const threshold = alertMap[p.ProductID];
+            const pct = threshold > 0 ? Math.round((qty / threshold) * 100) : 0;
+            let status = "ok";
+            if (qty === 0) status = "oos";
+            else if (pct <= 30) status = "critical";
+            else if (pct <= 60) status = "low";
+            return { ...p, totalQty: qty, threshold, pct, status };
+          })
+          .filter(p => p.status !== "ok");
+        if (alerts.length > 0) {
+          setLowStockItems(alerts);
+          setShowLowStockAlert(true);
+        }
+      } catch (e) { /* silent — don't block login on alert fetch failure */ }
     }
   });
   return /*#__PURE__*/React.createElement("div", {
@@ -3610,7 +3707,45 @@ function App() {
       boxShadow: "0 8px 32px rgba(45,74,47,0.15)",
       maxWidth: 340
     }
-  }, toast), /*#__PURE__*/React.createElement("div", {
+  }, toast),
+  showLowStockAlert && React.createElement("div", {
+    style: { position:"fixed", inset:0, background:"rgba(45,74,47,0.65)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:500, padding:16 }
+  }, React.createElement("div", {
+    style: { background:"#fefcf9", borderRadius:18, padding:"28px 28px 24px", width:460, maxWidth:"100%", border:"1px solid #ddd5c8", boxShadow:"0 20px 60px rgba(45,74,47,0.2)" }
+  },
+    React.createElement("div", { style:{ display:"flex", alignItems:"center", gap:10, marginBottom:18 } },
+      React.createElement("span", { style:{ fontSize:28 } }, "⚠️"),
+      React.createElement("div", null,
+        React.createElement("div", { style:{ fontWeight:800, fontSize:17, color:"#c4733a" } }, "Low Stock Alert"),
+        React.createElement("div", { style:{ fontSize:12, color:"#6b7f6c" } }, lowStockItems.length + " product" + (lowStockItems.length > 1 ? "s" : "") + " need attention")
+      )
+    ),
+    lowStockItems.map(p => React.createElement("div", {
+      key: p.ProductID,
+      style: { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", background: p.status === "oos" ? "#fef2f2" : "#fff8f0", borderRadius:10, marginBottom:8, border: "1px solid " + (p.status === "oos" ? "#fca5a5" : "#f4c98a") }
+    },
+      React.createElement("div", null,
+        React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#2d4a2f" } }, p.ProductName || p.ProductID),
+        React.createElement("div", { style:{ fontSize:11, color:"#6b7f6c", marginTop:2 } }, "Reorder level: " + p.threshold + " units")
+      ),
+      React.createElement("div", { style:{ textAlign:"right" } },
+        React.createElement("div", { style:{ fontWeight:800, fontSize:18, color: p.status === "oos" ? "#ef4444" : "#c4733a" } }, p.totalQty),
+        React.createElement("div", { style:{ fontSize:10, fontWeight:700, color: p.status === "oos" ? "#ef4444" : "#c4733a", textTransform:"uppercase", letterSpacing:"0.05em" } },
+          p.status === "oos" ? "OUT OF STOCK" : p.status === "critical" ? "CRITICAL" : "LOW"
+        )
+      )
+    )),
+    React.createElement("div", { style:{ fontSize:11, color:"#9aaa9b", marginTop:6, marginBottom:18 } },
+      "Total stock across all physical locations (excludes virtual like FBA in-transit)."
+    ),
+    React.createElement("div", { style:{ display:"flex", gap:10, justifyContent:"flex-end" } },
+      React.createElement("button", {
+        onClick: () => setShowLowStockAlert(false),
+        style: { background:"#5a8a5e", color:"#fff", border:"none", borderRadius:9, padding:"10px 24px", fontWeight:700, cursor:"pointer", fontSize:14 }
+      }, "Noted — Go to Dashboard")
+    )
+  )),
+  /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#faf6f0",
       borderBottom: "1px solid #ddd5c8",
@@ -5189,4 +5324,3 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     React.createElement(App, null)
   )
 );
-
