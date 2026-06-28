@@ -71,7 +71,7 @@ const API = "https://script.google.com/macros/s/AKfycbxKecIXYRLLmmTZSunZ-NZdIdwF
 const STAFF_DB_FALLBACK = [{
   name: "Lalith Kiran",
   email: "info@aveekids.com",
-  role: "Owner",
+  role: "Founder",
   pin: "1111",
   canCreate: true,
   canApprove: true,
@@ -80,6 +80,8 @@ const STAFF_DB_FALLBACK = [{
 }];
 // What each role can CREATE
 const CAN_CREATE_TYPES = {
+  Founder: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  "Co-Founder": ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Owner: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Admin: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Manager: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
@@ -223,6 +225,8 @@ const SALES_LOCATIONS = ["WEBSITE_SALES", "FLIPKART_SALES", "SAMPLES", "DAMAGE"]
 // Virtual pass-through (ignored in stock calc)
 const VIRTUAL_LOCATIONS = ["SUPPLIER", "CUSTOMER"];
 const ROLE_COLOR = {
+  Founder: "#8b1a1a",
+  "Co-Founder": "#1a3a6b",
   Owner: "#c4733a",
   Admin: "#2d4a2f",
   Manager: "#3a8a8a",
@@ -340,6 +344,8 @@ function LoginScreen({
   const [shake, setShake] = React.useState(false);
   const [dropVal, setDropVal] = React.useState("");
   const ROLE_ICON = {
+    Founder: "🌟",
+    "Co-Founder": "💎",
     Owner: "👑",
     Admin: "🛡️",
     Manager: "📋",
@@ -538,6 +544,8 @@ function LoginScreen({
       margin: "0 auto 14px"
     }
   }, {
+    Founder: "🌟",
+    "Co-Founder": "💎",
     Owner: "👑",
     Admin: "🛡️",
     Manager: "📋",
@@ -788,7 +796,7 @@ function MovModal({
 }) {
   // Opening Balance is ONLY available to Owner — never any other role
   const OWNER_ONLY = ["Opening Balance – WH", "Opening Balance – FBA"];
-  const isOwner = user.role === "Owner";
+  const isOwner = user.role === "Owner" || user.role === "Founder" || user.role === "Co-Founder";
   const allAllowed = CAN_CREATE_TYPES[user.role] || [];
   const allowedTypes = allAllowed.filter(t => isOwner || !OWNER_ONLY.includes(t));
   const [type, setType] = React.useState(allowedTypes[0] || "");
@@ -3497,6 +3505,18 @@ function App() {
       if (Array.isArray(data) && data.length > 0) {
         // Merge sheet roles with permission map
         const rolePerms = {
+          Founder: {
+            canCreate: true,
+            canApprove: true,
+            canReverse: true,
+            canViewAll: true
+          },
+          "Co-Founder": {
+            canCreate: true,
+            canApprove: true,
+            canReverse: true,
+            canViewAll: true
+          },
           Owner: {
             canCreate: true,
             canApprove: true,
@@ -3528,15 +3548,13 @@ function App() {
             canViewAll: true
           }
         };
-        const enriched = data.map(s => ({
-          ...s,
-          ...(rolePerms[s.role] || rolePerms["Warehouse"]),
-          // Sheet columns override defaults if explicitly set
-          canCreate: s.canCreate,
-          canApprove: s.canApprove,
-          canReverse: s.canReverse,
-          canViewAll: s.canViewAll
-        }));
+        const enriched = data.map(s => {
+          // Role is the source of truth for permissions.
+          // Sheet CanCreate/CanApprove columns are IGNORED — role determines access.
+          // This prevents sheet typos from locking out team members.
+          const perms = rolePerms[s.role] || rolePerms["Warehouse"];
+          return { ...s, ...perms };
+        });
         setStaffDB(enriched);
       } else {
         // Sheet not set up yet - use fallback
@@ -3823,6 +3841,8 @@ function App() {
       fontSize: 14
     }
   }, {
+    Founder: "🌟",
+    "Co-Founder": "💎",
     Owner: "👑",
     Admin: "🛡️",
     Manager: "📋",
@@ -4205,7 +4225,7 @@ function App() {
       padding: "6px 14px",
       fontSize: 12
     }
-  }, "⟳ Refresh"), (user.role === "Owner" || user.role === "Admin" || user.role === "Manager" || user.role === "Auditor") && /*#__PURE__*/React.createElement("button", {
+  }, "⟳ Refresh"), (user.role === "Founder" || user.role === "Co-Founder" || user.role === "Owner" || user.role === "Admin" || user.role === "Manager" || user.role === "Auditor") && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowCountModal(true),
     style: {
       ...btnS(),
