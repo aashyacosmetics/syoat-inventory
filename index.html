@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Syoat · Inventory ERP</title>
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+
+  <!-- React 18 from CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Plus Jakarta Sans", system-ui, sans-serif; background: #f3eee7; }
+    #root { min-height: 100vh; }
+    /* Loading screen — shown until React mounts */
+    #splash {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh; background: #f3eee7; gap: 14px;
+    }
+    #splash img { width: 90px; }
+    #splash p { font-size: 13px; color: #6b7f6c; letter-spacing: 0.04em; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    #splash p { animation: pulse 1.6s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+
+<!-- Loading splash — replaced by React on mount -->
+<div id="splash">
+  <img src="syoat-logo.png" alt="Syoat"/>
+  <p>Loading Inventory ERP…</p>
+</div>
+
+<!-- React mounts here -->
+<div id="root"></div>
+
+<!-- App — all logic lives here; update only this file for new features -->
+<script src="syoat-app.js"></script>
+
+</body>
+</html>
