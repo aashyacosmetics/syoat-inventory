@@ -1,4 +1,16 @@
 // ─────────────────────────────────────────────────────────────
+//  Hide loading splash once this script executes
+// ─────────────────────────────────────────────────────────────
+(function() {
+  var splash = document.getElementById('splash');
+  if (splash) {
+    splash.style.transition = 'opacity 0.3s ease';
+    splash.style.opacity = '0';
+    setTimeout(function() { if (splash) splash.style.display = 'none'; }, 320);
+  }
+})();
+
+// ─────────────────────────────────────────────────────────────
 //  Logo — reference by filename (lives in same folder as index.html)
 // ─────────────────────────────────────────────────────────────
 const SYOAT_LOGO = "syoat-logo.png";
@@ -5177,4 +5189,3 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     React.createElement(App, null)
   )
 );
-
