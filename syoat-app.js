@@ -60,7 +60,7 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-const API = "https://script.google.com/macros/s/AKfycbxKecIXYRLLmmTZSunZ-NZdIdwFPCy0ynEs16yfTiMlORJo2VuV0jbeRfmZWuN49GhLXQ/exec";
+const API = "https://script.google.com/macros/s/AKfycbxhaMR92ma642Z0hRBGXV9O22WjnhngvBMeEEDAojuo-xdfBU6O9XIETGpANKslMrpqzg/exec";
 
 // ─────────────────────────────────────────────────────────────
 //  STAFF — with PINs and role-based permissions
