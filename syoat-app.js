@@ -841,19 +841,56 @@ function MovModal({
     src: "",
     dst: ""
   };
+  // Compress image to <1MB at best quality using canvas
+  function compressToTarget(file, callback) {
+    if (!file.type.startsWith("image/")) {
+      // PDF — read as-is, no compression
+      const r = new FileReader();
+      r.onload = e => callback(e.target.result, file.size, file.type);
+      r.readAsDataURL(file);
+      return;
+    }
+    const r = new FileReader();
+    r.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX_BYTES = 900 * 1024; // target <1MB (900KB to be safe)
+        const canvas = document.createElement("canvas");
+        // Scale down if wider/taller than 2048px
+        let w = img.width, h = img.height;
+        const MAX_DIM = 2048;
+        if (w > MAX_DIM || h > MAX_DIM) {
+          const s = Math.min(MAX_DIM / w, MAX_DIM / h);
+          w = Math.round(w * s);
+          h = Math.round(h * s);
+        }
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        // Start at quality 0.92 and step down until under limit
+        let q = 0.92;
+        let dataUrl = canvas.toDataURL("image/jpeg", q);
+        while (dataUrl.length * 0.75 > MAX_BYTES && q > 0.45) {
+          q = Math.round((q - 0.05) * 100) / 100;
+          dataUrl = canvas.toDataURL("image/jpeg", q);
+        }
+        callback(dataUrl, Math.round(dataUrl.length * 0.75), "image/jpeg");
+      };
+      img.src = e.target.result;
+    };
+    r.readAsDataURL(file);
+  }
   function handleFiles(files) {
     Array.from(files).forEach(file => {
       if (!file.type.startsWith("image/") && file.type !== "application/pdf") return;
-      const reader = new FileReader();
-      reader.onload = e => {
+      compressToTarget(file, (dataUrl, finalBytes, finalType) => {
         setImages(prev => [...prev, {
           name: file.name,
-          dataUrl: e.target.result,
-          type: file.type,
-          size: (file.size / 1024).toFixed(1) + " KB"
+          dataUrl,
+          type: finalType,
+          size: (finalBytes / 1024).toFixed(1) + " KB"
         }]);
-      };
-      reader.readAsDataURL(file);
+      });
     });
   }
   function removeImage(i) {
