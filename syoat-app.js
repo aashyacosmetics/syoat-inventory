@@ -651,6 +651,7 @@ function LoginScreen({
 function PendingBanner({
   drafts,
   user,
+  products,
   onApprove,
   onApproveAll
 }) {
@@ -795,7 +796,12 @@ function PendingBanner({
       fontSize: 11,
       color: "#6b7f6c"
     }
-  }, l.ProductID, " × ", l.Quantity)))), /*#__PURE__*/React.createElement("button", {
+  }, (products && products.find(p => p.ProductID === l.ProductID) ? products.find(p => p.ProductID === l.ProductID).ProductName : l.ProductID), " × ", l.Quantity)))), m.DocumentFile && String(m.DocumentFile).startsWith("data:") && /*#__PURE__*/React.createElement("img", {
+    src: m.DocumentFile,
+    title: "Tap to open full image",
+    onClick: () => { const w = window.open(); w.document.write(`<img src="${m.DocumentFile}" style="max-width:100%">`); },
+    style: { width: 52, height: 52, objectFit: "cover", borderRadius: 7, cursor: "pointer", border: "2px solid #ddd5c8", marginTop: 6, display: "block" }
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: () => approveOne(m.MovementID),
     disabled: busy === m.MovementID,
     style: {
@@ -918,19 +924,37 @@ function MovModal({
     setBusy(true);
     setErr("");
     try {
+      // Build tiny thumbnail (≤30KB) from first image for storage in Google Sheet
+      let docThumb = "";
+      if (images.length > 0 && images[0].dataUrl && images[0].dataUrl.startsWith("data:image")) {
+        docThumb = await new Promise(resolve => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            const MAX = 320;
+            let w = img.width, h = img.height;
+            if (w > MAX || h > MAX) { const s = Math.min(MAX/w, MAX/h); w=Math.round(w*s); h=Math.round(h*s); }
+            canvas.width = w; canvas.height = h;
+            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL("image/jpeg", 0.35));
+          };
+          img.src = images[0].dataUrl;
+        });
+      }
+      const finalNotes = (notes ? notes + " " : "") + (images.length > 0 ? `[${images.length} attachment(s): ${images.map(i => i.name).join(", ")}]` : "");
       const res = await apiWrite("createMovement", user.email, {
         movementType: type,
         sourceLocationID: sd.src,
         destinationLocationID: sd.dst,
         referenceNumber: refNo,
         carrierTrackingNumber: carrier,
-        notes,
+        notes: finalNotes,
+        documentFile: docThumb,
         lines: lines.map(l => ({
           productID: l.pid,
           quantity: Number(l.qty),
           unitCost: Number(l.cost) || ""
-        })),
-        notes: (notes ? notes + " " : "") + (images.length > 0 ? `[${images.length} attachment(s): ${images.map(i => i.name).join(", ")}]` : "")
+        }))
       });
       onDone(`✅ ${res.movementID} saved as Draft` + (user.canApprove ? " — approve it on the dashboard" : " — a Manager will approve it"));
       onClose();
@@ -3748,8 +3772,10 @@ function App() {
         });
         const totals = {};
         stk.forEach(row => {
-          const VIRTUAL = ["SUPPLIER","CUSTOMER","WEBSITE_SALES","FLIPKART_SALES","SAMPLES","DAMAGE"];
-          if (!VIRTUAL.includes(row.LocationID)) {
+          // Only count sellable physical locations — same formula as product cards (fba + wh + transit)
+          // Excludes Returns Hold since those units need QC before they can be sold
+          const SELLABLE = ["MAIN_WH","AMAZON_FBA","FBA_TRANSIT"];
+          if (SELLABLE.includes(row.LocationID)) {
             totals[row.ProductID] = (totals[row.ProductID] || 0) + (parseFloat(row.Quantity) || 0);
           }
         });
@@ -3966,6 +3992,7 @@ function App() {
   }, "❌ ", error), !loading && /*#__PURE__*/React.createElement(PendingBanner, {
     drafts: drafts,
     user: user,
+    products: products,
     onApprove: approveOne,
     onApproveAll: approveAll
   }), /*#__PURE__*/React.createElement("div", {
