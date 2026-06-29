@@ -801,7 +801,7 @@ function PendingBanner({
     title: "Tap to open full image",
     onClick: () => { const w = window.open(); w.document.write(`<img src="${m.DocumentFile}" style="max-width:100%">`); },
     style: { width: 52, height: 52, objectFit: "cover", borderRadius: 7, cursor: "pointer", border: "2px solid #ddd5c8", marginTop: 6, display: "block" }
-  })), /*#__PURE__*/React.createElement("button", {
+  }), /*#__PURE__*/React.createElement("button", {
     onClick: () => approveOne(m.MovementID),
     disabled: busy === m.MovementID,
     style: {
@@ -5386,11 +5386,6 @@ function App() {
     }
   }, "🌾"), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontWeight: 700,
-      marginBottom: 6
-    }
-  }, "No stock recorded yet"), /*#__PURE__*/React.createElement("div", {
-    style: {
       color: "#8a9e8b",
       fontSize: 13,
       marginBottom: 18
@@ -5411,8 +5406,7 @@ function App() {
   }), showList && /*#__PURE__*/React.createElement(MovListModal, {
     user: user,
     staffDB: staffDB,
-    onClose: () => setShowList(false),
-    onApproveSuccess: load
+    onClose: () => setShowList(false)
   }), showCountModal && /*#__PURE__*/React.createElement(StockCountModal, {
     products: products,
     stock: stock,
@@ -5434,6 +5428,15 @@ function App() {
       loadCounts();
       load();
       setEditingCount(null);
+    }
+  }));
+}
+ReactDOM.createRoot(document.getElementById("root")).render(
+  React.createElement(ErrorBoundary, null,
+    React.createElement(App, null)
+  )
+);
+l);
     }
   }));
 }
