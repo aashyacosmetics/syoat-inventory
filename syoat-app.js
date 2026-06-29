@@ -3587,7 +3587,21 @@ function App() {
 
   // Load staff/PINs from sheet on app mount (before login)
   React.useEffect(() => {
+    // Safety net: if the API hasn't responded within 7s, show login with offline fallback.
+    // fetchWithRetry has no per-request timeout, so a slow/cold GAS endpoint can hang
+    // for 30–90s per attempt × 3 retries, keeping staffDB===null (loading spinner) indefinitely.
+    let done = false;
+    const loginTimer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        setStaffDB(STAFF_DB_FALLBACK);
+        setStaffLoadError("Google Sheet is slow — using offline mode. Refresh to retry.");
+      }
+    }, 7000);
     api("getAppLogins").then(data => {
+      if (done) return;  // timeout already fired — ignore late response
+      done = true;
+      clearTimeout(loginTimer);
       if (Array.isArray(data) && data.length > 0) {
         // Merge sheet roles with permission map
         const rolePerms = {
@@ -3651,6 +3665,9 @@ function App() {
         setStaffLoadError("App_Logins sheet has no Active rows. Add staff rows with Status = Active.");
       }
     }).catch(err => {
+      if (done) return;
+      done = true;
+      clearTimeout(loginTimer);
       setStaffDB(STAFF_DB_FALLBACK);
       setStaffLoadError("API error: " + (err && err.message ? err.message : String(err)));
     });
@@ -5428,15 +5445,6 @@ function App() {
       loadCounts();
       load();
       setEditingCount(null);
-    }
-  }));
-}
-ReactDOM.createRoot(document.getElementById("root")).render(
-  React.createElement(ErrorBoundary, null,
-    React.createElement(App, null)
-  )
-);
-l);
     }
   }));
 }
