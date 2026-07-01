@@ -72,7 +72,7 @@ const STAFF_DB_FALLBACK = [{
   name: "Lalith Kiran",
   email: "info@aveekids.com",
   role: "Founder",
-  pin: "1111",
+  // PIN intentionally omitted — offline fallback uses localStorage cache (set on first successful load).
   canCreate: true,
   canApprove: true,
   canReverse: true,
@@ -86,7 +86,7 @@ const CAN_CREATE_TYPES = {
   Admin: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Manager: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   // Warehouse ships from WH only — cannot touch FBA stock
-  Warehouse: ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Return Received", "Damage", "Samples"],
+  Warehouse: ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Auditor: []
 };
 
@@ -1539,7 +1539,8 @@ function MovListModal({
   user,
   onClose,
   onApproveSuccess,
-  staffDB
+  staffDB,
+  products
 }) {
   const [movs, setMovs] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -1755,7 +1756,7 @@ function MovListModal({
       fontSize: 11,
       color: "#6b7f6c"
     }
-  }, l.ProductID, " × ", l.Quantity)))), m.Status === "Draft" && user.canApprove && /*#__PURE__*/React.createElement("button", {
+  }, (products || []).find(p => p.ProductID === l.ProductID)?.ProductName || l.ProductID, " × ", l.Quantity)))), m.Status === "Draft" && user.canApprove && /*#__PURE__*/React.createElement("button", {
     onClick: () => approve(m.MovementID),
     disabled: busy === m.MovementID,
     style: {
@@ -2142,9 +2143,8 @@ function AmazonImportTab({
   // Load import history from storage on mount
   React.useEffect(() => {
     try {
-      window.storage.get("amazon_import_dates").then(res => {
-        if (res && res.value) setImportedDates(JSON.parse(res.value));
-      }).catch(() => {});
+      const _cached = localStorage.getItem("amazon_import_dates");
+      if (_cached) setImportedDates(JSON.parse(_cached));
     } catch (e) {}
   }, []);
 
@@ -2160,7 +2160,7 @@ function AmazonImportTab({
       if (!existing[dateKey]) {
         existing[dateKey] = new Date().toISOString().slice(0, 10);
         setImportedDates(existing);
-        await window.storage.set("amazon_import_dates", JSON.stringify(existing));
+        localStorage.setItem("amazon_import_dates", JSON.stringify(existing));
       }
     } catch (e) {}
   }
@@ -2182,7 +2182,7 @@ function AmazonImportTab({
   async function clearImportHistory() {
     setImportedDates({});
     try {
-      await window.storage.delete("amazon_import_dates");
+      localStorage.removeItem("amazon_import_dates");
     } catch (e) {}
   }
   function reset() {
@@ -3553,6 +3553,7 @@ function App() {
   const [editingCount, setEditingCount] = React.useState(null);
   const [showLowStockAlert, setShowLowStockAlert] = React.useState(false);
   const [lowStockItems, setLowStockItems] = React.useState([]);
+  const [analyticsMovs, setAnalyticsMovs] = React.useState(null); // approved movs for analytics dispatch panel
   const notify = msg => {
     setToast(msg);
     setTimeout(() => setToast(""), 5000);
@@ -3594,8 +3595,12 @@ function App() {
     const loginTimer = setTimeout(() => {
       if (!done) {
         done = true;
-        setStaffDB(STAFF_DB_FALLBACK);
-        setStaffLoadError("Google Sheet is slow — using offline mode. Refresh to retry.");
+        const _ct = (() => { try { return JSON.parse(localStorage.getItem("syoat_staff_cache") || "null"); } catch { return null; } })();
+        setStaffDB(_ct || STAFF_DB_FALLBACK);
+        setStaffLoadError(_ct
+          ? "Google Sheet is slow — using cached logins. Refresh to retry."
+          : "Google Sheet is slow — using offline mode. Refresh to retry."
+        );
       }
     }, 7000);
     api("getAppLogins").then(data => {
@@ -3655,20 +3660,24 @@ function App() {
           const perms = rolePerms[s.role] || rolePerms["Warehouse"];
           return { ...s, ...perms };
         });
+        // Cache enriched list in localStorage — used by timeout/error fallback so PINs stay current.
+        try { localStorage.setItem("syoat_staff_cache", JSON.stringify(enriched)); } catch {}
         setStaffDB(enriched);
       } else if (data && data.error) {
-        setStaffDB(STAFF_DB_FALLBACK);
+        const _c1 = (() => { try { return JSON.parse(localStorage.getItem("syoat_staff_cache") || "null"); } catch { return null; } })();
+        setStaffDB(_c1 || STAFF_DB_FALLBACK);
         setStaffLoadError("Sheet error: " + data.error);
       } else {
-        // Sheet not set up yet - use fallback
-        setStaffDB(STAFF_DB_FALLBACK);
+        const _c2 = (() => { try { return JSON.parse(localStorage.getItem("syoat_staff_cache") || "null"); } catch { return null; } })();
+        setStaffDB(_c2 || STAFF_DB_FALLBACK);
         setStaffLoadError("App_Logins sheet has no Active rows. Add staff rows with Status = Active.");
       }
     }).catch(err => {
       if (done) return;
       done = true;
       clearTimeout(loginTimer);
-      setStaffDB(STAFF_DB_FALLBACK);
+      const _c3 = (() => { try { return JSON.parse(localStorage.getItem("syoat_staff_cache") || "null"); } catch { return null; } })();
+      setStaffDB(_c3 || STAFF_DB_FALLBACK);
       setStaffLoadError("API error: " + (err && err.message ? err.message : String(err)));
     });
   }, []);
@@ -3677,6 +3686,13 @@ function App() {
     load();
     loadCounts();
   }, [user]);
+  // Fetch approved movements for analytics dispatch panel (lazy — only when tab is opened)
+  React.useEffect(() => {
+    if (!user || tab !== "analytics" || analyticsMovs !== null) return;
+    api("getMovements", { includeLines: "true", limit: "500" }).then(data => {
+      setAnalyticsMovs(Array.isArray(data) ? data.filter(m => m.Status === "Approved") : []);
+    }).catch(() => setAnalyticsMovs([]));
+  }, [user, tab, analyticsMovs]);
   async function loadCounts() {
     setCountsLoading(true);
     try {
@@ -5039,7 +5055,10 @@ function App() {
       color: "#c8bfb0"
     }
   }, "Loading…") : (() => {
-    // Compute dispatches per channel from stock (negative = consumed from that location)
+    // Compute dispatches per channel from approved movement lines (accurate).
+    // IMPORTANT: getStock treats sales destinations (WEBSITE_SALES, FLIPKART_SALES, etc.)
+    // as VIRTUAL — no stock accumulates there. We must use movement data instead.
+    // AMAZON_FBA is a holding location (not a sales channel) so it is excluded here.
     const channels = [{
       key: "WEBSITE_SALES",
       label: "Website Orders",
@@ -5051,12 +5070,6 @@ function App() {
       color: "#c4733a",
       icon: "🛒"
     }, {
-      key: "AMAZON_FBA",
-      label: "Amazon FBA Sales",
-      color: "#3a8a8a",
-      icon: "📦",
-      note: "consumed by FBA"
-    }, {
       key: "SAMPLES",
       label: "Samples",
       color: "#8a9e8b",
@@ -5067,16 +5080,18 @@ function App() {
       color: "#c4534a",
       icon: "⚠️"
     }];
-    // For each channel, sum all product quantities dispatched TO that location
+    // Sum line quantities from approved movements whose destination matches each channel
     const dispatchTotals = {};
-    channels.forEach(ch => {
-      // We need to compute from movements — use products × stock as proxy
-      // Actually use the getStock data: if a location has NEGATIVE stock it means
-      // nothing (virtual), so we track dispatches via the stockFor pattern
-      // For sales locations, stock there = total dispatched
-      dispatchTotals[ch.key] = stock.filter(s => s.LocationID === ch.key).reduce((a, s) => a + Math.abs(Number(s.Quantity)), 0);
-    });
+    channels.forEach(ch => { dispatchTotals[ch.key] = 0; });
+    if (analyticsMovs) {
+      analyticsMovs.forEach(m => {
+        if (dispatchTotals.hasOwnProperty(m.DstLocationID) && Array.isArray(m.Lines)) {
+          m.Lines.forEach(l => { dispatchTotals[m.DstLocationID] += Number(l.Quantity) || 0; });
+        }
+      });
+    }
     const totalOut = Object.values(dispatchTotals).reduce((a, v) => a + v, 0);
+    if (!analyticsMovs) return /*#__PURE__*/React.createElement("div", {style:{color:"#c8bfb0",fontSize:13,padding:"8px 0"}}, "Loading dispatch data…");
     return /*#__PURE__*/React.createElement("div", null, channels.map(ch => {
       const qty = dispatchTotals[ch.key] || 0;
       const pct = totalOut > 0 ? Math.round(qty / totalOut * 100) : 0;
@@ -5423,6 +5438,7 @@ function App() {
   }), showList && /*#__PURE__*/React.createElement(MovListModal, {
     user: user,
     staffDB: staffDB,
+    products: products,
     onClose: () => setShowList(false)
   }), showCountModal && /*#__PURE__*/React.createElement(StockCountModal, {
     products: products,
