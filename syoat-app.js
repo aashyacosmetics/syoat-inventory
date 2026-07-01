@@ -657,6 +657,7 @@ function PendingBanner({
 }) {
   const [busy, setBusy] = React.useState(null);
   const [busyAll, setBusyAll] = React.useState(false);
+  const [viewImg, setViewImg] = React.useState(null); // lightbox image URL
   if (!drafts || drafts.length === 0) return null;
   if (!user.canApprove) {
     return /*#__PURE__*/React.createElement("div", {
@@ -691,7 +692,18 @@ function PendingBanner({
     await onApproveAll();
     setBusyAll(false);
   }
-  return /*#__PURE__*/React.createElement("div", {
+  const lightbox = viewImg ? /*#__PURE__*/React.createElement("div", {
+    onClick: () => setViewImg(null),
+    style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 9999,
+      display: "flex", alignItems: "center", justifyContent: "center", cursor: "zoom-out" }
+  }, /*#__PURE__*/React.createElement("img", {
+    src: viewImg,
+    style: { maxWidth: "95vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 4px 40px rgba(0,0,0,0.6)" }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: { position: "absolute", top: 14, right: 18, color: "#fff", fontSize: 32, cursor: "pointer", fontWeight: 700, lineHeight: 1 },
+    onClick: e => { e.stopPropagation(); setViewImg(null); }
+  }, "×")) : null;
+  return /*#__PURE__*/React.createElement(React.Fragment, null, lightbox, /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#c4733a10",
       border: "1px solid #c4733a40",
@@ -796,12 +808,21 @@ function PendingBanner({
       fontSize: 11,
       color: "#6b7f6c"
     }
-  }, (products && products.find(p => p.ProductID === l.ProductID) ? products.find(p => p.ProductID === l.ProductID).ProductName : l.ProductID), " × ", l.Quantity)))), m.DocumentFile && String(m.DocumentFile).startsWith("data:") && /*#__PURE__*/React.createElement("img", {
-    src: m.DocumentFile,
-    title: "Tap to open full image",
-    onClick: () => { const w = window.open(); w.document.write(`<img src="${m.DocumentFile}" style="max-width:100%">`); },
-    style: { width: 52, height: 52, objectFit: "cover", borderRadius: 7, cursor: "pointer", border: "2px solid #ddd5c8", marginTop: 6, display: "block" }
-  }), /*#__PURE__*/React.createElement("button", {
+  }, (products && products.find(p => p.ProductID === l.ProductID) ? products.find(p => p.ProductID === l.ProductID).ProductName : l.ProductID), " × ", l.Quantity)))), /*#__PURE__*/React.createElement("div", {
+    style: { marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }
+  },
+  m.DocumentFile && String(m.DocumentFile).startsWith("data:image") && /*#__PURE__*/React.createElement("div", {
+    onClick: () => setViewImg(m.DocumentFile),
+    style: { cursor: "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #5a8a5e", width: 90, height: 90, flexShrink: 0 }
+  }, /*#__PURE__*/React.createElement("img", {
+    src: m.DocumentFile, style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: { position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(45,74,47,0.78)", fontSize: 9, color: "#fff", textAlign: "center", padding: "2px 0", fontWeight: 700 }
+  }, "👁 Tap to view")),
+  m.Notes && m.Notes.includes("attachment(s)") && !String(m.DocumentFile || "").startsWith("data:image") && /*#__PURE__*/React.createElement("div", {
+    style: { background: "#c4733a12", border: "1px solid #c4733a40", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#c4733a", fontWeight: 600 }
+  }, "📄 PDF invoice attached — filename in notes")
+  ), /*#__PURE__*/React.createElement("button", {
     onClick: () => approveOne(m.MovementID),
     disabled: busy === m.MovementID,
     style: {
@@ -811,7 +832,7 @@ function PendingBanner({
       opacity: busy === m.MovementID ? 0.6 : 1,
       whiteSpace: "nowrap"
     }
-  }, busy === m.MovementID ? "Approving…" : "✅ Approve")))));
+  }, busy === m.MovementID ? "Approving…" : "✅ Approve"))))));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -841,6 +862,7 @@ function MovModal({
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState("");
   const [images, setImages] = React.useState([]); // { name, dataUrl, type }
+  const [compressing, setCompressing] = React.useState(0); // tracks in-flight image compressions
   const fileInputRef = React.useRef(null);
   const cameraInputRef = React.useRef(null);
   const sd = SRC_DST[type] || {
@@ -889,6 +911,7 @@ function MovModal({
   function handleFiles(files) {
     Array.from(files).forEach(file => {
       if (!file.type.startsWith("image/") && file.type !== "application/pdf") return;
+      setCompressing(n => n + 1); // block submit until this resolves
       compressToTarget(file, (dataUrl, finalBytes, finalType) => {
         setImages(prev => [...prev, {
           name: file.name,
@@ -896,6 +919,7 @@ function MovModal({
           type: finalType,
           size: (finalBytes / 1024).toFixed(1) + " KB"
         }]);
+        setCompressing(n => Math.max(0, n - 1)); // done — unblock submit
       });
     });
   }
@@ -931,12 +955,12 @@ function MovModal({
           const img = new Image();
           img.onload = () => {
             const canvas = document.createElement("canvas");
-            const MAX = 320;
+            const MAX = 480;
             let w = img.width, h = img.height;
             if (w > MAX || h > MAX) { const s = Math.min(MAX/w, MAX/h); w=Math.round(w*s); h=Math.round(h*s); }
             canvas.width = w; canvas.height = h;
             canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL("image/jpeg", 0.35));
+            resolve(canvas.toDataURL("image/jpeg", 0.60));
           };
           img.src = images[0].dataUrl;
         });
@@ -1523,13 +1547,13 @@ function MovModal({
     }
   }, "Cancel"), /*#__PURE__*/React.createElement("button", {
     onClick: submit,
-    disabled: busy,
+    disabled: busy || compressing > 0,
     style: {
       ...btnS(),
       flex: 2,
-      opacity: busy ? 0.7 : 1
+      opacity: busy || compressing > 0 ? 0.7 : 1
     }
-  }, busy ? "Saving…" : "Record Movement"))));
+  }, busy ? "Saving…" : compressing > 0 ? "Processing image…" : "Record Movement"))));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1551,6 +1575,7 @@ function MovListModal({
   const [reverseModal, setReverseModal] = React.useState(null); // movementID to reverse
   const [reverseReason, setReverseReason] = React.useState("");
   const [reverseBusy, setReverseBusy] = React.useState(false);
+  const [viewImg, setViewImg] = React.useState(null); // lightbox image URL
   const load = React.useCallback(async lim => {
     setLoading(true);
     try {
@@ -1603,7 +1628,18 @@ function MovListModal({
     }
     setReverseBusy(false);
   }
-  return /*#__PURE__*/React.createElement("div", {
+  const lightbox = viewImg ? /*#__PURE__*/React.createElement("div", {
+    onClick: () => setViewImg(null),
+    style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 9999,
+      display: "flex", alignItems: "center", justifyContent: "center", cursor: "zoom-out" }
+  }, /*#__PURE__*/React.createElement("img", {
+    src: viewImg,
+    style: { maxWidth: "95vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 4px 40px rgba(0,0,0,0.6)" }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: { position: "absolute", top: 14, right: 18, color: "#fff", fontSize: 32, cursor: "pointer", fontWeight: 700, lineHeight: 1 },
+    onClick: e => { e.stopPropagation(); setViewImg(null); }
+  }, "×")) : null;
+  return /*#__PURE__*/React.createElement(React.Fragment, null, lightbox, /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
       inset: 0,
@@ -1756,7 +1792,19 @@ function MovListModal({
       fontSize: 11,
       color: "#6b7f6c"
     }
-  }, (products || []).find(p => p.ProductID === l.ProductID)?.ProductName || l.ProductID, " × ", l.Quantity)))), m.Status === "Draft" && user.canApprove && /*#__PURE__*/React.createElement("button", {
+  }, (products || []).find(p => p.ProductID === l.ProductID)?.ProductName || l.ProductID, " × ", l.Quantity)))),
+  m.DocumentFile && String(m.DocumentFile).startsWith("data:image") && /*#__PURE__*/React.createElement("div", {
+    onClick: () => setViewImg(m.DocumentFile),
+    style: { cursor: "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #5a8a5e", width: 64, height: 64, flexShrink: 0, marginTop: 6 }
+  }, /*#__PURE__*/React.createElement("img", {
+    src: m.DocumentFile, style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: { position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(45,74,47,0.75)", fontSize: 8, color: "#fff", textAlign: "center", padding: "2px 0", fontWeight: 700 }
+  }, "👁")),
+  m.Notes && m.Notes.includes("attachment(s)") && !String(m.DocumentFile || "").startsWith("data:image") && /*#__PURE__*/React.createElement("span", {
+    style: { fontSize: 10, color: "#c4733a", fontWeight: 600, marginTop: 4 }
+  }, "📄 PDF"),
+  m.Status === "Draft" && user.canApprove && /*#__PURE__*/React.createElement("button", {
     onClick: () => approve(m.MovementID),
     disabled: busy === m.MovementID,
     style: {
@@ -1848,7 +1896,7 @@ function MovListModal({
         style: { background: reverseBusy || !reverseReason.trim() ? "#ccc" : "#c4733a", color:"#fff", border:"none", borderRadius:9, padding:"9px 20px", fontWeight:700, cursor: reverseBusy || !reverseReason.trim() ? "not-allowed" : "pointer", fontSize:13 }
       }, reverseBusy ? "Reversing…" : "Confirm Reversal")
     )
-  ))));
+  )))));
 }
 
 // ─────────────────────────────────────────────────────────────
