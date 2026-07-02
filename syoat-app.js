@@ -147,6 +147,17 @@ async function apiWrite(action, email, payload) {
   return fetchWithRetry(API + "?" + qs);
 }
 
+// WRITE via POST — no URL-length ceiling. Used when the payload carries photo
+// attachments (base64 thumbnails can easily exceed the ~7000-char GET budget).
+async function apiWritePost(action, email, payload) {
+  var enriched = Object.assign({}, payload, { action: action, email: email, requestId: genRequestId() });
+  return fetchWithRetry(API, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
+    body: JSON.stringify(enriched)
+  });
+}
+
 // ─────────────────────────────────────────────────────────────
 //  Constants
 // ─────────────────────────────────────────────────────────────
@@ -648,16 +659,34 @@ function LoginScreen({
 // ─────────────────────────────────────────────────────────────
 //  PENDING APPROVALS BANNER
 // ─────────────────────────────────────────────────────────────
+function parseAttachments(docFile) {
+  if (!docFile) return [];
+  const s = String(docFile);
+  if (s.startsWith("data:image")) return [s]; // legacy single-image format
+  if (s.startsWith("[")) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) return arr.filter(x => typeof x === "string" && x.startsWith("data:image")).slice(0, 4);
+    } catch (e) { /* fall through */ }
+  }
+  return [];
+}
+
 function PendingBanner({
   drafts,
   user,
   products,
   onApprove,
-  onApproveAll
+  onApproveAll,
+  onEdit,
+  onReject
 }) {
   const [busy, setBusy] = React.useState(null);
   const [busyAll, setBusyAll] = React.useState(false);
   const [viewImg, setViewImg] = React.useState(null); // lightbox image URL
+  const [rejectTarget, setRejectTarget] = React.useState(null); // movementID with reject-reason box open
+  const [rejectReason, setRejectReason] = React.useState("");
+  const [rejectBusy, setRejectBusy] = React.useState(null);
   if (!drafts || drafts.length === 0) return null;
   if (!user.canApprove) {
     return /*#__PURE__*/React.createElement("div", {
@@ -691,6 +720,14 @@ function PendingBanner({
     setBusyAll(true);
     await onApproveAll();
     setBusyAll(false);
+  }
+  async function confirmReject() {
+    if (!rejectTarget) return;
+    setRejectBusy(rejectTarget);
+    await onReject(rejectTarget, rejectReason);
+    setRejectBusy(null);
+    setRejectTarget(null);
+    setRejectReason("");
   }
   const lightbox = viewImg ? /*#__PURE__*/React.createElement("div", {
     onClick: () => setViewImg(null),
@@ -746,98 +783,327 @@ function PendingBanner({
       display: "grid",
       gap: 8
     }
-  }, drafts.map(m => /*#__PURE__*/React.createElement("div", {
-    key: m.MovementID,
-    style: {
-      background: "#f3eee7",
-      borderRadius: 10,
-      padding: "10px 14px",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      flexWrap: "wrap",
-      gap: 8
-    }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 7,
-      alignItems: "center",
-      marginBottom: 3,
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: "#2d4a2f",
-      fontWeight: 700,
-      fontSize: 13
-    }
-  }, m.MovementID), /*#__PURE__*/React.createElement("span", {
-    style: {
-      background: "#c4733a18",
-      color: "#c4733a",
-      border: "1px solid #c4733a40",
-      borderRadius: 5,
-      padding: "1px 6px",
-      fontSize: 11,
-      fontWeight: 700
-    }
-  }, "Draft"), /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: "#8a9e8b",
-      fontSize: 12
-    }
-  }, m.MovementType)), /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: "#9aaa9b",
-      fontSize: 12
-    }
-  }, LOC_LABEL[m.SourceLocationID] || m.SourceLocationID, " → ", LOC_LABEL[m.DestinationLocationID] || m.DestinationLocationID, m.Notes ? " · " + m.Notes : "", " · by " + (m.EnteredByEmail || "").split("@")[0]), m.lines && m.lines.length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 5,
-      flexWrap: "wrap",
-      marginTop: 5
-    }
-  }, m.lines.map(l => /*#__PURE__*/React.createElement("span", {
-    key: l.MovementLineID,
-    style: {
-      background: "#ffffff",
-      borderRadius: 5,
-      padding: "2px 8px",
-      fontSize: 11,
-      color: "#6b7f6c"
-    }
-  }, (products && products.find(p => p.ProductID === l.ProductID) ? products.find(p => p.ProductID === l.ProductID).ProductName : l.ProductID), " × ", l.Quantity)))), /*#__PURE__*/React.createElement("div", {
-    style: { marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }
-  },
-  m.DocumentFile && String(m.DocumentFile).startsWith("data:image") && /*#__PURE__*/React.createElement("div", {
-    onClick: () => setViewImg(m.DocumentFile),
-    style: { cursor: "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #5a8a5e", width: 90, height: 90, flexShrink: 0 }
-  }, /*#__PURE__*/React.createElement("img", {
-    src: m.DocumentFile, style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
-  }), /*#__PURE__*/React.createElement("div", {
-    style: { position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(45,74,47,0.78)", fontSize: 9, color: "#fff", textAlign: "center", padding: "2px 0", fontWeight: 700 }
-  }, "👁 Tap to view")),
-  m.Notes && m.Notes.includes("attachment(s)") && !String(m.DocumentFile || "").startsWith("data:image") && /*#__PURE__*/React.createElement("div", {
-    style: { background: "#c4733a12", border: "1px solid #c4733a40", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#c4733a", fontWeight: 600 }
-  }, "📄 PDF invoice attached — filename in notes")
-  ), /*#__PURE__*/React.createElement("button", {
-    onClick: () => approveOne(m.MovementID),
-    disabled: busy === m.MovementID,
-    style: {
-      ...btnS("#16a34a"),
-      padding: "7px 16px",
-      fontSize: 12,
-      opacity: busy === m.MovementID ? 0.6 : 1,
-      whiteSpace: "nowrap"
-    }
-  }, busy === m.MovementID ? "Approving…" : "✅ Approve"))))));
+  }, drafts.map(m => {
+    const atts = parseAttachments(m.DocumentFile);
+    const thumbs = atts.map((img, i) => /*#__PURE__*/React.createElement("div", {
+      key: i,
+      onClick: () => setViewImg(img),
+      style: { cursor: "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #5a8a5e", width: 90, height: 90, flexShrink: 0 }
+    }, /*#__PURE__*/React.createElement("img", {
+      src: img, style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: { position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(45,74,47,0.78)", fontSize: 9, color: "#fff", textAlign: "center", padding: "2px 0", fontWeight: 700 }
+    }, "👁 Tap to view")));
+    const pdfBadge = m.Notes && m.Notes.includes("attachment(s)") && atts.length === 0 ? /*#__PURE__*/React.createElement("div", {
+      style: { background: "#c4733a12", border: "1px solid #c4733a40", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#c4733a", fontWeight: 600 }
+    }, "📄 PDF invoice attached — filename in notes") : null;
+    const rejectBox = rejectTarget === m.MovementID ? /*#__PURE__*/React.createElement("div", {
+      style: { marginTop: 8, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }
+    }, /*#__PURE__*/React.createElement("input", {
+      value: rejectReason,
+      onChange: e => setRejectReason(e.target.value),
+      placeholder: "Reason for rejecting (optional)",
+      style: { flex: 1, minWidth: 160, borderRadius: 7, border: "1px solid #ddd5c8", padding: "6px 10px", fontSize: 12, fontFamily: "inherit" }
+    }), /*#__PURE__*/React.createElement("button", {
+      onClick: confirmReject,
+      disabled: rejectBusy === m.MovementID,
+      style: { ...btnS("#ef4444"), padding: "6px 12px", fontSize: 11, opacity: rejectBusy === m.MovementID ? 0.6 : 1 }
+    }, rejectBusy === m.MovementID ? "…" : "Confirm Reject"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => { setRejectTarget(null); setRejectReason(""); },
+      style: { ...ghost, padding: "6px 12px", fontSize: 11 }
+    }, "Cancel")) : null;
+    return /*#__PURE__*/React.createElement("div", {
+      key: m.MovementID,
+      style: {
+        background: "#f3eee7",
+        borderRadius: 10,
+        padding: "10px 14px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 7,
+        alignItems: "center",
+        marginBottom: 3,
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: "#2d4a2f",
+        fontWeight: 700,
+        fontSize: 13
+      }
+    }, m.MovementID), /*#__PURE__*/React.createElement("span", {
+      style: {
+        background: "#c4733a18",
+        color: "#c4733a",
+        border: "1px solid #c4733a40",
+        borderRadius: 5,
+        padding: "1px 6px",
+        fontSize: 11,
+        fontWeight: 700
+      }
+    }, "Draft"), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: "#8a9e8b",
+        fontSize: 12
+      }
+    }, m.MovementType)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: "#9aaa9b",
+        fontSize: 12
+      }
+    }, LOC_LABEL[m.SourceLocationID] || m.SourceLocationID, " → ", LOC_LABEL[m.DestinationLocationID] || m.DestinationLocationID, m.Notes ? " · " + m.Notes : "", " · by " + (m.EnteredByEmail || "").split("@")[0]), m.lines && m.lines.length > 0 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 5,
+        flexWrap: "wrap",
+        marginTop: 5
+      }
+    }, m.lines.map(l => /*#__PURE__*/React.createElement("span", {
+      key: l.MovementLineID,
+      style: {
+        background: "#ffffff",
+        borderRadius: 5,
+        padding: "2px 8px",
+        fontSize: 11,
+        color: "#6b7f6c"
+      }
+    }, (products && products.find(p => p.ProductID === l.ProductID) ? products.find(p => p.ProductID === l.ProductID).ProductName : l.ProductID), " × ", l.Quantity))), rejectBox), /*#__PURE__*/React.createElement("div", {
+      style: { marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }
+    }, thumbs, pdfBadge, /*#__PURE__*/React.createElement("button", {
+      onClick: () => onEdit(m),
+      style: { background: "none", border: "1px solid #3a8a8a", color: "#3a8a8a", borderRadius: 7, padding: "6px 13px", fontSize: 12, cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }
+    }, "✏️ Edit"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => { setRejectTarget(m.MovementID); setRejectReason(""); },
+      style: { background: "none", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 7, padding: "6px 13px", fontSize: 12, cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }
+    }, "✖ Reject"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => approveOne(m.MovementID),
+      disabled: busy === m.MovementID,
+      style: {
+        ...btnS("#16a34a"),
+        padding: "7px 16px",
+        fontSize: 12,
+        opacity: busy === m.MovementID ? 0.6 : 1,
+        whiteSpace: "nowrap"
+      }
+    }, busy === m.MovementID ? "Approving…" : "✅ Approve")));
+  }))));
 }
 
 // ─────────────────────────────────────────────────────────────
 //  MOVEMENT CREATE MODAL
 // ─────────────────────────────────────────────────────────────
+function MovEditModal({
+  movement,
+  products,
+  user,
+  onClose,
+  onDone
+}) {
+  const [lines, setLines] = React.useState(
+    (movement.lines || []).map(l => ({ pid: l.ProductID, qty: String(l.Quantity ?? ""), cost: l.UnitCost != null ? String(l.UnitCost) : "" }))
+  );
+  const [refNo, setRefNo] = React.useState(movement.ReferenceNumber || "");
+  const [carrier, setCarrier] = React.useState(movement.CarrierTrackingNumber || "");
+  const [notes, setNotes] = React.useState((movement.Notes || "").replace(/\s*\[\d+ attachment\(s\):[^\]]*\]/, "").trim());
+  const [images, setImages] = React.useState([]); // newly added photos this session — replaces old ones if any added
+  const [compressing, setCompressing] = React.useState(0);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  const existingAtts = parseAttachments(movement.DocumentFile);
+
+  function compressToTarget(file, callback) {
+    if (!file.type.startsWith("image/")) {
+      const r = new FileReader();
+      r.onload = e => callback(e.target.result, file.size, file.type);
+      r.readAsDataURL(file);
+      return;
+    }
+    const r = new FileReader();
+    r.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX_BYTES = 900 * 1024;
+        const canvas = document.createElement("canvas");
+        let w = img.width, h = img.height;
+        const MAX_DIM = 2048;
+        if (w > MAX_DIM || h > MAX_DIM) { const s = Math.min(MAX_DIM/w, MAX_DIM/h); w=Math.round(w*s); h=Math.round(h*s); }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        let q = 0.92;
+        let dataUrl = canvas.toDataURL("image/jpeg", q);
+        while (dataUrl.length * 0.75 > MAX_BYTES && q > 0.45) {
+          q = Math.round((q - 0.05) * 100) / 100;
+          dataUrl = canvas.toDataURL("image/jpeg", q);
+        }
+        callback(dataUrl, Math.round(dataUrl.length * 0.75), "image/jpeg");
+      };
+      img.src = e.target.result;
+    };
+    r.readAsDataURL(file);
+  }
+  function handleFiles(files) {
+    Array.from(files).forEach(file => {
+      if (!file.type.startsWith("image/") && file.type !== "application/pdf") return;
+      setCompressing(n => n + 1);
+      compressToTarget(file, (dataUrl, finalBytes, finalType) => {
+        setImages(prev => [...prev, { name: file.name, dataUrl, type: finalType, size: (finalBytes/1024).toFixed(1) + " KB" }]);
+        setCompressing(n => Math.max(0, n - 1));
+      });
+    });
+  }
+  function removeImage(i) {
+    setImages(imgs => imgs.filter((_, j) => j !== i));
+  }
+  const addLine = () => setLines(l => [...l, { pid: products[0]?.ProductID || "", qty: "", cost: "" }]);
+  const remLine = i => setLines(l => l.filter((_, j) => j !== i));
+  const setLine = (i, k, v) => setLines(l => l.map((x, j) => j === i ? { ...x, [k]: v } : x));
+
+  async function submit() {
+    if (lines.some(l => !l.qty || isNaN(Number(l.qty)))) {
+      setErr("All lines need a quantity.");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      let documentFile;
+      if (images.length > 0) {
+        const MAX_ATTACH = 4;
+        const imgFiles = images.filter(i => i.dataUrl && i.dataUrl.startsWith("data:image")).slice(0, MAX_ATTACH);
+        function makeThumb(dataUrl) {
+          return new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement("canvas");
+              const MAX = 480;
+              let w = img.width, h = img.height;
+              if (w > MAX || h > MAX) { const s = Math.min(MAX/w, MAX/h); w=Math.round(w*s); h=Math.round(h*s); }
+              canvas.width = w; canvas.height = h;
+              canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+              resolve(canvas.toDataURL("image/jpeg", 0.60));
+            };
+            img.onerror = () => resolve(null);
+            img.src = dataUrl;
+          });
+        }
+        const thumbs = (await Promise.all(imgFiles.map(f => makeThumb(f.dataUrl)))).filter(Boolean);
+        documentFile = thumbs.length > 0 ? JSON.stringify(thumbs) : "";
+      }
+      const finalNotes = (notes ? notes + " " : "") + (images.length > 0 ? `[${images.length} attachment(s): ${images.map(i => i.name).join(", ")}]` : "");
+      const payload = {
+        movementID: movement.MovementID,
+        referenceNumber: refNo,
+        carrierTrackingNumber: carrier,
+        notes: finalNotes,
+        lines: lines.map(l => ({ productID: l.pid, quantity: Number(l.qty), unitCost: Number(l.cost) || "" }))
+      };
+      if (documentFile !== undefined) payload.documentFile = documentFile;
+      // Photo attachments can exceed the GET URL-length budget — use POST when present.
+      const res = documentFile
+        ? await apiWritePost("editMovement", user.email, payload)
+        : await apiWrite("editMovement", user.email, payload);
+      onDone(`✅ ${res.movementID} updated`);
+      onClose();
+    } catch (e) {
+      setErr(e.message);
+    }
+    setBusy(false);
+  }
+
+  return /*#__PURE__*/React.createElement("div", {
+    style: { position: "fixed", inset: 0, background: "rgba(45,74,47,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 16 }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { background: "#fefcf9", borderRadius: 16, padding: 22, width: 500, maxWidth: "100%", border: "1px solid #ddd5c8", maxHeight: "90vh", overflowY: "auto" }
+  },
+    /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }
+    },
+      /*#__PURE__*/React.createElement("div", { style: { color: "#2d4a2f", fontWeight: 800, fontSize: 15 } }, "✏️ Edit ", movement.MovementID),
+      /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: "#8a9e8b", fontSize: 22, cursor: "pointer" } }, "×")
+    ),
+    /*#__PURE__*/React.createElement("div", {
+      style: { background: "#f3eee7", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#4a7a4e", fontWeight: 600, marginBottom: 12 }
+    }, movement.MovementType, " · ", LOC_LABEL[movement.SourceLocationID] || movement.SourceLocationID, " → ", LOC_LABEL[movement.DestinationLocationID] || movement.DestinationLocationID),
+    err && /*#__PURE__*/React.createElement("div", { style: { color: "#ef4444", fontSize: 12, marginBottom: 10 } }, err),
+    /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 10 } },
+      lines.map((line, i) => /*#__PURE__*/React.createElement("div", {
+        key: i,
+        style: { display: "flex", gap: 8, alignItems: "center" }
+      },
+        /*#__PURE__*/React.createElement("select", {
+          value: line.pid,
+          onChange: e => setLine(i, "pid", e.target.value),
+          style: { ...inp, flex: 2 }
+        }, products.map(p => /*#__PURE__*/React.createElement("option", { key: p.ProductID, value: p.ProductID }, p.ProductName))),
+        /*#__PURE__*/React.createElement("input", {
+          type: "number",
+          value: line.qty,
+          onChange: e => setLine(i, "qty", e.target.value),
+          placeholder: "Qty",
+          style: { ...inp, flex: 1 }
+        }),
+        lines.length > 1 && /*#__PURE__*/React.createElement("button", {
+          onClick: () => remLine(i),
+          style: { background: "none", border: "none", color: "#ef4444", fontSize: 18, cursor: "pointer" }
+        }, "×")
+      )),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: addLine,
+        style: { ...ghost, padding: "6px 12px", fontSize: 12, justifySelf: "start" }
+      }, "+ Add product line"),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("label", { style: lbl }, "Reference No."),
+        /*#__PURE__*/React.createElement("input", { value: refNo, onChange: e => setRefNo(e.target.value), style: inp })
+      ),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("label", { style: lbl }, "Notes"),
+        /*#__PURE__*/React.createElement("textarea", { value: notes, onChange: e => setNotes(e.target.value), rows: 2, style: { ...inp, fontFamily: "inherit", resize: "vertical" } })
+      ),
+      existingAtts.length > 0 && images.length === 0 && /*#__PURE__*/React.createElement("div", {
+        style: { fontSize: 11, color: "#8a9e8b" }
+      }, "This draft already has ", existingAtts.length, " photo(s) attached. Adding a new photo below will replace them."),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("label", { style: lbl }, "Replace photo (optional)"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "file",
+          accept: "image/*",
+          multiple: true,
+          onChange: e => { handleFiles(e.target.files); e.target.value = ""; }
+        }),
+        images.length > 0 && /*#__PURE__*/React.createElement("div", {
+          style: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }
+        }, images.map((img, i) => /*#__PURE__*/React.createElement("div", {
+          key: i,
+          style: { position: "relative", width: 56, height: 56, borderRadius: 6, overflow: "hidden", border: "1px solid #ddd5c8" }
+        },
+          /*#__PURE__*/React.createElement("img", { src: img.dataUrl, style: { width: "100%", height: "100%", objectFit: "cover" } }),
+          /*#__PURE__*/React.createElement("div", {
+            onClick: () => removeImage(i),
+            style: { position: "absolute", top: 0, right: 0, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 11, padding: "0 4px", cursor: "pointer" }
+          }, "×")
+        )))
+      )
+    ),
+    /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", gap: 10, marginTop: 18 }
+    },
+      /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { ...ghost, flex: 1 } }, "Cancel"),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: submit,
+        disabled: busy || compressing > 0,
+        style: { ...btnS("#3a8a8a"), flex: 2, opacity: (busy || compressing > 0) ? 0.6 : 1 }
+      }, busy ? "Saving…" : compressing > 0 ? "Processing image…" : "Save Changes")
+    )
+  ));
+}
+
 function MovModal({
   products,
   stock,
@@ -948,10 +1214,12 @@ function MovModal({
     setBusy(true);
     setErr("");
     try {
-      // Build tiny thumbnail (≤30KB) from first image for storage in Google Sheet
-      let docThumb = "";
-      if (images.length > 0 && images[0].dataUrl && images[0].dataUrl.startsWith("data:image")) {
-        docThumb = await new Promise(resolve => {
+      // Build a small thumbnail (≤30KB each) for every attached photo — up to 4 —
+      // so the approver can see all of them, not just the first one.
+      const MAX_ATTACH = 4;
+      const imgFiles = images.filter(i => i.dataUrl && i.dataUrl.startsWith("data:image")).slice(0, MAX_ATTACH);
+      function makeThumb(dataUrl) {
+        return new Promise(resolve => {
           const img = new Image();
           img.onload = () => {
             const canvas = document.createElement("canvas");
@@ -962,11 +1230,14 @@ function MovModal({
             canvas.getContext("2d").drawImage(img, 0, 0, w, h);
             resolve(canvas.toDataURL("image/jpeg", 0.60));
           };
-          img.src = images[0].dataUrl;
+          img.onerror = () => resolve(null);
+          img.src = dataUrl;
         });
       }
+      const thumbs = (await Promise.all(imgFiles.map(f => makeThumb(f.dataUrl)))).filter(Boolean);
+      const docThumb = thumbs.length > 0 ? JSON.stringify(thumbs) : "";
       const finalNotes = (notes ? notes + " " : "") + (images.length > 0 ? `[${images.length} attachment(s): ${images.map(i => i.name).join(", ")}]` : "");
-      const res = await apiWrite("createMovement", user.email, {
+      const movPayload = {
         movementType: type,
         sourceLocationID: sd.src,
         destinationLocationID: sd.dst,
@@ -979,7 +1250,11 @@ function MovModal({
           quantity: Number(l.qty),
           unitCost: Number(l.cost) || ""
         }))
-      });
+      };
+      // Photo attachments can exceed the GET URL-length budget — use POST when present.
+      const res = docThumb
+        ? await apiWritePost("createMovement", user.email, movPayload)
+        : await apiWrite("createMovement", user.email, movPayload);
       onDone(`✅ ${res.movementID} saved as Draft` + (user.canApprove ? " — approve it on the dashboard" : " — a Manager will approve it"));
       onClose();
     } catch (e) {
@@ -1576,6 +1851,7 @@ function MovListModal({
   const [reverseReason, setReverseReason] = React.useState("");
   const [reverseBusy, setReverseBusy] = React.useState(false);
   const [viewImg, setViewImg] = React.useState(null); // lightbox image URL
+  const [productFilter, setProductFilter] = React.useState(""); // ProductID or "" for all
   const load = React.useCallback(async lim => {
     setLoading(true);
     try {
@@ -1628,6 +1904,7 @@ function MovListModal({
     }
     setReverseBusy(false);
   }
+  const displayMovs = productFilter ? movs.filter(m => m.lines && m.lines.some(l => l.ProductID === productFilter)) : movs;
   const lightbox = viewImg ? /*#__PURE__*/React.createElement("div", {
     onClick: () => setViewImg(null),
     style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 9999,
@@ -1681,9 +1958,14 @@ function MovListModal({
     style: {
       display: "flex",
       gap: 8,
-      alignItems: "center"
+      alignItems: "center",
+      flexWrap: "wrap"
     }
-  }, /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement("select", {
+    value: productFilter,
+    onChange: e => setProductFilter(e.target.value),
+    style: { borderRadius: 7, border: "1px solid #ddd5c8", padding: "6px 8px", fontSize: 12, color: "#2d4a2f", background: "#faf6f0", maxWidth: 150 }
+  }, /*#__PURE__*/React.createElement("option", { value: "" }, "All products"), (products || []).map(p => /*#__PURE__*/React.createElement("option", { key: p.ProductID, value: p.ProductID }, p.ProductName))), /*#__PURE__*/React.createElement("button", {
     onClick: load,
     style: {
       ...ghost,
@@ -1717,13 +1999,13 @@ function MovListModal({
       textAlign: "center",
       color: "#9aaa9b"
     }
-  }, "Loading…") : movs.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, "Loading…") : displayMovs.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 40,
       textAlign: "center",
       color: "#9aaa9b"
     }
-  }, "No movements found.") : movs.map(m => /*#__PURE__*/React.createElement("div", {
+  }, "No movements found.") : displayMovs.map(m => /*#__PURE__*/React.createElement("div", {
     key: m.MovementID,
     style: {
       borderBottom: "1px solid #ede6dc",
@@ -1793,15 +2075,16 @@ function MovListModal({
       color: "#6b7f6c"
     }
   }, (products || []).find(p => p.ProductID === l.ProductID)?.ProductName || l.ProductID, " × ", l.Quantity)))),
-  m.DocumentFile && String(m.DocumentFile).startsWith("data:image") && /*#__PURE__*/React.createElement("div", {
-    onClick: () => setViewImg(m.DocumentFile),
+  parseAttachments(m.DocumentFile).map((img, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    onClick: () => setViewImg(img),
     style: { cursor: "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #5a8a5e", width: 64, height: 64, flexShrink: 0, marginTop: 6 }
   }, /*#__PURE__*/React.createElement("img", {
-    src: m.DocumentFile, style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
+    src: img, style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
   }), /*#__PURE__*/React.createElement("div", {
     style: { position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(45,74,47,0.75)", fontSize: 8, color: "#fff", textAlign: "center", padding: "2px 0", fontWeight: 700 }
-  }, "👁")),
-  m.Notes && m.Notes.includes("attachment(s)") && !String(m.DocumentFile || "").startsWith("data:image") && /*#__PURE__*/React.createElement("span", {
+  }, "👁"))),
+  m.Notes && m.Notes.includes("attachment(s)") && parseAttachments(m.DocumentFile).length === 0 && /*#__PURE__*/React.createElement("span", {
     style: { fontSize: 10, color: "#c4733a", fontWeight: 600, marginTop: 4 }
   }, "📄 PDF"),
   m.Status === "Draft" && user.canApprove && /*#__PURE__*/React.createElement("button", {
@@ -1845,7 +2128,7 @@ function MovListModal({
       fontSize: 12,
       color: "#9aaa9b"
     }
-  }, "Showing ", movs.length, " latest movements"), hasMore && /*#__PURE__*/React.createElement("button", {
+  }, "Showing ", displayMovs.length, productFilter ? " filtered" : " latest", " movements"), hasMore && /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       const newLimit = pageLimit + 10;
       setPageLimit(newLimit);
@@ -3589,6 +3872,7 @@ function App() {
   const [tab, setTab] = React.useState("product");
   const [showMov, setShowMov] = React.useState(false);
   const [showList, setShowList] = React.useState(false);
+  const [editingMov, setEditingMov] = React.useState(null); // draft movement being edited, or null
   const [toast, setToast] = React.useState("");
   const [syncing, setSyncing] = React.useState(false);
   const [lastSync, setLastSync] = React.useState(null);
@@ -3777,6 +4061,18 @@ function App() {
       notify("❌ " + e.message);
     }
   }
+  async function rejectDraft(movID, reason) {
+    try {
+      await apiWrite("rejectMovement", user.email, {
+        movementID: movID,
+        reason: reason || ""
+      });
+      notify("🚫 Rejected " + movID);
+      await load();
+    } catch (e) {
+      notify("❌ " + e.message);
+    }
+  }
   function stockFor(pid) {
     const rows = stock.filter(s => s.ProductID === pid && STOCK_LOCATIONS.includes(s.LocationID));
     const by = {};
@@ -3789,6 +4085,36 @@ function App() {
       transit: by["FBA_TRANSIT"] || 0,
       returns: by["RETURNS"] || 0
     };
+  }
+  // Exports current system FBA + FBA-transit stock per product as a CSV,
+  // so it can be compared line-by-line against Amazon's own inventory report.
+  function exportFBAReconciliation() {
+    const rows = products.map(p => {
+      const sk = stockFor(p.ProductID);
+      return {
+        ProductID: p.ProductID,
+        SKU: p.SKU || "",
+        ProductName: p.ProductName || "",
+        ASIN: p.AmazonASIN || "",
+        FBA_Transit_Qty: sk.transit,
+        FBA_Qty: sk.fba,
+        Total_FBA_Side: sk.transit + sk.fba
+      };
+    });
+    const headers = ["ProductID","SKU","ProductName","ASIN","FBA_Transit_Qty","FBA_Qty","Total_FBA_Side"];
+    const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+    const csv = [headers.join(",")].concat(
+      rows.map(r => headers.map(h => esc(r[h])).join(","))
+    ).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Syoat_FBA_Reconciliation_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
   const totFBA = stock.filter(s => s.LocationID === "AMAZON_FBA").reduce((a, s) => a + Number(s.Quantity), 0);
   const totWH = stock.filter(s => s.LocationID === "MAIN_WH").reduce((a, s) => a + Number(s.Quantity), 0);
@@ -4044,7 +4370,11 @@ function App() {
   }, syncing ? "⟳ Syncing…" : "⟳ Sync" + (lastSync ? " · " + tsAgo(lastSync) : "")), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowList(true),
     style: ghost
-  }, "📋 Movements"), user.canCreate && /*#__PURE__*/React.createElement("button", {
+  }, "📋 Movements"), user.canViewAll && /*#__PURE__*/React.createElement("button", {
+    onClick: exportFBAReconciliation,
+    style: ghost,
+    title: "Download system FBA + FBA-Transit stock per product as CSV, to compare against Amazon's report"
+  }, "⬇ FBA Report"), user.canCreate && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowMov(true),
     style: btnS()
   }, "+ Record Movement"), /*#__PURE__*/React.createElement("button", {
@@ -4075,7 +4405,9 @@ function App() {
     user: user,
     products: products,
     onApprove: approveOne,
-    onApproveAll: approveAll
+    onApproveAll: approveAll,
+    onEdit: m => setEditingMov(m),
+    onReject: rejectDraft
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
@@ -5509,6 +5841,16 @@ function App() {
       loadCounts();
       load();
       setEditingCount(null);
+    }
+  }), editingMov && /*#__PURE__*/React.createElement(MovEditModal, {
+    movement: editingMov,
+    products: products,
+    user: user,
+    onClose: () => setEditingMov(null),
+    onDone: msg => {
+      notify(msg);
+      load();
+      setEditingMov(null);
     }
   }));
 }
