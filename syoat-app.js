@@ -662,11 +662,12 @@ function LoginScreen({
 function parseAttachments(docFile) {
   if (!docFile) return [];
   const s = String(docFile);
-  if (s.startsWith("data:image")) return [s]; // legacy single-image format
+  const isImg = x => typeof x === "string" && (x.startsWith("data:image") || x.startsWith("http"));
+  if (isImg(s)) return [s]; // single attachment (legacy base64 OR Drive URL)
   if (s.startsWith("[")) {
     try {
       const arr = JSON.parse(s);
-      if (Array.isArray(arr)) return arr.filter(x => typeof x === "string" && x.startsWith("data:image")).slice(0, 4);
+      if (Array.isArray(arr)) return arr.filter(isImg).slice(0, 4);
     } catch (e) { /* fall through */ }
   }
   return [];
@@ -973,28 +974,27 @@ function MovEditModal({
     setBusy(true);
     setErr("");
     try {
-      let documentFile;
+      let uploads = [];
       if (images.length > 0) {
         const MAX_ATTACH = 4;
         const imgFiles = images.filter(i => i.dataUrl && i.dataUrl.startsWith("data:image")).slice(0, MAX_ATTACH);
-        function makeThumb(dataUrl) {
+        function makeUpload(dataUrl) {
           return new Promise(resolve => {
             const img = new Image();
             img.onload = () => {
               const canvas = document.createElement("canvas");
-              const MAX = 480;
+              const MAX = 1600;
               let w = img.width, h = img.height;
               if (w > MAX || h > MAX) { const s = Math.min(MAX/w, MAX/h); w=Math.round(w*s); h=Math.round(h*s); }
               canvas.width = w; canvas.height = h;
               canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-              resolve(canvas.toDataURL("image/jpeg", 0.60));
+              resolve(canvas.toDataURL("image/jpeg", 0.82));
             };
             img.onerror = () => resolve(null);
             img.src = dataUrl;
           });
         }
-        const thumbs = (await Promise.all(imgFiles.map(f => makeThumb(f.dataUrl)))).filter(Boolean);
-        documentFile = thumbs.length > 0 ? JSON.stringify(thumbs) : "";
+        uploads = (await Promise.all(imgFiles.map(f => makeUpload(f.dataUrl)))).filter(Boolean);
       }
       const finalNotes = (notes ? notes + " " : "") + (images.length > 0 ? `[${images.length} attachment(s): ${images.map(i => i.name).join(", ")}]` : "");
       const payload = {
@@ -1004,9 +1004,9 @@ function MovEditModal({
         notes: finalNotes,
         lines: lines.map(l => ({ productID: l.pid, quantity: Number(l.qty), unitCost: Number(l.cost) || "" }))
       };
-      if (documentFile !== undefined) payload.documentFile = documentFile;
+      if (uploads.length) payload.attachmentImages = uploads;
       // Photo attachments can exceed the GET URL-length budget — use POST when present.
-      const res = documentFile
+      const res = uploads.length
         ? await apiWritePost("editMovement", user.email, payload)
         : await apiWrite("editMovement", user.email, payload);
       onDone(`✅ ${res.movementID} updated`);
@@ -1218,24 +1218,24 @@ function MovModal({
       // so the approver can see all of them, not just the first one.
       const MAX_ATTACH = 4;
       const imgFiles = images.filter(i => i.dataUrl && i.dataUrl.startsWith("data:image")).slice(0, MAX_ATTACH);
-      function makeThumb(dataUrl) {
+      function makeUpload(dataUrl) {
         return new Promise(resolve => {
           const img = new Image();
           img.onload = () => {
             const canvas = document.createElement("canvas");
-            const MAX = 480;
+            const MAX = 1600;
             let w = img.width, h = img.height;
             if (w > MAX || h > MAX) { const s = Math.min(MAX/w, MAX/h); w=Math.round(w*s); h=Math.round(h*s); }
             canvas.width = w; canvas.height = h;
             canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL("image/jpeg", 0.60));
+            resolve(canvas.toDataURL("image/jpeg", 0.82));
           };
           img.onerror = () => resolve(null);
           img.src = dataUrl;
         });
       }
-      const thumbs = (await Promise.all(imgFiles.map(f => makeThumb(f.dataUrl)))).filter(Boolean);
-      const docThumb = thumbs.length > 0 ? JSON.stringify(thumbs) : "";
+      const uploads = (await Promise.all(imgFiles.map(f => makeUpload(f.dataUrl)))).filter(Boolean);
+      const hasImgs = uploads.length > 0;
       const finalNotes = (notes ? notes + " " : "") + (images.length > 0 ? `[${images.length} attachment(s): ${images.map(i => i.name).join(", ")}]` : "");
       const movPayload = {
         movementType: type,
@@ -1244,7 +1244,7 @@ function MovModal({
         referenceNumber: refNo,
         carrierTrackingNumber: carrier,
         notes: finalNotes,
-        documentFile: docThumb,
+        attachmentImages: uploads,
         lines: lines.map(l => ({
           productID: l.pid,
           quantity: Number(l.qty),
@@ -1252,7 +1252,7 @@ function MovModal({
         }))
       };
       // Photo attachments can exceed the GET URL-length budget — use POST when present.
-      const res = docThumb
+      const res = hasImgs
         ? await apiWritePost("createMovement", user.email, movPayload)
         : await apiWrite("createMovement", user.email, movPayload);
       onDone(`✅ ${res.movementID} saved as Draft` + (user.canApprove ? " — approve it on the dashboard" : " — a Manager will approve it"));
