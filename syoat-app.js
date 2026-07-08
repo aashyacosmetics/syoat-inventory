@@ -2450,6 +2450,68 @@ function StockCountModal({
 //  Handles: FBA Inventory Event Detail Report (CSV)
 //  One upload → Stock Count + FBA Shipments + Damage
 // ─────────────────────────────────────────────────────────────
+function AssembleComboModal({
+  products,
+  stock,
+  user,
+  onClose,
+  onDone
+}) {
+  const [bom, setBom] = React.useState(null);
+  const [loadErr, setLoadErr] = React.useState("");
+  const [comboID, setComboID] = React.useState("");
+  const [qty, setQty] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+
+  React.useEffect(() => {
+    let alive = true;
+    api("getComboBOM").then(rows => {
+      if (!alive) return;
+      const list = Array.isArray(rows) ? rows : [];
+      setBom(list);
+      const ids = Array.from(new Set(list.map(r => String(r.ComboProductID))));
+      if (ids.length) setComboID(ids[0]);
+    }).catch(e => { if (alive) setLoadErr(e.message); });
+    return () => { alive = false; };
+  }, []);
+
+  const nameOf = pid => { const p = products.find(x => x.ProductID === pid); return p ? p.ProductName : pid; };
+  const onHandWH = pid => stock ? stock.filter(s => s.ProductID === pid && s.LocationID === "MAIN_WH").reduce((a, s) => a + Number(s.Quantity), 0) : 0;
+
+  const comboIDs = bom ? Array.from(new Set(bom.map(r => String(r.ComboProductID)))) : [];
+  const recipe = bom ? bom.filter(r => String(r.ComboProductID) === comboID && Number(r.Qty) > 0) : [];
+  const nQty = parseFloat(qty);
+  const perUnitBuildable = recipe.length ? Math.min.apply(null, recipe.map(r => Math.floor(onHandWH(r.ComponentProductID) / Number(r.Qty)))) : 0;
+
+  async function submit() {
+    if (!comboID) { setErr("Pick a combo to assemble."); return; }
+    if (!qty || isNaN(nQty) || nQty <= 0) { setErr("Enter a quantity greater than 0."); return; }
+    const short = recipe.filter(r => onHandWH(r.ComponentProductID) < nQty * Number(r.Qty));
+    if (short.length) { setErr("Not enough parts in Main Warehouse: " + short.map(r => nameOf(r.ComponentProductID)).join(", ")); return; }
+    setBusy(true);
+    setErr("");
+    try {
+      const res = await apiWrite("assembleCombo", user.email, { comboProductID: comboID, quantity: nQty });
+      onDone("✅ " + res.movementID + " — assemble " + nQty + " × " + nameOf(comboID) + " saved as Draft" + (user.canApprove ? " — approve it on the dashboard" : " — a Manager will approve it"));
+      onClose();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
+
+  const MODAL_STYLE = { position: "fixed", inset: 0, background: "rgba(45,74,47,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 };
+  const BOX_STYLE = { background: "#fefcf9", borderRadius: 16, padding: 22, width: 460, maxWidth: "100%", border: "1px solid #ddd5c8", maxHeight: "90vh", overflowY: "auto" };
+  const LBL = { fontSize: 12, fontWeight: 700, color: "#5a6b5b", marginBottom: 4, display: "block" };
+  const INP = { width: "100%", padding: "9px 11px", borderRadius: 9, border: "1px solid #ccd3c4", fontSize: 14, marginBottom: 14, boxSizing: "border-box" };
+
+  return /*#__PURE__*/React.createElement("div", { style: MODAL_STYLE }, /*#__PURE__*/React.createElement("div", { style: BOX_STYLE }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 18, fontWeight: 800, color: "#2d4a2f" } }, "🧩 Assemble Combo"), /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#9aaa9b" } }, "×")), loadErr ? /*#__PURE__*/React.createElement("div", { style: { color: "#c4534a", fontSize: 13 } }, "Couldn't load recipes: " + loadErr) : bom === null ? /*#__PURE__*/React.createElement("div", { style: { color: "#9aaa9b", fontSize: 13, padding: "10px 0" } }, "Loading recipes…") : comboIDs.length === 0 ? /*#__PURE__*/React.createElement("div", { style: { color: "#9aaa9b", fontSize: 13, padding: "10px 0" } }, "No combos found. Add rows to the Combo_BOM sheet first.") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", { style: LBL }, "Combo to build"), /*#__PURE__*/React.createElement("select", { value: comboID, onChange: e => setComboID(e.target.value), style: INP }, comboIDs.map(id => /*#__PURE__*/React.createElement("option", { key: id, value: id }, nameOf(id) + " (" + id + ")"))), /*#__PURE__*/React.createElement("label", { style: LBL }, "Quantity to assemble"), /*#__PURE__*/React.createElement("input", { type: "number", min: "1", value: qty, onChange: e => setQty(e.target.value), placeholder: "e.g. 20", style: INP }), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#5a8a5e", marginTop: -8, marginBottom: 14 } }, "Buildable now from parts: " + perUnitBuildable), /*#__PURE__*/React.createElement("div", { style: { background: "#f4f1ea", borderRadius: 10, padding: "10px 12px", marginBottom: 14 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#5a6b5b", marginBottom: 6 } }, "Will consume from Main Warehouse:"), recipe.map(r => {
+    const need = (nQty > 0 ? nQty : 0) * Number(r.Qty);
+    const have = onHandWH(r.ComponentProductID);
+    const okStock = have >= need;
+    return /*#__PURE__*/React.createElement("div", { key: r.ComponentProductID, style: { display: "flex", justifyContent: "space-between", fontSize: 13, padding: "2px 0", color: okStock ? "#2d4a2f" : "#c4534a" } }, /*#__PURE__*/React.createElement("span", null, nameOf(r.ComponentProductID) + " × " + Number(r.Qty) + "/unit"), /*#__PURE__*/React.createElement("span", null, "need " + need + " · have " + have));
+  })), err && /*#__PURE__*/React.createElement("div", { style: { color: "#c4534a", fontSize: 13, marginBottom: 10 } }, err), /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end" } }, /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { padding: "9px 18px", borderRadius: 9, border: "1px solid #ccd3c4", background: "#fff", cursor: "pointer", fontSize: 14 } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: submit, disabled: busy, style: { padding: "9px 20px", borderRadius: 9, border: "none", background: busy ? "#9aaa9b" : "#6d5ae6", color: "#fff", cursor: busy ? "default" : "pointer", fontSize: 14, fontWeight: 700 } }, busy ? "Saving…" : "Assemble")))));
+}
+
 function AmazonImportTab({
   products,
   stock,
@@ -3881,6 +3943,7 @@ function App() {
   const [staffLoadError, setStaffLoadError] = React.useState(null);
   const [stockCounts, setStockCounts] = React.useState([]);
   const [showCountModal, setShowCountModal] = React.useState(false);
+  const [showAssemble, setShowAssemble] = React.useState(false);
   const [countsLoading, setCountsLoading] = React.useState(false);
   const [editingCount, setEditingCount] = React.useState(null);
   const [showLowStockAlert, setShowLowStockAlert] = React.useState(false);
@@ -4377,7 +4440,13 @@ function App() {
   }, "⬇ FBA Report"), user.canCreate && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowMov(true),
     style: btnS()
-  }, "+ Record Movement"), /*#__PURE__*/React.createElement("button", {
+  }, "+ Record Movement"), user.canCreate && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowAssemble(true),
+    style: {
+      ...btnS(),
+      background: "#6d5ae6"
+    }
+  }, "🧩 Assemble Combo"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setUser(null),
     style: {
       ...ghost,
@@ -5828,6 +5897,15 @@ function App() {
     onDone: msg => {
       notify(msg);
       loadCounts();
+      load();
+    }
+  }), showAssemble && /*#__PURE__*/React.createElement(AssembleComboModal, {
+    products: products,
+    stock: stock,
+    user: user,
+    onClose: () => setShowAssemble(false),
+    onDone: msg => {
+      notify(msg);
       load();
     }
   }), editingCount && /*#__PURE__*/React.createElement(EditCountModal, {
