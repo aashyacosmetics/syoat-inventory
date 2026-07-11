@@ -1,0 +1,61 @@
+:root {
+  --syoat-ink: #123f2a;
+  --syoat-green: #075f36;
+  --syoat-green-soft: #edf6ee;
+  --syoat-ivory: #f8f4ed;
+  --syoat-card: #fffdf9;
+  --syoat-border: #e8dfd4;
+  --syoat-danger: #e44322;
+  --syoat-muted: #718077;
+  color-scheme: light;
+}
+
+html {
+  background: var(--syoat-ivory);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--syoat-ivory) !important;
+  color: var(--syoat-ink);
+  overscroll-behavior-y: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  min-height: 44px;
+  touch-action: manipulation;
+}
+
+input,
+select,
+textarea {
+  min-height: 44px;
+}
+
+img {
+  max-width: 100%;
+}
+
+@media (max-width: 560px) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
