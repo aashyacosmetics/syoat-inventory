@@ -4813,8 +4813,15 @@ function App() {
       key: p.ProductID,
       style: {
         ...card,
+        display: "flex",
+        gap: 12,
+        alignItems: "flex-start",
         border: `1px solid ${st !== "ok" ? SC[st] + "50" : "#e0d2bd"}`
       }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { width: 50, height: 58, borderRadius: 9, overflow: "hidden", position: "relative", flexShrink: 0, background: "linear-gradient(160deg,#e7dcc9,#cdbb9f)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }
+    }, p.ItemType === "Freebie" ? "🎁" : "🧴", /*#__PURE__*/React.createElement("img", { src: "images/" + p.ProductID + ".png", onError: function(e){ e.currentTarget.style.display = "none"; }, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover" } })), /*#__PURE__*/React.createElement("div", {
+      style: { flex: 1, minWidth: 0 }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
@@ -4899,10 +4906,11 @@ function App() {
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
+        fontFamily: "Fraunces,serif",
         fontSize: loc.label === "FBA" || loc.label === "Warehouse" ? 24 : 18,
-        fontWeight: 900,
+        fontWeight: 600,
         color: loc.val > 0 ? loc.c : "#c8b9a3",
-        letterSpacing: -1
+        letterSpacing: -0.5
       }
     }, loc.val), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -4936,7 +4944,7 @@ function App() {
         fontSize: 11,
         marginTop: 3
       }
-    }, "Alert at ", at, " · MRP ₹", p.MRP || "—", " · Cost ₹", p.UnitCost || "—")));
+    }, "Alert at ", at, " · MRP ₹", p.MRP || "—", " · Cost ₹", p.UnitCost || "—"))));
   })), tab === "location" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
