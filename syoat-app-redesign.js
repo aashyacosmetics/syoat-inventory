@@ -2994,6 +2994,8 @@ function AmazonImportTab({
 
   // ── RENDER ──
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: { background: "linear-gradient(135deg,#241b14,#3f2e20)", borderRadius: 16, padding: "16px 18px", marginBottom: 16, color: "#f2e7d5" }
+  }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 11 } }, /*#__PURE__*/React.createElement("div", { style: { width: 42, height: 42, borderRadius: 11, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 30, color: "#241b14" })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 19, fontWeight: 600 } }, "Amazon FBA"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Upload a Seller Central report to sync FBA")))), /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#bd5d3812",
       border: "1px solid #bd5d3830",
