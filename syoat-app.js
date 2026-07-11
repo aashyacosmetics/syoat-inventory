@@ -61,6 +61,7 @@ class ErrorBoundary extends React.Component {
 }
 
 const API = "https://script.google.com/macros/s/AKfycbwqBI7uPnv63VYms4PHaJceFhNzEf8Y6f-6ni-2LT2G_1pWmL7WpdwK4uu6HeAuW67agg/exec";
+let AUTH_TOKEN = sessionStorage.getItem("syoat_session_token") || "";
 
 // ─────────────────────────────────────────────────────────────
 //  STAFF — with PINs and role-based permissions
@@ -112,6 +113,14 @@ async function fetchWithRetry(url, options, retries) {
       return d.data;
     } catch (e) {
       lastErr = e;
+      const message = String(e && e.message || "");
+      if (message.includes("Incorrect PIN") || message.includes("Too many incorrect attempts")) throw e;
+      if (message.includes("Session required") || message.includes("Session expired") || message.includes("Account is not active")) {
+        AUTH_TOKEN = "";
+        sessionStorage.removeItem("syoat_session_token");
+        setTimeout(() => window.location.reload(), 50);
+        throw e;
+      }
       if (attempt < retries) {
         await new Promise(function(r) { setTimeout(r, attempt * 1200); });
       }
@@ -123,34 +132,21 @@ async function fetchWithRetry(url, options, retries) {
 // READ — GET (safe, cacheable)
 async function api(action, params) {
   params = params || {};
-  var qs = new URLSearchParams(Object.assign({ action: action }, params)).toString();
+  var auth = AUTH_TOKEN ? { sessionToken: AUTH_TOKEN } : {};
+  var qs = new URLSearchParams(Object.assign({}, params, { action: action }, auth)).toString();
   return fetchWithRetry(API + "?" + qs);
 }
 
 // WRITE — GET with payload + requestId
 // requestId lets Apps Script detect and skip duplicate submissions
 async function apiWrite(action, email, payload) {
-  var enriched = Object.assign({}, payload, { requestId: genRequestId() });
-  var serialised = JSON.stringify(enriched);
-  var qs = new URLSearchParams({
-    action: action,
-    email: email,
-    payload: encodeURIComponent(serialised)
-  }).toString();
-
-  // Guard: URL length limit (~7500 chars safe across all browsers/proxies)
-  if (qs.length > 7000) {
-    throw new Error(
-      "Payload too large (" + qs.length + " chars). Please reduce the number of product lines or split into two submissions."
-    );
-  }
-  return fetchWithRetry(API + "?" + qs);
+  return apiWritePost(action, email, payload);
 }
 
 // WRITE via POST — no URL-length ceiling. Used when the payload carries photo
 // attachments (base64 thumbnails can easily exceed the ~7000-char GET budget).
 async function apiWritePost(action, email, payload) {
-  var enriched = Object.assign({}, payload, { action: action, email: email, requestId: genRequestId() });
+  var enriched = Object.assign({}, payload, { action: action, email: email, sessionToken: AUTH_TOKEN, requestId: genRequestId() });
   return fetchWithRetry(API, {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
@@ -385,6 +381,7 @@ function LoginScreen({
   const [pin, setPin] = React.useState("");
   const [error, setError] = React.useState("");
   const [shake, setShake] = React.useState(false);
+  const [checkingPin, setCheckingPin] = React.useState(false);
   const [dropVal, setDropVal] = React.useState("");
   const ROLE_ICON = {
     Founder: "🌟",
@@ -416,14 +413,22 @@ function LoginScreen({
       setTimeout(() => checkPin(newPin), 150);
     }
   }
-  function checkPin(enteredPin) {
-    if (enteredPin === selected.pin) {
-      onLogin(selected);
-    } else {
+  async function checkPin(enteredPin) {
+    if (checkingPin) return;
+    setCheckingPin(true);
+    try {
+      const verified = await apiWritePost("verifyPin", selected.email, { pin: enteredPin });
+      if (!verified || !verified.sessionToken) throw new Error("Login service returned no session. Please try again.");
+      AUTH_TOKEN = verified.sessionToken || "";
+      sessionStorage.setItem("syoat_session_token", AUTH_TOKEN);
+      onLogin({ ...selected, ...verified });
+    } catch (e) {
       setShake(true);
-      setError("Wrong PIN. Try again.");
+      setError(String(e && e.message || "").includes("Incorrect PIN") ? "Wrong PIN. Try again." : (e.message || "Could not connect. Please try again."));
       setPin("");
       setTimeout(() => setShake(false), 500);
+    } finally {
+      setCheckingPin(false);
     }
   }
   function clearPin() {
@@ -1034,7 +1039,10 @@ function MovEditModal({
         notes: finalNotes,
         lines: lines.map(l => ({ productID: l.pid, quantity: Number(l.qty), unitCost: Number(l.cost) || "" }))
       };
-      if (uploads.length) payload.attachmentImages = uploads;
+      if (uploads.length) {
+        payload.attachmentImages = uploads;
+        payload.attachmentNames = imgFiles.map(f => f.name);
+      }
       // Photo attachments can exceed the GET URL-length budget — use POST when present.
       const res = uploads.length
         ? await apiWritePost("editMovement", user.email, payload)
@@ -1281,6 +1289,7 @@ function MovModal({
         carrierTrackingNumber: carrier,
         notes: finalNotes,
         attachmentImages: uploads,
+        attachmentNames: imgFiles.map(f => f.name),
         lines: lines.map(l => ({
           productID: l.pid,
           quantity: Number(l.qty),
@@ -3978,6 +3987,7 @@ function EditCountModal({
 // ─────────────────────────────────────────────────────────────
 function App() {
   const [user, setUser] = React.useState(null);
+  const [restoringSession, setRestoringSession] = React.useState(!!AUTH_TOKEN);
   const [products, setProducts] = React.useState([]);
   const [stock, setStock] = React.useState([]);
   const [drafts, setDrafts] = React.useState([]);
@@ -4005,6 +4015,16 @@ function App() {
     setToast(msg);
     setTimeout(() => setToast(""), 5000);
   };
+  React.useEffect(() => {
+    if (!AUTH_TOKEN) { setRestoringSession(false); return; }
+    api("getSession").then(profile => {
+      if (!profile || !profile.email) throw new Error("Invalid session profile");
+      setUser(profile);
+    }).catch(() => {
+      AUTH_TOKEN = "";
+      sessionStorage.removeItem("syoat_session_token");
+    }).finally(() => setRestoringSession(false));
+  }, []);
   const load = React.useCallback(async () => {
     setSyncing(true);
     try {
@@ -4486,20 +4506,20 @@ function App() {
     onClick: () => setShowList(true),
     style: ghost
   }, "📋 Movements"), user.canViewAll && /*#__PURE__*/React.createElement("button", {
-    onClick: exportFBAReconciliation,
+    onClick: () => setTab("amazon"),
     style: ghost,
-    title: "Download system FBA + FBA-Transit stock per product as CSV, to compare against Amazon's report"
-  }, "⬇ FBA Report"), user.canCreate && /*#__PURE__*/React.createElement("button", {
+    title: "Open the guided Amazon report upload and validation workflow"
+  }, "Amazon Upload"), user.canCreate && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowMov(true),
     style: btnS()
-  }, "+ Record Movement"), user.canCreate && /*#__PURE__*/React.createElement("button", {
+  }, "+ Record Movement"), (user.role === "Founder" || user.role === "Co-Founder") && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowAssemble(true),
     style: {
       ...btnS(),
       background: "#6d5ae6"
     }
   }, "🧩 Assemble Combo"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setUser(null),
+    onClick: () => { apiWritePost("logout", "", {}).catch(() => {}).finally(() => { AUTH_TOKEN = ""; sessionStorage.removeItem("syoat_session_token"); setUser(null); }); },
     style: {
       ...ghost,
       color: "#ef4444",
