@@ -417,7 +417,14 @@ function LoginScreen({
     }
   }
   function checkPin(enteredPin) {
-    if (enteredPin === selected.pin) {
+    if (!selected.pin) {
+      setShake(true);
+      setError("Logins didn't load (offline). Reload the page, then try again.");
+      setPin("");
+      setTimeout(() => setShake(false), 500);
+      return;
+    }
+    if (String(enteredPin) === String(selected.pin)) {
       onLogin(selected);
     } else {
       setShake(true);
