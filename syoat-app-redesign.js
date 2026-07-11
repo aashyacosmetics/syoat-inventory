@@ -2118,7 +2118,7 @@ function MovListModal({
       fontSize: 12,
       marginBottom: 4
     }
-  }, LOC_LABEL[m.SourceLocationID] || m.SourceLocationID, " → ", LOC_LABEL[m.DestinationLocationID] || m.DestinationLocationID, m.ReferenceNumber ? " · " + m.ReferenceNumber : "", " · by " + (m.EnteredByEmail || "").split("@")[0]), m.lines && m.lines.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, LOC_LABEL[m.SourceLocationID] || m.SourceLocationID, " → ", LOC_LABEL[m.DestinationLocationID] || m.DestinationLocationID, m.ReferenceNumber ? " · " + m.ReferenceNumber : "", " · by " + (m.EnteredByEmail || "").split("@")[0] + (m.MovementDateTime ? " · " + String(m.MovementDateTime).slice(0, 16).replace("T", " ") : "")), m.lines && m.lines.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 5,
@@ -2994,23 +2994,24 @@ function AmazonImportTab({
 
   // ── RENDER ──
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: { background: "linear-gradient(135deg,#241b14,#3f2e20)", borderRadius: 16, padding: "16px 18px", marginBottom: 16, color: "#f2e7d5" }
-  }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 11 } }, /*#__PURE__*/React.createElement("div", { style: { width: 42, height: 42, borderRadius: 11, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 30, color: "#241b14" })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 19, fontWeight: 600 } }, "Amazon FBA"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Upload a Seller Central report to sync FBA")))), /*#__PURE__*/React.createElement("div", {
+    style: { background: "linear-gradient(140deg,#241b14,#463017)", borderRadius: 18, padding: "18px", marginBottom: 16, color: "#f2e7d5", position: "relative", overflow: "hidden" }
+  }, /*#__PURE__*/React.createElement("div", { style: { position: "absolute", right: -34, top: -34, width: 140, height: 140, borderRadius: "50%", background: "radial-gradient(circle,rgba(255,153,0,0.35),transparent 70%)" } }), /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, position: "relative" } }, /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 46, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 32, color: "#241b14" })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 600 } }, "Amazon FBA"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Upload a Seller Central report to sync stock"))), /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10, marginTop: 15, position: "relative" } }, (function(){ var fba = (stock || []).reduce(function(a,x){ return a + (x.LocationID === "AMAZON_FBA" ? Number(x.Quantity || 0) : 0); }, 0); var tr = (stock || []).reduce(function(a,x){ return a + (x.LocationID === "FBA_TRANSIT" ? Number(x.Quantity || 0) : 0); }, 0); return [{ n: fba, l: "At FBA" }, { n: tr, l: "In Transit" }, { n: fba + tr, l: "FBA-side" }]; })().map(function(x){ return /*#__PURE__*/React.createElement("div", { key: x.l, style: { flex: 1, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.13)", borderRadius: 12, padding: "9px 6px", textAlign: "center" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 600 } }, x.n), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "#c9b49a", fontWeight: 600, marginTop: 2 } }, x.l)); }))), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#bd5d3812",
-      border: "1px solid #bd5d3830",
-      borderRadius: 12,
+      background: "#fdf9f1",
+      border: "1px solid #e7d9c4",
+      borderRadius: 14,
       padding: "14px 18px",
-      marginBottom: 18
+      marginBottom: 16
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontWeight: 800,
+      fontFamily: "Fraunces,serif",
+      fontWeight: 600,
       color: "#2c211a",
-      fontSize: 14,
+      fontSize: 16,
       marginBottom: 6
     }
-  }, "📋 FBA Inventory Event Detail Report"), /*#__PURE__*/React.createElement("div", {
+  }, "📋 How to pull this report"), /*#__PURE__*/React.createElement("div", {
     style: {
       color: "#6f6152",
       fontSize: 13,
@@ -3989,6 +3990,15 @@ function EditCountModal({
 //  Redesign helpers — Amazon smile icon, Home dashboard, Bottom nav
 //  (added for warm-editorial redesign; all data/permission logic reused)
 // ─────────────────────────────────────────────────────────────
+function nextImgExt(e){
+  var img = e.currentTarget;
+  var base = img.getAttribute("data-base") || "";
+  var exts = ["jpg","jpeg","webp","JPG","JPEG","PNG"];
+  var i = parseInt(img.getAttribute("data-i") || "0", 10);
+  if (base && i < exts.length) { img.setAttribute("data-i", String(i + 1)); img.src = base + "." + exts[i]; }
+  else { img.style.display = "none"; }
+}
+
 function AmazonIcon(props) {
   var size = props.size || 20, color = props.color || "#2c211a";
   return /*#__PURE__*/React.createElement("svg", { width: size, height: size * 0.68, viewBox: "0 0 50 34" },
@@ -4025,7 +4035,7 @@ function HomeView(props) {
   function prodImg(pid, emoji) {
     return /*#__PURE__*/React.createElement("div", { style: { width: 40, height: 46, borderRadius: 8, overflow: "hidden", position: "relative", background: "linear-gradient(160deg,#e7dcc9,#cdbb9f)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 } },
       emoji,
-      /*#__PURE__*/React.createElement("img", { src: "images/" + pid + ".png", onError: function(e){ e.currentTarget.style.display = "none"; }, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover" } })
+      /*#__PURE__*/React.createElement("img", { src: "images/" + pid + ".png", "data-base": "images/" + pid, onError: nextImgExt, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover" } })
     );
   }
   var healthCells = [
@@ -4822,7 +4832,7 @@ function App() {
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: { width: 50, height: 58, borderRadius: 9, overflow: "hidden", position: "relative", flexShrink: 0, background: "linear-gradient(160deg,#e7dcc9,#cdbb9f)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }
-    }, p.ItemType === "Freebie" ? "🎁" : "🧴", /*#__PURE__*/React.createElement("img", { src: "images/" + p.ProductID + ".png", onError: function(e){ e.currentTarget.style.display = "none"; }, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover" } })), /*#__PURE__*/React.createElement("div", {
+    }, p.ItemType === "Freebie" ? "🎁" : "🧴", /*#__PURE__*/React.createElement("img", { src: "images/" + p.ProductID + ".png", "data-base": "images/" + p.ProductID, onError: nextImgExt, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover" } })), /*#__PURE__*/React.createElement("div", {
       style: { flex: 1, minWidth: 0 }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
