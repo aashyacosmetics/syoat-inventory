@@ -4206,10 +4206,8 @@ function App() {
           : "Google Sheet is slow — using offline mode. Refresh to retry."
         );
       }
-    }, 7000);
+    }, 12000);
     api("getAppLogins").then(data => {
-      if (done) return;  // timeout already fired — ignore late response
-      done = true;
       clearTimeout(loginTimer);
       if (Array.isArray(data) && data.length > 0) {
         // Merge sheet roles with permission map
@@ -4267,7 +4265,13 @@ function App() {
         // Cache enriched list in localStorage — used by timeout/error fallback so PINs stay current.
         try { localStorage.setItem("syoat_staff_cache", JSON.stringify(enriched)); } catch {}
         setStaffDB(enriched);
-      } else if (data && data.error) {
+        setStaffLoadError(null);
+        done = true;
+        return;
+      }
+      if (done) return; // timeout already applied a fallback — keep it rather than replace with another fallback
+      done = true;
+      if (data && data.error) {
         const _c1 = (() => { try { return JSON.parse(localStorage.getItem("syoat_staff_cache") || "null"); } catch { return null; } })();
         setStaffDB(_c1 || STAFF_DB_FALLBACK);
         setStaffLoadError("Sheet error: " + data.error);
