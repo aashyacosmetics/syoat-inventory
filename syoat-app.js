@@ -218,6 +218,36 @@ const SRC_DST = {
     dst: "RETURNS"
   }
 };
+
+// Friendly display names for the dropdown + history. DISPLAY ONLY — the stored
+// MovementType value stays the key on the left, so history and all logic are unchanged.
+const TYPE_LABEL = {
+  "Opening Balance – WH":  "Opening Balance — Warehouse",
+  "Opening Balance – FBA": "Opening Balance — Amazon FBA",
+  "Stock In":              "Stock In — Supplier → Warehouse",
+  "FBA Dispatch":          "Send to Amazon FBA — WH → FBA",
+  "FBA Receipt":           "FBA Receipt — In-Transit → FBA",
+  "Website – WH Ship":     "Website Order — ship from Warehouse",
+  "Website – FBA Ship":    "Website Order — ship from Amazon FBA",
+  "Flipkart Dispatch":     "Flipkart Order — WH → Flipkart",
+  "Samples":               "Samples / Office Use — WH → Samples",
+  "Damage":                "Damage in Warehouse — WH → Damage",
+  "Returns – to WH":       "Return → back to Warehouse (good stock)",
+  "Returns – Damaged":     "Return → mark Damaged (unsellable)",
+  "Return Received":       "Return Received — Customer → Returns"
+};
+
+// Category tabs for the Record Movement form. Types are grouped by the task the
+// user is doing. A tab only appears if the user's role has ≥1 type in it, so
+// Warehouse sees 4 tabs (Receive/Ship/Returns/Damage-Samples) and owners see 5.
+// The 'types' are stored MovementType keys — display uses TYPE_LABEL.
+const TYPE_GROUPS = [
+  { key: "receive", label: "📥 Receive",         types: ["Stock In", "FBA Receipt"] },
+  { key: "ship",    label: "📤 Ship Orders",     types: ["FBA Dispatch", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch"] },
+  { key: "returns", label: "↩️ Returns",          types: ["Return Received", "Returns – to WH", "Returns – Damaged"] },
+  { key: "adjust",  label: "🗑️ Damage / Samples", types: ["Damage", "Samples"] },
+  { key: "setup",   label: "⚙️ Setup",           types: ["Opening Balance – WH", "Opening Balance – FBA"] }
+];
 const LOC_LABEL = {
   MAIN_WH: "Main Warehouse",
   AMAZON_FBA: "Amazon FBA",
@@ -854,7 +884,7 @@ function PendingBanner({
         color: "#8a9e8b",
         fontSize: 12
       }
-    }, m.MovementType)), /*#__PURE__*/React.createElement("div", {
+    }, TYPE_LABEL[m.MovementType] || m.MovementType)), /*#__PURE__*/React.createElement("div", {
       style: {
         color: "#9aaa9b",
         fontSize: 12
@@ -1030,7 +1060,7 @@ function MovEditModal({
     ),
     /*#__PURE__*/React.createElement("div", {
       style: { background: "#f3eee7", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#4a7a4e", fontWeight: 600, marginBottom: 12 }
-    }, movement.MovementType, " · ", LOC_LABEL[movement.SourceLocationID] || movement.SourceLocationID, " → ", LOC_LABEL[movement.DestinationLocationID] || movement.DestinationLocationID),
+    }, TYPE_LABEL[movement.MovementType] || movement.MovementType, " · ", LOC_LABEL[movement.SourceLocationID] || movement.SourceLocationID, " → ", LOC_LABEL[movement.DestinationLocationID] || movement.DestinationLocationID),
     err && /*#__PURE__*/React.createElement("div", { style: { color: "#ef4444", fontSize: 12, marginBottom: 10 } }, err),
     /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 10 } },
       lines.map((line, i) => /*#__PURE__*/React.createElement("div", {
@@ -1117,6 +1147,12 @@ function MovModal({
   const allAllowed = CAN_CREATE_TYPES[user.role] || [];
   const allowedTypes = allAllowed.filter(t => isOwner || !OWNER_ONLY.includes(t));
   const [type, setType] = React.useState(allowedTypes[0] || "");
+  const availGroups = TYPE_GROUPS
+    .map(g => ({ key: g.key, label: g.label, types: g.types.filter(t => allowedTypes.includes(t)) }))
+    .filter(g => g.types.length > 0);
+  const groupKeyOf = t => { const g = availGroups.find(x => x.types.includes(t)); return g ? g.key : (availGroups[0] ? availGroups[0].key : ""); };
+  const [category, setCategory] = React.useState(groupKeyOf(allowedTypes[0] || ""));
+  const activeGroup = availGroups.find(g => g.key === category) || availGroups[0] || { types: [] };
   const [refNo, setRefNo] = React.useState("");
   const [carrier, setCarrier] = React.useState("");
   const [notes, setNotes] = React.useState("");
@@ -1313,13 +1349,29 @@ function MovModal({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
-  }, "Movement Type"), /*#__PURE__*/React.createElement("select", {
-    value: type,
-    onChange: e => setType(e.target.value),
-    style: inp
-  }, allowedTypes.map(t => /*#__PURE__*/React.createElement("option", {
-    key: t
-  }, t)))), type && /*#__PURE__*/React.createElement("div", {
+  }, "Movement Type"), /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }
+  }, availGroups.map(g => /*#__PURE__*/React.createElement("button", {
+    key: g.key,
+    onClick: () => { setCategory(g.key); setType(g.types[0]); },
+    style: {
+      padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer",
+      border: "1px solid " + (category === g.key ? "#3a8a8a" : "#d8dcc8"),
+      background: category === g.key ? "#3a8a8a" : "#fff",
+      color: category === g.key ? "#fff" : "#5a6b5b"
+    }
+  }, g.label))), /*#__PURE__*/React.createElement("div", {
+    style: { display: "grid", gap: 6 }
+  }, activeGroup.types.map(t => /*#__PURE__*/React.createElement("button", {
+    key: t,
+    onClick: () => setType(t),
+    style: {
+      textAlign: "left", padding: "10px 12px", borderRadius: 9, fontSize: 13, cursor: "pointer",
+      border: "1px solid " + (type === t ? "#3a8a8a" : "#d8dcc8"),
+      background: type === t ? "#eaf5f5" : "#fff",
+      color: "#2d4a2f", fontWeight: type === t ? 700 : 500
+    }
+  }, TYPE_LABEL[t] || t)))), type && /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#f3eee7",
       borderRadius: 8,
@@ -2053,7 +2105,7 @@ function MovListModal({
       color: "#8a9e8b",
       fontSize: 12
     }
-  }, m.MovementType)), /*#__PURE__*/React.createElement("div", {
+  }, TYPE_LABEL[m.MovementType] || m.MovementType)), /*#__PURE__*/React.createElement("div", {
     style: {
       color: "#9aaa9b",
       fontSize: 12,
