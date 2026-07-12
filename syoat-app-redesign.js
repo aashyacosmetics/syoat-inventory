@@ -4686,22 +4686,11 @@ function App() {
     onClick: function(){ setShowAssemble(true); },
     style: { background: "#2a201a", color: "#f4ead8", border: "none", borderRadius: 14, height: 48, fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", fontFamily: "inherit" }
   }, /*#__PURE__*/React.createElement("span", { style: { width: 22, height: 22, borderRadius: "50%", background: "#bd5d38", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 } }, "🧩"), " Assemble Combo")), (tab === "product" || tab === "location" || tab === "counts") && /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6,
-      marginBottom: 16,
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    style: tabSt("product"),
-    onClick: () => setTab("product")
-  }, "📦 By Product"), /*#__PURE__*/React.createElement("button", {
-    style: tabSt("location"),
-    onClick: () => setTab("location")
-  }, "📍 By Location"), /*#__PURE__*/React.createElement("button", {
-    style: tabSt("counts"),
-    onClick: () => setTab("counts")
-  }, "🔢 Stock Count")), tab === "product" && /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 13, padding: 4, gap: 3, marginBottom: 16, maxWidth: 420 }
+  }, [{ k: "product", l: "📦 By Product" }, { k: "location", l: "📍 By Location" }, { k: "counts", l: "🔢 Stock Count" }].map(function(x){
+    var on = tab === x.k;
+    return /*#__PURE__*/React.createElement("button", { key: x.k, onClick: function(){ setTab(x.k); }, style: { flex: 1, border: "none", background: on ? "#2a201a" : "transparent", color: on ? "#f4ead8" : "#6f6152", padding: "9px 4px", borderRadius: 9, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", boxShadow: on ? "0 1px 4px rgba(0,0,0,0.15)" : "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 } }, x.l);
+  })), tab === "product" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gap: 10
@@ -4854,67 +4843,25 @@ function App() {
         marginTop: 3
       }
     }, "Alert at ", at, " · MRP ₹", p.MRP || "—", " · Cost ₹", p.UnitCost || "—"))));
-  })), tab === "location" && /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
-      gap: 12
-    }
-  }, Object.entries(LOC_LABEL).filter(([lid]) => STOCK_LOCATIONS.includes(lid)).map(([lid, lname]) => {
-    const rows = stock.filter(s => s.LocationID === lid);
-    const total = rows.reduce((a, s) => a + Number(s.Quantity), 0);
-    return /*#__PURE__*/React.createElement("div", {
-      key: lid,
-      style: card
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontWeight: 700,
-        fontSize: 14,
-        color: "#2c211a",
-        marginBottom: 10
-      }
-    }, lname), rows.length === 0 ? /*#__PURE__*/React.createElement("div", {
-      style: {
-        color: "#c8b9a3",
-        fontSize: 13
-      }
-    }, "No stock") : rows.map(r => {
-      const p = products.find(x => x.ProductID === r.ProductID);
-      return /*#__PURE__*/React.createElement("div", {
-        key: r.ProductID,
-        style: {
-          display: "flex",
-          justifyContent: "space-between",
-          borderBottom: "1px solid #e7d9c4",
-          padding: "7px 0",
-          fontSize: 12
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#6f6152"
-        }
-      }, (p?.ProductName || r.ProductID).split(" ").slice(0, 4).join(" ")), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 800,
-          color: "#2c211a"
-        }
-      }, r.Quantity));
-    }), /*#__PURE__*/React.createElement("div", {
-      style: {
-        marginTop: 8,
-        paddingTop: 7,
-        borderTop: "1px solid #e7d9c4",
-        display: "flex",
-        justifyContent: "space-between",
-        fontSize: 12,
-        color: "#a89680"
-      }
-    }, /*#__PURE__*/React.createElement("span", null, "Total"), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontWeight: 800,
-        color: "#bd5d38"
-      }
-    }, total)));
+  })), tab === "location" && /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 12 } }, [{ id: "MAIN_WH", ic: "🏠", bg: "#efe4d2", sub: "Physical in-house stock" }, { id: "AMAZON_FBA", ic: "AMZ", bg: "#f2ddd0", sub: "Held by Amazon" }, { id: "FBA_TRANSIT", ic: "🚚", bg: "#f4e7c8", sub: "Shipped, not yet received" }, { id: "RETURNS", ic: "↩️", bg: "#f3dcd5", sub: "Awaiting inspection" }].map(function(loc){
+    var rows = (stock || []).filter(function(s){ return s.LocationID === loc.id; }).map(function(s){ var p = (products || []).find(function(x){ return x.ProductID === s.ProductID; }); return { name: (p && p.ProductName) || s.ProductID, pid: s.ProductID, qty: Number(s.Quantity) || 0, freebie: p && p.ItemType === "Freebie" }; }).filter(function(r){ return r.qty !== 0; }).sort(function(a,b){ return b.qty - a.qty; });
+    var total = rows.reduce(function(a,r){ return a + r.qty; }, 0);
+    var maxq = rows.length ? rows[0].qty : 1;
+    return /*#__PURE__*/React.createElement("div", { key: loc.id, style: { ...card, padding: 14 } },
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 11, marginBottom: rows.length ? 12 : 0 } },
+        /*#__PURE__*/React.createElement("div", { style: { width: 40, height: 40, borderRadius: 11, background: loc.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19, flexShrink: 0 } }, loc.ic === "AMZ" ? /*#__PURE__*/React.createElement(AmazonIcon, { size: 22, color: "#2c211a" }) : loc.ic),
+        /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#2c211a" } }, LOC_LABEL[loc.id] || loc.id), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680" } }, loc.sub)),
+        /*#__PURE__*/React.createElement("div", { style: { textAlign: "right" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 600, color: total > 0 ? "#2c211a" : "#cbbca4", lineHeight: 1 } }, total.toLocaleString("en-IN")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.08em" } }, "units"))
+      ),
+      rows.length === 0 ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680", paddingTop: 2 } }, "No stock at this location") : rows.map(function(r){
+        return /*#__PURE__*/React.createElement("div", { key: r.pid, style: { display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderTop: "1px solid #e7d9c4" } },
+          /*#__PURE__*/React.createElement("div", { style: { width: 28, height: 32, borderRadius: 6, overflow: "hidden", position: "relative", background: "linear-gradient(160deg,#e7dcc9,#cdbb9f)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 } }, r.freebie ? "🎁" : "🧴", /*#__PURE__*/React.createElement("img", { src: "images/" + r.pid + ".png", "data-base": "images/" + r.pid, onError: nextImgExt, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover" } })),
+          /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, r.name.replace("Syoat ", "")),
+          /*#__PURE__*/React.createElement("div", { style: { width: 64, height: 5, borderRadius: 5, background: "#f5ecdc", overflow: "hidden", flexShrink: 0 } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(6, r.qty / maxq * 100) + "%", background: "#5f7a4f" } })),
+          /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 15, fontWeight: 600, width: 46, textAlign: "right" } }, r.qty.toLocaleString("en-IN"))
+        );
+      })
+    );
   })), tab === "counts" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -5049,7 +4996,7 @@ function App() {
         fontSize: 13,
         marginBottom: 3
       }
-    }, c.ProductID, " @ ", LOC_LABEL[c.LocationID] || c.LocationID), /*#__PURE__*/React.createElement("div", {
+    }, ((products || []).find(function(p){ return p.ProductID === c.ProductID; }) || {}).ProductName || c.ProductID, " @ ", LOC_LABEL[c.LocationID] || c.LocationID), /*#__PURE__*/React.createElement("div", {
       style: {
         color: "#a89680",
         fontSize: 12
