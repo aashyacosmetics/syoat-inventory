@@ -2573,6 +2573,8 @@ function AssembleComboModal({
 
 function FbaReconcileTab(props) {
   var products = props.products, stock = props.stock, user = props.user, notify = props.notify;
+  var TRANSIT_DAYS = 12, TARGET_DAYS = 30;
+  var _sub = React.useState("upload"), sub = _sub[0], setSub = _sub[1];
   var _s = React.useState("upload"), step = _s[0], setStep = _s[1];
   var _p = React.useState([]), preview = _p[0], setPreview = _p[1];
   var _u = React.useState([]), unmapped = _u[0], setUnmapped = _u[1];
@@ -2580,22 +2582,13 @@ function FbaReconcileTab(props) {
   var _e = React.useState(""), error = _e[0], setError = _e[1];
   var _b = React.useState(false), busy = _b[0], setBusy = _b[1];
   var _o = React.useState(false), drag = _o[0], setDrag = _o[1];
+  var _lg = React.useState(function () { try { return JSON.parse(localStorage.getItem("syoat_fba_ledger") || "null"); } catch (e) { return null; } }), ledger = _lg[0], setLedger = _lg[1];
   var fileRef = React.useRef(null);
   var payloadRef = React.useRef(null);
 
-  function splitCSV(line) {
-    var out = [], cur = "", q = false;
-    for (var i = 0; i < line.length; i++) {
-      var c = line[i];
-      if (c === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; }
-      else if (c === "," && !q) { out.push(cur); cur = ""; }
-      else cur += c;
-    }
-    out.push(cur); return out;
-  }
-  function fbaStockOf(pid) {
-    var t = 0; (stock || []).forEach(function (s) { if (s.ProductID === pid && s.LocationID === "AMAZON_FBA") t += Number(s.Quantity) || 0; }); return t;
-  }
+  function splitCSV(line) { var out = [], cur = "", q = false; for (var i = 0; i < line.length; i++) { var c = line[i]; if (c === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; } else if (c === "," && !q) { out.push(cur); cur = ""; } else cur += c; } out.push(cur); return out; }
+  function fbaStockOf(pid) { var t = 0; (stock || []).forEach(function (s) { if (s.ProductID === pid && s.LocationID === "AMAZON_FBA") t += Number(s.Quantity) || 0; }); return t; }
+
   function handleFile(file) {
     if (!file) return;
     setError("");
@@ -2606,35 +2599,46 @@ function FbaReconcileTab(props) {
         var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
         if (!lines.length) { setError("That file is empty."); return; }
         var isTab = lines[0].indexOf("\t") !== -1 && lines[0].indexOf(",") === -1;
-        var pl = isTab
-          ? function (l) { return l.split("\t").map(function (x) { return x.replace(/^"|"$/g, "").trim(); }); }
-          : function (l) { return splitCSV(l).map(function (x) { return x.replace(/^"|"$/g, "").trim(); }); };
+        var pl = isTab ? function (l) { return l.split("\t").map(function (x) { return x.replace(/^"|"$/g, "").trim(); }); } : function (l) { return splitCSV(l).map(function (x) { return x.replace(/^"|"$/g, "").trim(); }); };
         var header = pl(lines[0]), H = {};
         header.forEach(function (h, i) { H[h.toLowerCase()] = i; });
         if (H["amazon-order-id"] !== undefined) { setError("This is the All Orders report. Please upload Inventory Ledger — Summary view."); return; }
         var hasEnd = H["ending warehouse balance"] !== undefined, hasDisp = H["disposition"] !== undefined, hasAsin = H["asin"] !== undefined;
         if (H["event type"] !== undefined && !hasEnd) { setError("This is the Ledger Detailed view. Switch to the Summary view and download again."); return; }
         if (!(hasEnd && hasDisp && hasAsin)) { setError("Unrecognised file. Upload Inventory Ledger — Summary (needs ASIN, Disposition, Ending Warehouse Balance)."); return; }
-        var iAsin = H["asin"], iDisp = H["disposition"], iEnd = H["ending warehouse balance"], iDate = H["date"];
-        var asinQty = {}, dateSeen = "";
+        var iAsin = H["asin"], iDisp = H["disposition"], iEnd = H["ending warehouse balance"], iDate = H["date"], iLoc = H["location"], iShip = H["customer shipments"];
+        var asinQty = {}, endFC = {}, shipTot = {}, shipFC = {}, datesSet = {}, dateSeen = "";
         for (var r = 1; r < lines.length; r++) {
           var c = pl(lines[r]);
           if (String(c[iDisp]).toUpperCase() !== "SELLABLE") continue;
           var a = c[iAsin]; if (!a) continue;
-          asinQty[a] = (asinQty[a] || 0) + (parseFloat(c[iEnd]) || 0);
-          if (iDate !== undefined && c[iDate]) dateSeen = c[iDate];
+          var fc = (iLoc !== undefined && c[iLoc]) ? c[iLoc] : "FBA";
+          var end = parseFloat(c[iEnd]) || 0;
+          var ship = (iShip !== undefined) ? Math.abs(parseFloat(c[iShip]) || 0) : 0;
+          asinQty[a] = (asinQty[a] || 0) + end;
+          endFC[a] = endFC[a] || {}; endFC[a][fc] = (endFC[a][fc] || 0) + end;
+          shipTot[a] = (shipTot[a] || 0) + ship;
+          shipFC[a] = shipFC[a] || {}; shipFC[a][fc] = (shipFC[a][fc] || 0) + ship;
+          if (iDate !== undefined && c[iDate]) { datesSet[c[iDate]] = 1; dateSeen = c[iDate]; }
         }
         var a2p = {}; (products || []).forEach(function (p) { if (p.AmazonASIN) a2p[String(p.AmazonASIN).trim()] = p; });
-        var mapped = [], unm = [];
+        var mapped = [], unm = [], snapProducts = [];
         Object.keys(asinQty).forEach(function (a) {
           var p = a2p[a];
-          if (p) { var sys = fbaStockOf(p.ProductID); mapped.push({ productID: p.ProductID, name: p.ProductName, asin: a, sys: sys, ledger: asinQty[a], delta: asinQty[a] - sys }); }
-          else unm.push({ asin: a, qty: asinQty[a] });
+          if (!p) { unm.push({ asin: a, qty: asinQty[a] }); return; }
+          var sys = fbaStockOf(p.ProductID);
+          mapped.push({ productID: p.ProductID, name: p.ProductName, asin: a, sys: sys, ledger: asinQty[a], delta: asinQty[a] - sys });
+          var perFC = Object.keys(endFC[a] || {}).map(function (fc) { return { fc: fc, qty: endFC[a][fc], sold: (shipFC[a] && shipFC[a][fc]) || 0 }; }).filter(function (x) { return x.qty !== 0 || x.sold !== 0; }).sort(function (x, y) { return y.qty - x.qty; });
+          snapProducts.push({ productID: p.ProductID, name: p.ProductName, fnsku: p.FNSKU || "", total: asinQty[a], sold: shipTot[a] || 0, perFC: perFC });
         });
         mapped.sort(function (x, y) { return Math.abs(y.delta) - Math.abs(x.delta); });
         if (!mapped.length) { setError("No Syoat products matched by ASIN. Check the AmazonASIN column in your Products sheet."); return; }
         var rd = dateSeen, m = dateSeen.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
         if (m) rd = m[3] + "-" + ("0" + m[1]).slice(-2) + "-" + ("0" + m[2]).slice(-2);
+        var reportDays = Math.max(1, Object.keys(datesSet).length);
+        var snapshot = { reportDate: rd, reportDays: reportDays, savedAt: new Date().toISOString().slice(0, 16).replace("T", " "), products: snapProducts };
+        try { localStorage.setItem("syoat_fba_ledger", JSON.stringify(snapshot)); } catch (e) {}
+        setLedger(snapshot);
         payloadRef.current = { text: text, name: file.name, mime: isTab ? "text/plain" : "text/csv" };
         setReportDate(rd); setPreview(mapped); setUnmapped(unm); setStep("preview");
       } catch (err) { setError("Couldn't read the file: " + err.message); }
@@ -2646,68 +2650,67 @@ function FbaReconcileTab(props) {
     (async function () {
       try {
         var items = preview.filter(function (x) { return x.delta !== 0; }).map(function (x) { return { productID: x.productID, ledgerQty: x.ledger }; });
-        if (!items.length) { notify("✅ FBA already matches the ledger — nothing to adjust."); reset(); if (props.onCountCreated) props.onCountCreated(); return; }
-        var f = payloadRef.current || {};
-        var res = await apiWritePost("createFbaReconciliation", user.email, { items: items, fileText: f.text, fileName: f.name, fileMime: f.mime, reportDate: reportDate });
+        if (!items.length) { notify("✅ FBA already matches the ledger — nothing to adjust."); resetUp(); if (props.onCountCreated) props.onCountCreated(); return; }
+        var fp = payloadRef.current || {};
+        var res = await apiWritePost("createFbaReconciliation", user.email, { items: items, fileText: fp.text, fileName: fp.name, fileMime: fp.mime, reportDate: reportDate });
         notify("✅ " + (res.createdCount || items.length) + " FBA count(s) created — approve them in Stock Count." + (res.driveUrl ? " File archived to Drive." : ""));
-        reset(); if (props.onCountCreated) props.onCountCreated();
+        resetUp(); if (props.onCountCreated) props.onCountCreated();
       } catch (e) { notify("❌ " + e.message); }
       setBusy(false);
     })();
   }
-  function reset() { setStep("upload"); setPreview([]); setUnmapped([]); setError(""); setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
+  function resetUp() { setStep("upload"); setPreview([]); setUnmapped([]); setError(""); setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
 
-  var hero = /*#__PURE__*/React.createElement("div", { style: { background: "linear-gradient(140deg,#241b14,#463017)", borderRadius: 18, padding: "18px", marginBottom: 16, color: "#f2e7d5" } },
-    /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
-      /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 46, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 32, color: "#241b14" })),
-      /*#__PURE__*/React.createElement("div", null,
-        /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 600 } }, "Amazon FBA"),
-        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Weekly · upload the Inventory Ledger to sync FBA stock"))));
+  var hero = /*#__PURE__*/React.createElement("div", { style: { background: "linear-gradient(140deg,#241b14,#463017)", borderRadius: 18, padding: "18px", marginBottom: 14, color: "#f2e7d5" } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } }, /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 46, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 32, color: "#241b14" })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 600 } }, "Amazon FBA"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Weekly ledger · fulfilment-centre stock · shipment plan"))));
 
-  var guide = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 14 } },
-    /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 16, fontWeight: 600, marginBottom: 6 } }, "📋 How to pull this report"),
-    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: "#6f6152", lineHeight: 1.7 } },
-      "Seller Central → Reports → Fulfilment → ", /*#__PURE__*/React.createElement("b", null, "Inventory Ledger"), " → View: ", /*#__PURE__*/React.createElement("b", null, "Summary"), " → latest date → Download (CSV or TXT)."),
-    /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, fontSize: 11.5, color: "#5f7a4f", fontWeight: 600 } }, "✅ Right file: Inventory Ledger — Summary"),
-    /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#b23a2e", fontWeight: 600 } }, "❌ Not the Detailed view · Not All Orders · Not Manage Inventory"));
+  var SUBS = [{ k: "upload", l: "⬆️ Upload" }, { k: "fc", l: "🏬 Locations – FC" }, { k: "reco", l: "📦 Recommendations" }];
+  var subnav = /*#__PURE__*/React.createElement("div", { style: { display: "flex", background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 13, padding: 4, gap: 3, marginBottom: 14 } }, SUBS.map(function (x) { var on = sub === x.k; return /*#__PURE__*/React.createElement("button", { key: x.k, onClick: function () { setSub(x.k); }, style: { flex: 1, border: "none", background: on ? "#2a201a" : "transparent", color: on ? "#f4ead8" : "#6f6152", padding: "9px 4px", borderRadius: 9, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", boxShadow: on ? "0 1px 4px rgba(0,0,0,0.15)" : "none" } }, x.l); }));
 
-  if (step === "preview") {
-    var totAdj = preview.filter(function (x) { return x.delta !== 0; }).length;
-    return /*#__PURE__*/React.createElement("div", null, hero,
-      /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", margin: "2px 2px 10px" } },
-        /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 600 } }, "Reconcile preview"),
-        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680" } }, reportDate ? "Ledger date " + reportDate : "")),
-      /*#__PURE__*/React.createElement("div", { style: { ...card, padding: "6px 14px 10px" } },
-        /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, padding: "9px 0", borderBottom: "1px solid #e7d9c4", fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "#a89680", fontWeight: 700 } },
-          /*#__PURE__*/React.createElement("span", null, "Product"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "System"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Ledger"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Δ")),
-        preview.map(function (x) {
-          var dc = x.delta === 0 ? "#a89680" : x.delta > 0 ? "#5f7a4f" : "#b23a2e";
-          return /*#__PURE__*/React.createElement("div", { key: x.productID, style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #f0ebe2", fontSize: 12.5 } },
-            /*#__PURE__*/React.createElement("span", { style: { fontWeight: 600, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (x.name || x.productID).replace("Syoat ", "")),
-            /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600, color: "#6f6152" } }, x.sys),
-            /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600 } }, x.ledger),
-            /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 700, color: dc } }, x.delta > 0 ? "+" + x.delta : x.delta));
-        })),
-      unmapped.length > 0 && /*#__PURE__*/React.createElement("div", { style: { background: "#f4e7c8", border: "1px solid #e8d09a", borderRadius: 12, padding: "10px 13px", marginTop: 10, fontSize: 11.5, color: "#6b5326" } },
-        /*#__PURE__*/React.createElement("b", null, "⚠️ " + unmapped.length + " unmapped ASIN(s) — not adjusted: "), unmapped.map(function (u) { return u.asin + " (" + u.qty + ")"; }).join(", ")),
-      /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#6f6152", margin: "12px 2px" } }, totAdj + " product(s) will get an adjustment count at Amazon FBA, pending Manager approval in the Stock Count tab."),
-      /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 } },
-        /*#__PURE__*/React.createElement("button", { onClick: reset, disabled: busy, style: { border: "1px solid #e0d2bd", background: "transparent", color: "#6f6152", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 600, cursor: "pointer" } }, "Cancel"),
-        /*#__PURE__*/React.createElement("button", { onClick: confirmImport, disabled: busy, style: { border: "none", background: busy ? "#c8b9a3" : "#2a201a", color: "#f4ead8", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, cursor: busy ? "wait" : "pointer" } }, busy ? "Saving…" : "Confirm · create " + totAdj + " count(s)")));
+  var guide = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 14 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 16, fontWeight: 600, marginBottom: 6 } }, "📋 How to pull this report"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: "#6f6152", lineHeight: 1.7 } }, "Seller Central → Reports → Fulfilment → ", /*#__PURE__*/React.createElement("b", null, "Inventory Ledger"), " → View: ", /*#__PURE__*/React.createElement("b", null, "Summary"), " → latest date → Download (CSV or TXT)."), /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, fontSize: 11.5, color: "#5f7a4f", fontWeight: 600 } }, "✅ Right file: Inventory Ledger — Summary"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#b23a2e", fontWeight: 600 } }, "❌ Not the Detailed view · Not All Orders · Not Manage Inventory"));
+
+  function uploadTab() {
+    if (step === "preview") {
+      var totAdj = preview.filter(function (x) { return x.delta !== 0; }).length;
+      return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", margin: "2px 2px 10px" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 600 } }, "Reconcile preview"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680" } }, reportDate ? "Ledger date " + reportDate : "")), /*#__PURE__*/React.createElement("div", { style: { ...card, padding: "6px 14px 10px" } }, /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, padding: "9px 0", borderBottom: "1px solid #e7d9c4", fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "#a89680", fontWeight: 700 } }, /*#__PURE__*/React.createElement("span", null, "Product"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "System"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Ledger"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Δ")), preview.map(function (x) { var dc = x.delta === 0 ? "#a89680" : x.delta > 0 ? "#5f7a4f" : "#b23a2e"; return /*#__PURE__*/React.createElement("div", { key: x.productID, style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #f0ebe2", fontSize: 12.5 } }, /*#__PURE__*/React.createElement("span", { style: { fontWeight: 600, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (x.name || x.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600, color: "#6f6152" } }, x.sys), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600 } }, x.ledger), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 700, color: dc } }, x.delta > 0 ? "+" + x.delta : x.delta)); })), unmapped.length > 0 && /*#__PURE__*/React.createElement("div", { style: { background: "#f4e7c8", border: "1px solid #e8d09a", borderRadius: 12, padding: "10px 13px", marginTop: 10, fontSize: 11.5, color: "#6b5326" } }, /*#__PURE__*/React.createElement("b", null, "⚠️ " + unmapped.length + " unmapped ASIN(s) — not adjusted: "), unmapped.map(function (u) { return u.asin + " (" + u.qty + ")"; }).join(", ")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#6f6152", margin: "12px 2px" } }, totAdj + " product(s) will get an adjustment count at Amazon FBA, pending Manager approval in the Stock Count tab."), /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 } }, /*#__PURE__*/React.createElement("button", { onClick: resetUp, disabled: busy, style: { border: "1px solid #e0d2bd", background: "transparent", color: "#6f6152", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 600, cursor: "pointer" } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: confirmImport, disabled: busy, style: { border: "none", background: busy ? "#c8b9a3" : "#2a201a", color: "#f4ead8", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, cursor: busy ? "wait" : "pointer" } }, busy ? "Saving…" : "Confirm · create " + totAdj + " count(s)")));
+    }
+    return /*#__PURE__*/React.createElement("div", null, guide, /*#__PURE__*/React.createElement("div", { onDragOver: function (e) { e.preventDefault(); setDrag(true); }, onDragLeave: function () { setDrag(false); }, onDrop: function (e) { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }, onClick: function () { if (fileRef.current) fileRef.current.click(); }, style: { border: "2px dashed " + (drag ? "#bd5d38" : "#e0d2bd"), borderRadius: 16, padding: "40px 20px", textAlign: "center", cursor: "pointer", background: drag ? "#bd5d3808" : "#f5ecdc" } }, /*#__PURE__*/React.createElement("input", { ref: fileRef, type: "file", accept: ".csv,.txt,.tsv", style: { display: "none" }, onChange: function (e) { handleFile(e.target.files[0]); } }), /*#__PURE__*/React.createElement("div", { style: { fontSize: 34 } }, "⬆️"), /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 15, color: "#2c211a", marginTop: 8 } }, "Choose Ledger file or drop here"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680", marginTop: 4 } }, "CSV or TXT · nothing changes until you confirm the preview")), error && /*#__PURE__*/React.createElement("div", { style: { background: "#f3dcd5", border: "1px solid #e3b7ad", borderRadius: 12, padding: "12px 15px", marginTop: 12, fontSize: 12.5, color: "#b23a2e", fontWeight: 600 } }, "❌ " + error));
   }
 
-  return /*#__PURE__*/React.createElement("div", null, hero, guide,
-    /*#__PURE__*/React.createElement("div", {
-      onDragOver: function (e) { e.preventDefault(); setDrag(true); },
-      onDragLeave: function () { setDrag(false); },
-      onDrop: function (e) { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); },
-      onClick: function () { if (fileRef.current) fileRef.current.click(); },
-      style: { border: "2px dashed " + (drag ? "#bd5d38" : "#e0d2bd"), borderRadius: 16, padding: "40px 20px", textAlign: "center", cursor: "pointer", background: drag ? "#bd5d3808" : "#f5ecdc" } },
-      /*#__PURE__*/React.createElement("input", { ref: fileRef, type: "file", accept: ".csv,.txt,.tsv", style: { display: "none" }, onChange: function (e) { handleFile(e.target.files[0]); } }),
-      /*#__PURE__*/React.createElement("div", { style: { fontSize: 34 } }, "⬆️"),
-      /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 15, color: "#2c211a", marginTop: 8 } }, "Choose Ledger file or drop here"),
-      /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680", marginTop: 4 } }, "CSV or TXT · nothing changes until you confirm the preview")),
-    error && /*#__PURE__*/React.createElement("div", { style: { background: "#f3dcd5", border: "1px solid #e3b7ad", borderRadius: 12, padding: "12px 15px", marginTop: 12, fontSize: 12.5, color: "#b23a2e", fontWeight: 600 } }, "❌ " + error));
+  function emptyLedger(msg) { return /*#__PURE__*/React.createElement("div", { style: { ...card, textAlign: "center", padding: 30, color: "#a89680", fontSize: 13 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 26, marginBottom: 8 } }, "🏬"), msg, /*#__PURE__*/React.createElement("button", { onClick: function () { setSub("upload"); }, style: { display: "block", margin: "14px auto 0", border: "none", background: "#2a201a", color: "#f4ead8", borderRadius: 11, padding: "9px 18px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" } }, "Go to Upload")); }
+
+  function fcTab() {
+    if (!ledger || !ledger.products || !ledger.products.length) return emptyLedger("Upload a ledger first to see fulfilment-centre stock.");
+    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680", margin: "0 2px 10px" } }, "Per FNSKU · from ledger " + (ledger.reportDate || "") + " (" + ledger.reportDays + "-day)"), ledger.products.slice().sort(function (a, b) { return b.total - a.total; }).map(function (p) {
+      var maxfc = p.perFC.length ? p.perFC[0].qty : 1;
+      return /*#__PURE__*/React.createElement("div", { key: p.productID, style: { ...card, padding: 14, marginBottom: 12, minWidth: 0, overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 } }, /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 13.5, fontWeight: 700, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (p.name || p.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#a89680" } }, "FNSKU " + (p.fnsku || "—") + " · " + p.perFC.length + " FCs")), /*#__PURE__*/React.createElement("div", { style: { textAlign: "right", flexShrink: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 600, lineHeight: 1 } }, p.total), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.08em" } }, "total"))), p.perFC.map(function (fc) {
+        return /*#__PURE__*/React.createElement("div", { key: fc.fc, style: { display: "flex", alignItems: "center", gap: 9, padding: "6px 0", borderTop: "1px solid #f0ebe2" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 11.5, fontWeight: 600, color: "#2c211a", width: 52, flexShrink: 0 } }, fc.fc), /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 5, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, fc.qty / maxfc * 100) + "%", background: "#a97b52" } })), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 13, fontWeight: 600, width: 40, textAlign: "right" } }, fc.qty), /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: fc.sold > 0 ? "#bd5d38" : "#c8b9a3", width: 52, textAlign: "right" } }, fc.sold > 0 ? "−" + fc.sold + " sold" : "—"));
+      }));
+    }));
+  }
+
+  function recoTab() {
+    if (!ledger || !ledger.products || !ledger.products.length) return emptyLedger("Upload a ledger first to get shipment recommendations.");
+    var days = ledger.reportDays || 1;
+    var rows = ledger.products.map(function (p) {
+      var vel = p.sold / days;
+      var cover = vel > 0 ? p.total / vel : Infinity;
+      var ship = vel > 0 ? Math.max(0, Math.round(vel * TARGET_DAYS) - p.total) : 0;
+      var status = vel <= 0 ? "idle" : cover < TRANSIT_DAYS ? "urgent" : cover < (TRANSIT_DAYS + 13) ? "soon" : "ok";
+      return { p: p, vel: vel, cover: cover, ship: ship, status: status };
+    }).sort(function (a, b) { return (a.cover) - (b.cover); });
+    var SC = { urgent: { c: "#b23a2e", bg: "#f3dcd5", t: "Ship now" }, soon: { c: "#c2872f", bg: "#f4e7c8", t: "Plan soon" }, ok: { c: "#5f7a4f", bg: "#e2e8d3", t: "Healthy" }, idle: { c: "#a89680", bg: "#eee6d9", t: "No sales" } };
+    return /*#__PURE__*/React.createElement("div", null,
+      /*#__PURE__*/React.createElement("div", { style: { background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 12, padding: "10px 13px", marginBottom: 12, fontSize: 11.5, color: "#6f6152", lineHeight: 1.6 } }, "Based on sales velocity over ", /*#__PURE__*/React.createElement("b", null, days + " day(s)"), " of ledger data. Rule: keep at least ", /*#__PURE__*/React.createElement("b", null, TRANSIT_DAYS + " days"), " cover (shipment transit) and top up to ", /*#__PURE__*/React.createElement("b", null, TARGET_DAYS + " days"), ". For sharper numbers, upload a wider date-range ledger."),
+      rows.map(function (r) {
+        var sc = SC[r.status];
+        return /*#__PURE__*/React.createElement("div", { key: r.p.productID, style: { ...card, padding: 13, marginBottom: 11 } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 } }, /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 13.5, fontWeight: 700, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (r.p.name || r.p.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#a89680", marginTop: 1 } }, "FNSKU " + (r.p.fnsku || "—"))), /*#__PURE__*/React.createElement("span", { style: { background: sc.bg, color: sc.c, fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 } }, sc.t)),
+          /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 11 } }, [{ v: r.p.total, t: "At FBA" }, { v: r.vel > 0 ? r.vel.toFixed(1) + "/d" : "0", t: "Sales rate" }, { v: r.cover === Infinity ? "∞" : Math.round(r.cover) + "d", t: "Days cover" }].map(function (m) { return /*#__PURE__*/React.createElement("div", { key: m.t, style: { background: "#f5ecdc", borderRadius: 10, padding: "8px 6px", textAlign: "center" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 17, fontWeight: 600, color: "#2c211a" } }, m.v), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 2 } }, m.t)); })),
+          r.ship > 0 ? /*#__PURE__*/React.createElement("div", { style: { marginTop: 11, background: "#2a201a", color: "#f4ead8", borderRadius: 11, padding: "10px 13px", display: "flex", justifyContent: "space-between", alignItems: "center" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, fontWeight: 600 } }, "📦 Ship from Warehouse → FBA"), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 700, color: "#f0a882" } }, r.ship + " units")) : /*#__PURE__*/React.createElement("div", { style: { marginTop: 11, fontSize: 11.5, color: "#5f7a4f", fontWeight: 600, textAlign: "center" } }, r.status === "idle" ? "No recent FBA sales — no shipment needed." : "✅ Well stocked — no shipment needed."));
+      }),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", margin: "4px 2px", lineHeight: 1.5 } }, "Note: Amazon assigns the exact fulfilment centres when you create the inbound shipment (Send to Amazon). Use the Locations – FC tab to see current spread."));
+  }
+
+  return /*#__PURE__*/React.createElement("div", null, hero, subnav, sub === "upload" ? uploadTab() : sub === "fc" ? fcTab() : recoTab());
 }
 
 function AmazonImportTab({
