@@ -4563,129 +4563,18 @@ function App() {
     )
   )),
   /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: "#faf6f0",
-      borderBottom: "1px solid #e0d2bd",
-      padding: "12px 18px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      flexWrap: "wrap",
-      gap: 10
-    }
+    style: { position: "sticky", top: 0, zIndex: 60, background: "rgba(239,228,210,0.92)", backdropFilter: "blur(10px)", borderBottom: "1px solid #e7d9c4", padding: "10px 16px", display: "flex", alignItems: "center", gap: 11 }
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 10
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: "#fff",
-      borderRadius: 10,
-      padding: "4px 10px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      boxShadow: "0 1px 6px rgba(0,0,0,0.08)"
-    }
-  }, /*#__PURE__*/React.createElement("img", {
-    src: SYOAT_LOGO,
-    alt: "Syoat",
-    style: {
-      height: 32,
-      width: "auto",
-      display: "block",
-      filter: "brightness(0) saturate(100%) invert(27%) sepia(30%) saturate(600%) hue-rotate(90deg) brightness(85%)"
-    }
-  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontWeight: 800,
-      fontSize: 14
-    }
-  }, "Inventory ERP"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: "#a89680",
-      fontSize: 11
-    }
-  }, "Aashya Cosmetics · Hyderabad")), /*#__PURE__*/React.createElement("span", {
-    style: {
-      background: "#5f7a4f20",
-      color: "#4ade80",
-      border: "1px solid #5f7a4f40",
-      borderRadius: 6,
-      padding: "2px 7px",
-      fontSize: 11,
-      fontWeight: 700
-    }
-  }, "● LIVE")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 8,
-      alignItems: "center",
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: ROLE_COLOR[user.role] + "15",
-      border: `1px solid ${ROLE_COLOR[user.role]}30`,
-      borderRadius: 8,
-      padding: "5px 12px",
-      display: "flex",
-      alignItems: "center",
-      gap: 8
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 14
-    }
-  }, {
-    Founder: "🌟",
-    "Co-Founder": "💎",
-    Owner: "👑",
-    Admin: "🛡️",
-    Manager: "📋",
-    Warehouse: "📦",
-    Auditor: "🔍"
-  }[user.role]), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: "#2c211a",
-      fontWeight: 700,
-      fontSize: 12
-    }
-  }, user.name.split(" ")[0]), /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: ROLE_COLOR[user.role],
-      fontSize: 10,
-      fontWeight: 600
-    }
-  }, user.role))), /*#__PURE__*/React.createElement("button", {
-    onClick: load,
-    style: ghost
-  }, syncing ? "⟳ Syncing…" : "⟳ Sync" + (lastSync ? " · " + tsAgo(lastSync) : "")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowList(true),
-    style: ghost
-  }, "📋 Movements"), user.canViewAll && /*#__PURE__*/React.createElement("button", {
-    onClick: exportFBAReconciliation,
-    style: ghost,
-    title: "Download system FBA + FBA-Transit stock per product as CSV, to compare against Amazon's report"
-  }, "⬇ FBA Report"), user.canCreate && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowMov(true),
-    style: btnS()
-  }, "+ Record Movement"), user.canCreate && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowAssemble(true),
-    style: {
-      ...btnS(),
-      background: "#6d5ae6"
-    }
-  }, "🧩 Assemble Combo"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setUser(null),
-    style: {
-      ...ghost,
-      color: "#ef4444",
-      borderColor: "#ef444430"
-    }
-  }, "Logout"))), /*#__PURE__*/React.createElement("div", {
+    style: { width: 44, height: 44, borderRadius: 13, background: "#fff", border: "1px solid #e7d9c4", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 2px 6px -3px rgba(0,0,0,0.2)" }
+  }, /*#__PURE__*/React.createElement("img", { src: SYOAT_LOGO, alt: "Syoat", style: { width: "100%", height: "100%", objectFit: "contain", padding: 4 } })), /*#__PURE__*/React.createElement("div", {
+    style: { flex: 1, minWidth: 0 }
+  }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 600, color: "#2c211a", lineHeight: 1.05 } }, "Inventory ERP"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#6f6152", display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" } }, "Aashya Cosmetics · Hyderabad", /*#__PURE__*/React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 4, background: "#e2e8d3", color: "#5f7a4f", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", padding: "2px 7px", borderRadius: 20, textTransform: "uppercase" } }, /*#__PURE__*/React.createElement("span", { style: { width: 5, height: 5, borderRadius: "50%", background: "#5f9e6a" } }), "Live"))), /*#__PURE__*/React.createElement("button", {
+    onClick: load, title: "Sync now",
+    style: { width: 38, height: 38, borderRadius: "50%", border: "1px solid #e7d9c4", background: "#fdf9f1", color: syncing ? "#bd5d38" : "#6f6152", fontSize: 16, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }
+  }, "⟳"), /*#__PURE__*/React.createElement("button", {
+    onClick: function(){ if (window.confirm("Log out of Syoat ERP?")) setUser(null); }, title: user.name + " · tap to log out",
+    style: { width: 40, height: 40, borderRadius: "50%", background: "#2a201a", color: "#f2e7d5", border: "none", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0, cursor: "pointer", position: "relative" }
+  }, (user.name || "?").split(" ").map(function(w){ return w[0] || ""; }).slice(0, 2).join("").toUpperCase(), /*#__PURE__*/React.createElement("span", { style: { position: "absolute", bottom: 1, right: 1, width: 9, height: 9, borderRadius: "50%", background: "#5f9e6a", border: "2px solid #efe4d2" } }))), /*#__PURE__*/React.createElement("div", {
     style: {
       maxWidth: 940,
       margin: "0 auto",
@@ -4788,7 +4677,15 @@ function App() {
       fontSize: 12,
       marginTop: 3
     }
-  }, "Warehouse")))), (tab === "product" || tab === "location" || tab === "counts") && /*#__PURE__*/React.createElement("div", {
+  }, "Warehouse")))), (tab === "product" || tab === "location" || tab === "counts") && user.canCreate && /*#__PURE__*/React.createElement("div", {
+    style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11, margin: "2px 0 12px", maxWidth: 400 }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: function(){ setShowMov(true); },
+    style: { background: "#2a201a", color: "#f4ead8", border: "none", borderRadius: 14, height: 48, fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", fontFamily: "inherit" }
+  }, /*#__PURE__*/React.createElement("span", { style: { width: 22, height: 22, borderRadius: "50%", background: "#bd5d38", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 } }, "+"), " Record Movement"), /*#__PURE__*/React.createElement("button", {
+    onClick: function(){ setShowAssemble(true); },
+    style: { background: "#2a201a", color: "#f4ead8", border: "none", borderRadius: 14, height: 48, fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", fontFamily: "inherit" }
+  }, /*#__PURE__*/React.createElement("span", { style: { width: 22, height: 22, borderRadius: "50%", background: "#bd5d38", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 } }, "🧩"), " Assemble Combo")), (tab === "product" || tab === "location" || tab === "counts") && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 6,
