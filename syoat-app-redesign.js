@@ -5217,7 +5217,60 @@ function App() {
       display: "grid",
       gap: 16
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 600, color: "#2c211a", margin: "2px 0 -6px" } }, "Analytics"), (function(){
+    var totalUnits = 0, cost = 0, mrp = 0, crit = 0, cats = {};
+    (products || []).forEach(function(p){
+      var sk = stockFor(p.ProductID);
+      var tot = sk.fba + sk.wh + sk.transit + (sk.returns || 0);
+      totalUnits += tot;
+      cost += tot * (parseFloat(p.UnitCost) || 0);
+      mrp += tot * (parseFloat(p.MRP) || 0);
+      var at = alertThresholds[p.ProductID] || parseInt(p.ReorderLevel) || ALERT_FALLBACK;
+      var st = statusOf(tot, at);
+      if (st === "critical" || st === "oos") crit++;
+      var c = p.Category || "Other";
+      cats[c] = (cats[c] || 0) + tot;
+    });
+    function inrShort(n){ if (n >= 100000) return "₹" + (n / 100000).toFixed(2) + "L"; if (n >= 1000) return "₹" + (n / 1000).toFixed(1) + "k"; return "₹" + Math.round(n); }
+    var kpis = [
+      { v: totalUnits.toLocaleString("en-IN"), t: "Total Units", dark: true },
+      { v: inrShort(cost), t: "Inventory Cost" },
+      { v: inrShort(mrp), t: "MRP Value" },
+      { v: crit, t: "Critical Products", crit: true }
+    ];
+    var catArr = Object.keys(cats).map(function(k){ return { k: k, v: cats[k] }; }).filter(function(x){ return x.v > 0; }).sort(function(a,b){ return b.v - a.v; });
+    var palette = ["#bd5d38","#c2872f","#5f7a4f","#a97b52","#7a8b9a","#8a6d3b"];
+    var totalCat = catArr.reduce(function(a,x){ return a + x.v; }, 0) || 1;
+    var acc = 0, segs = [];
+    catArr.forEach(function(x, idx){ var start = acc / totalCat * 100; acc += x.v; var end = acc / totalCat * 100; segs.push(palette[idx % palette.length] + " " + start.toFixed(2) + "% " + end.toFixed(2) + "%"); });
+    var conic = "conic-gradient(" + segs.join(",") + ")";
+    return /*#__PURE__*/React.createElement(React.Fragment, null,
+      /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } }, kpis.map(function(k){
+        return /*#__PURE__*/React.createElement("div", { key: k.t, style: { background: k.dark ? "linear-gradient(135deg,#2a201a,#4a3626)" : "#fdf9f1", border: k.dark ? "none" : "1px solid #e7d9c4", borderRadius: 16, padding: 14 } },
+          /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 600, color: k.crit ? "#b23a2e" : (k.dark ? "#f2e7d5" : "#2c211a"), lineHeight: 1 } }, k.v),
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: k.dark ? "#c9b49a" : "#6f6152", marginTop: 6, fontWeight: 500 } }, k.t)
+        );
+      })),
+      /*#__PURE__*/React.createElement("div", { style: card },
+        /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 15, fontWeight: 600, color: "#2c211a", marginBottom: 14 } }, "Stock by Category"),
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 16 } },
+          /*#__PURE__*/React.createElement("div", { style: { width: 120, height: 120, borderRadius: "50%", flexShrink: 0, background: conic, display: "flex", alignItems: "center", justifyContent: "center" } },
+            /*#__PURE__*/React.createElement("div", { style: { width: 74, height: 74, borderRadius: "50%", background: "#fdf9f1", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" } },
+              /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 600, color: "#2c211a", lineHeight: 1 } }, totalUnits.toLocaleString("en-IN")),
+              /*#__PURE__*/React.createElement("div", { style: { fontSize: 8, letterSpacing: "0.1em", textTransform: "uppercase", color: "#a89680" } }, "units")
+            )
+          ),
+          /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } }, catArr.slice(0, 6).map(function(x, idx){
+            return /*#__PURE__*/React.createElement("div", { key: x.k, style: { display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, marginBottom: 8 } },
+              /*#__PURE__*/React.createElement("span", { style: { width: 10, height: 10, borderRadius: 3, background: palette[idx % palette.length], flexShrink: 0 } }),
+              /*#__PURE__*/React.createElement("span", { style: { flex: 1, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, x.k),
+              /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontWeight: 600, color: "#6f6152" } }, x.v.toLocaleString("en-IN"))
+            );
+          }))
+        )
+      )
+    );
+  })(), /*#__PURE__*/React.createElement("div", {
     style: card
   }, /*#__PURE__*/React.createElement("div", {
     style: {
