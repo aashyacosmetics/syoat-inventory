@@ -2657,7 +2657,7 @@ function FbaReconcileTab(props) {
         if (!items.length) { notify("✅ FBA already matches the ledger — nothing to adjust."); resetUp(); if (props.onCountCreated) props.onCountCreated(); return; }
         var fp = payloadRef.current || {};
         var res = await apiWritePost("createFbaReconciliation", user.email, { items: items, fileText: fp.text, fileName: fp.name, fileMime: fp.mime, reportDate: reportDate });
-        notify("✅ " + (res.createdCount || items.length) + " FBA count(s) created — approve them in Stock Count." + (res.driveUrl ? " File archived to Drive." : ""));
+        notify("✅ " + (res.appliedCount != null ? res.appliedCount : items.length) + " product(s) synced to Amazon FBA — stock updated." + (res.driveUrl ? " Ledger archived to Drive." : ""));
         resetUp(); if (props.onCountCreated) props.onCountCreated();
       } catch (e) { notify("❌ " + e.message); }
       setBusy(false);
