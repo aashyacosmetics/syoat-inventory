@@ -35,22 +35,22 @@ class ErrorBoundary extends React.Component {
       return React.createElement("div", {
         style: {
           display: "flex", flexDirection: "column", alignItems: "center",
-          justifyContent: "center", minHeight: "100vh", background: "#f3eee7",
+          justifyContent: "center", minHeight: "100vh", background: "#efe4d2",
           fontFamily: "Plus Jakarta Sans, system-ui", padding: "24px", gap: "16px"
         }
       },
         React.createElement("img", { src: SYOAT_LOGO, alt: "Syoat", style: { width: 80, opacity: 0.6 } }),
-        React.createElement("h2", { style: { color: "#2d4a2f", margin: 0 } }, "Something went wrong"),
-        React.createElement("p", { style: { color: "#6b7f6c", textAlign: "center", maxWidth: 360, margin: 0 } },
+        React.createElement("h2", { style: { color: "#2c211a", margin: 0 } }, "Something went wrong"),
+        React.createElement("p", { style: { color: "#6f6152", textAlign: "center", maxWidth: 360, margin: 0 } },
           "The app hit an unexpected error. Refresh the page to restart. If the problem persists, contact Lalith."
         ),
-        React.createElement("p", { style: { color: "#c4733a", fontSize: 12, maxWidth: 480, wordBreak: "break-all" } },
+        React.createElement("p", { style: { color: "#bd5d38", fontSize: 12, maxWidth: 480, wordBreak: "break-all" } },
           this.state.error ? this.state.error.message : "Unknown error"
         ),
         React.createElement("button", {
           onClick: () => window.location.reload(),
           style: {
-            background: "#5a8a5e", color: "#fff", border: "none",
+            background: "#bd5d38", color: "#fff", border: "none",
             borderRadius: 8, padding: "10px 24px", cursor: "pointer", fontWeight: 600
           }
         }, "Refresh App")
@@ -61,7 +61,6 @@ class ErrorBoundary extends React.Component {
 }
 
 const API = "https://script.google.com/macros/s/AKfycbwqBI7uPnv63VYms4PHaJceFhNzEf8Y6f-6ni-2LT2G_1pWmL7WpdwK4uu6HeAuW67agg/exec";
-let AUTH_TOKEN = sessionStorage.getItem("syoat_session_token") || "";
 
 // ─────────────────────────────────────────────────────────────
 //  STAFF — with PINs and role-based permissions
@@ -113,14 +112,6 @@ async function fetchWithRetry(url, options, retries) {
       return d.data;
     } catch (e) {
       lastErr = e;
-      const message = String(e && e.message || "");
-      if (message.includes("Incorrect PIN") || message.includes("Too many incorrect attempts")) throw e;
-      if (message.includes("Session required") || message.includes("Session expired") || message.includes("Account is not active")) {
-        AUTH_TOKEN = "";
-        sessionStorage.removeItem("syoat_session_token");
-        setTimeout(() => window.location.reload(), 50);
-        throw e;
-      }
       if (attempt < retries) {
         await new Promise(function(r) { setTimeout(r, attempt * 1200); });
       }
@@ -132,21 +123,34 @@ async function fetchWithRetry(url, options, retries) {
 // READ — GET (safe, cacheable)
 async function api(action, params) {
   params = params || {};
-  var auth = AUTH_TOKEN ? { sessionToken: AUTH_TOKEN } : {};
-  var qs = new URLSearchParams(Object.assign({}, params, { action: action }, auth)).toString();
+  var qs = new URLSearchParams(Object.assign({ action: action }, params)).toString();
   return fetchWithRetry(API + "?" + qs);
 }
 
 // WRITE — GET with payload + requestId
 // requestId lets Apps Script detect and skip duplicate submissions
 async function apiWrite(action, email, payload) {
-  return apiWritePost(action, email, payload);
+  var enriched = Object.assign({}, payload, { requestId: genRequestId() });
+  var serialised = JSON.stringify(enriched);
+  var qs = new URLSearchParams({
+    action: action,
+    email: email,
+    payload: encodeURIComponent(serialised)
+  }).toString();
+
+  // Guard: URL length limit (~7500 chars safe across all browsers/proxies)
+  if (qs.length > 7000) {
+    throw new Error(
+      "Payload too large (" + qs.length + " chars). Please reduce the number of product lines or split into two submissions."
+    );
+  }
+  return fetchWithRetry(API + "?" + qs);
 }
 
 // WRITE via POST — no URL-length ceiling. Used when the payload carries photo
 // attachments (base64 thumbnails can easily exceed the ~7000-char GET budget).
 async function apiWritePost(action, email, payload) {
-  var enriched = Object.assign({}, payload, { action: action, email: email, sessionToken: AUTH_TOKEN, requestId: genRequestId() });
+  var enriched = Object.assign({}, payload, { action: action, email: email, requestId: genRequestId() });
   return fetchWithRetry(API, {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
@@ -264,11 +268,11 @@ const VIRTUAL_LOCATIONS = ["SUPPLIER", "CUSTOMER"];
 const ROLE_COLOR = {
   Founder: "#8b1a1a",
   "Co-Founder": "#1a3a6b",
-  Owner: "#c4733a",
-  Admin: "#2d4a2f",
-  Manager: "#3a8a8a",
-  Warehouse: "#5a8a5e",
-  Auditor: "#8a9e8b"
+  Owner: "#bd5d38",
+  Admin: "#2c211a",
+  Manager: "#a97b52",
+  Warehouse: "#bd5d38",
+  Auditor: "#a89680"
 };
 function statusOf(qty, at) {
   if (qty <= 0) return "oos";
@@ -277,10 +281,10 @@ function statusOf(qty, at) {
   return "ok";
 }
 const SC = {
-  ok: "#16a34a",
-  low: "#d97706",
-  critical: "#dc2626",
-  oos: "#7c3aed"
+  ok: "#5f7a4f",
+  low: "#c2872f",
+  critical: "#b23a2e",
+  oos: "#8a6d3b"
 };
 const SL = {
   ok: "✅ OK",
@@ -290,7 +294,7 @@ const SL = {
 };
 const SC2 = {
   Draft: "#f59e0b",
-  Approved: "#16a34a",
+  Approved: "#5f7a4f",
   Reversed: "#64748b"
 };
 function tsAgo(d) {
@@ -305,26 +309,26 @@ function tsAgo(d) {
 //  Shared styles
 // ─────────────────────────────────────────────────────────────
 const card = {
-  background: "#ffffff",
-  border: "1px solid #e8dfd4",
+  background: "#fdf9f1",
+  border: "1px solid #e7d9c4",
   borderRadius: 14,
   padding: "16px 18px",
-  boxShadow: "0 2px 8px rgba(45,74,47,0.06)"
+  boxShadow: "0 2px 8px rgba(60,40,20,0.06)"
 };
 const inp = {
   width: "100%",
-  background: "#f3eee7",
-  border: "1px solid #ddd5c8",
+  background: "#efe4d2",
+  border: "1px solid #e0d2bd",
   borderRadius: 8,
   padding: "9px 12px",
-  color: "#2d4a2f",
+  color: "#2c211a",
   fontSize: 13,
   outline: "none",
   boxSizing: "border-box"
 };
 const lbl = {
   display: "block",
-  color: "#8a9e8b",
+  color: "#a89680",
   fontSize: 11,
   fontWeight: 700,
   marginBottom: 4,
@@ -343,9 +347,9 @@ const btnS = (c = "#6366f1") => ({
 });
 const ghost = {
   background: "transparent",
-  border: "1px solid #ddd5c8",
+  border: "1px solid #e0d2bd",
   borderRadius: 8,
-  color: "#6b7f6c",
+  color: "#6f6152",
   padding: "7px 13px",
   cursor: "pointer",
   fontSize: 13,
@@ -381,7 +385,6 @@ function LoginScreen({
   const [pin, setPin] = React.useState("");
   const [error, setError] = React.useState("");
   const [shake, setShake] = React.useState(false);
-  const [checkingPin, setCheckingPin] = React.useState(false);
   const [dropVal, setDropVal] = React.useState("");
   const ROLE_ICON = {
     Founder: "🌟",
@@ -413,22 +416,21 @@ function LoginScreen({
       setTimeout(() => checkPin(newPin), 150);
     }
   }
-  async function checkPin(enteredPin) {
-    if (checkingPin) return;
-    setCheckingPin(true);
-    try {
-      const verified = await apiWritePost("verifyPin", selected.email, { pin: enteredPin });
-      if (!verified || !verified.sessionToken) throw new Error("Login service returned no session. Please try again.");
-      AUTH_TOKEN = verified.sessionToken || "";
-      sessionStorage.setItem("syoat_session_token", AUTH_TOKEN);
-      onLogin({ ...selected, ...verified });
-    } catch (e) {
+  function checkPin(enteredPin) {
+    if (!selected.pin) {
       setShake(true);
-      setError(String(e && e.message || "").includes("Incorrect PIN") ? "Wrong PIN. Try again." : (e.message || "Could not connect. Please try again."));
+      setError("Logins didn't load (offline). Reload the page, then try again.");
       setPin("");
       setTimeout(() => setShake(false), 500);
-    } finally {
-      setCheckingPin(false);
+      return;
+    }
+    if (String(enteredPin) === String(selected.pin)) {
+      onLogin(selected);
+    } else {
+      setShake(true);
+      setError("Wrong PIN. Try again.");
+      setPin("");
+      setTimeout(() => setShake(false), 500);
     }
   }
   function clearPin() {
@@ -444,7 +446,7 @@ function LoginScreen({
         alignItems: "center",
         justifyContent: "center",
         padding: 24,
-        background: "#f3eee7"
+        background: "#efe4d2"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -478,18 +480,18 @@ function LoginScreen({
         fontWeight: 900,
         fontSize: 22,
         letterSpacing: -0.5,
-        color: "#2d4a2f"
+        color: "#2c211a"
       }
     }, "Inventory ERP"), /*#__PURE__*/React.createElement("div", {
       style: {
-        color: "#8a9e8b",
+        color: "#a89680",
         fontSize: 13,
         marginTop: 6
       }
     }, "Aashya Cosmetics · Hyderabad")), /*#__PURE__*/React.createElement("div", {
       style: {
-        background: "#ffffff",
-        border: "1px solid #ddd5c8",
+        background: "#fdf9f1",
+        border: "1px solid #e0d2bd",
         borderRadius: 16,
         padding: 28,
         width: "100%",
@@ -497,7 +499,7 @@ function LoginScreen({
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        color: "#6b7f6c",
+        color: "#6f6152",
         fontSize: 12,
         fontWeight: 700,
         textTransform: "uppercase",
@@ -524,11 +526,11 @@ function LoginScreen({
       onChange: handleDropChange,
       style: {
         width: "100%",
-        background: "#f3eee7",
-        border: "1px solid #ddd5c8",
+        background: "#efe4d2",
+        border: "1px solid #e0d2bd",
         borderRadius: 10,
         padding: "12px 44px 12px 14px",
-        color: dropVal ? "#2d4a2f" : "#475569",
+        color: dropVal ? "#2c211a" : "#475569",
         fontSize: 14,
         fontWeight: 600,
         outline: "none",
@@ -548,14 +550,14 @@ function LoginScreen({
         right: 14,
         top: "50%",
         transform: "translateY(-50%)",
-        color: "#9aaa9b",
+        color: "#a89680",
         pointerEvents: "none",
         fontSize: 12
       }
     }, "▼")), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11,
-        color: staffSource === "sheet" ? "#6b9e6b" : "#c4733a",
+        color: staffSource === "sheet" ? "#6b9e6b" : "#bd5d38",
         marginTop: 6,
         marginBottom: 2,
         textAlign: "right"
@@ -566,7 +568,7 @@ function LoginScreen({
     ), /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 16,
-        color: "#c8bfb0",
+        color: "#c8b9a3",
         fontSize: 12,
         textAlign: "center"
       }
@@ -583,7 +585,7 @@ function LoginScreen({
       alignItems: "center",
       justifyContent: "center",
       padding: 24,
-      background: "#f3eee7"
+      background: "#efe4d2"
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setSelected(null),
@@ -628,7 +630,7 @@ function LoginScreen({
     }
   }, "Hi, ", selected.name.split(" ")[0], "!"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 13,
       marginTop: 4
     }
@@ -645,7 +647,7 @@ function LoginScreen({
       width: 16,
       height: 16,
       borderRadius: "50%",
-      background: i < pin.length ? "#6366f1" : "#ddd5c8",
+      background: i < pin.length ? "#6366f1" : "#e0d2bd",
       border: "2px solid " + (i < pin.length ? "#6366f1" : "#475569"),
       transition: "background 0.1s"
     }
@@ -676,9 +678,9 @@ function LoginScreen({
         borderRadius: 12,
         fontSize: isDel ? 22 : 20,
         fontWeight: 700,
-        background: isDel ? "#e8e0d4" : "#ffffff",
-        border: "1px solid #ddd5c8",
-        color: isDel ? "#9aaa9b" : "#2d4a2f",
+        background: isDel ? "#e8e0d4" : "#fdf9f1",
+        border: "1px solid #e0d2bd",
+        color: isDel ? "#a89680" : "#2c211a",
         cursor: "pointer",
         transition: "background 0.1s"
       },
@@ -727,15 +729,15 @@ function PendingBanner({
   if (!user.canApprove) {
     return /*#__PURE__*/React.createElement("div", {
       style: {
-        background: "#c4733a10",
-        border: "1px solid #c4733a40",
+        background: "#bd5d3810",
+        border: "1px solid #bd5d3840",
         borderRadius: 12,
         padding: "12px 16px",
         margin: "14px 0"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        color: "#c4733a",
+        color: "#bd5d38",
         fontWeight: 700,
         fontSize: 13
       }
@@ -778,8 +780,8 @@ function PendingBanner({
   }, "×")) : null;
   return /*#__PURE__*/React.createElement(React.Fragment, null, lightbox, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#c4733a10",
-      border: "1px solid #c4733a40",
+      background: "#bd5d3810",
+      border: "1px solid #bd5d3840",
       borderRadius: 12,
       padding: "14px 18px",
       margin: "14px 0"
@@ -795,7 +797,7 @@ function PendingBanner({
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#c4733a",
+      color: "#bd5d38",
       fontWeight: 800,
       fontSize: 13
     }
@@ -824,14 +826,14 @@ function PendingBanner({
     const thumbs = atts.map((img, i) => /*#__PURE__*/React.createElement("div", {
       key: i,
       onClick: () => setViewImg(img),
-      style: { cursor: "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #5a8a5e", width: 90, height: 90, flexShrink: 0 }
+      style: { cursor: "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #bd5d38", width: 90, height: 90, flexShrink: 0 }
     }, /*#__PURE__*/React.createElement("img", {
       src: img, style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
     }), /*#__PURE__*/React.createElement("div", {
-      style: { position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(45,74,47,0.78)", fontSize: 9, color: "#fff", textAlign: "center", padding: "2px 0", fontWeight: 700 }
+      style: { position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(60,40,20,0.78)", fontSize: 9, color: "#fff", textAlign: "center", padding: "2px 0", fontWeight: 700 }
     }, "👁 Tap to view")));
     const pdfBadge = m.Notes && m.Notes.includes("attachment(s)") && atts.length === 0 ? /*#__PURE__*/React.createElement("div", {
-      style: { background: "#c4733a12", border: "1px solid #c4733a40", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#c4733a", fontWeight: 600 }
+      style: { background: "#bd5d3812", border: "1px solid #bd5d3840", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#bd5d38", fontWeight: 600 }
     }, "📄 PDF invoice attached — filename in notes") : null;
     const rejectBox = rejectTarget === m.MovementID ? /*#__PURE__*/React.createElement("div", {
       style: { marginTop: 8, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }
@@ -839,7 +841,7 @@ function PendingBanner({
       value: rejectReason,
       onChange: e => setRejectReason(e.target.value),
       placeholder: "Reason for rejecting (optional)",
-      style: { flex: 1, minWidth: 160, borderRadius: 7, border: "1px solid #ddd5c8", padding: "6px 10px", fontSize: 12, fontFamily: "inherit" }
+      style: { flex: 1, minWidth: 160, borderRadius: 7, border: "1px solid #e0d2bd", padding: "6px 10px", fontSize: 12, fontFamily: "inherit" }
     }), /*#__PURE__*/React.createElement("button", {
       onClick: confirmReject,
       disabled: rejectBusy === m.MovementID,
@@ -851,7 +853,7 @@ function PendingBanner({
     return /*#__PURE__*/React.createElement("div", {
       key: m.MovementID,
       style: {
-        background: "#f3eee7",
+        background: "#efe4d2",
         borderRadius: 10,
         padding: "10px 14px",
         display: "flex",
@@ -870,15 +872,15 @@ function PendingBanner({
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        color: "#2d4a2f",
+        color: "#2c211a",
         fontWeight: 700,
         fontSize: 13
       }
     }, m.MovementID), /*#__PURE__*/React.createElement("span", {
       style: {
-        background: "#c4733a18",
-        color: "#c4733a",
-        border: "1px solid #c4733a40",
+        background: "#bd5d3818",
+        color: "#bd5d38",
+        border: "1px solid #bd5d3840",
         borderRadius: 5,
         padding: "1px 6px",
         fontSize: 11,
@@ -886,12 +888,12 @@ function PendingBanner({
       }
     }, "Draft"), /*#__PURE__*/React.createElement("span", {
       style: {
-        color: "#8a9e8b",
+        color: "#a89680",
         fontSize: 12
       }
     }, TYPE_LABEL[m.MovementType] || m.MovementType)), /*#__PURE__*/React.createElement("div", {
       style: {
-        color: "#9aaa9b",
+        color: "#a89680",
         fontSize: 12
       }
     }, LOC_LABEL[m.SourceLocationID] || m.SourceLocationID, " → ", LOC_LABEL[m.DestinationLocationID] || m.DestinationLocationID, m.Notes ? " · " + m.Notes : "", " · by " + (m.EnteredByEmail || "").split("@")[0]), m.lines && m.lines.length > 0 && /*#__PURE__*/React.createElement("div", {
@@ -904,17 +906,17 @@ function PendingBanner({
     }, m.lines.map(l => /*#__PURE__*/React.createElement("span", {
       key: l.MovementLineID,
       style: {
-        background: "#ffffff",
+        background: "#fdf9f1",
         borderRadius: 5,
         padding: "2px 8px",
         fontSize: 11,
-        color: "#6b7f6c"
+        color: "#6f6152"
       }
     }, (products && products.find(p => p.ProductID === l.ProductID) ? products.find(p => p.ProductID === l.ProductID).ProductName : l.ProductID), " × ", l.Quantity))), rejectBox), /*#__PURE__*/React.createElement("div", {
       style: { marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }
     }, thumbs, pdfBadge, /*#__PURE__*/React.createElement("button", {
       onClick: () => onEdit(m),
-      style: { background: "none", border: "1px solid #3a8a8a", color: "#3a8a8a", borderRadius: 7, padding: "6px 13px", fontSize: 12, cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }
+      style: { background: "none", border: "1px solid #a97b52", color: "#a97b52", borderRadius: 7, padding: "6px 13px", fontSize: 12, cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }
     }, "✏️ Edit"), /*#__PURE__*/React.createElement("button", {
       onClick: () => { setRejectTarget(m.MovementID); setRejectReason(""); },
       style: { background: "none", border: "1px solid #ef4444", color: "#ef4444", borderRadius: 7, padding: "6px 13px", fontSize: 12, cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }
@@ -922,7 +924,7 @@ function PendingBanner({
       onClick: () => approveOne(m.MovementID),
       disabled: busy === m.MovementID,
       style: {
-        ...btnS("#16a34a"),
+        ...btnS("#5f7a4f"),
         padding: "7px 16px",
         fontSize: 12,
         opacity: busy === m.MovementID ? 0.6 : 1,
@@ -1039,10 +1041,7 @@ function MovEditModal({
         notes: finalNotes,
         lines: lines.map(l => ({ productID: l.pid, quantity: Number(l.qty), unitCost: Number(l.cost) || "" }))
       };
-      if (uploads.length) {
-        payload.attachmentImages = uploads;
-        payload.attachmentNames = imgFiles.map(f => f.name);
-      }
+      if (uploads.length) payload.attachmentImages = uploads;
       // Photo attachments can exceed the GET URL-length budget — use POST when present.
       const res = uploads.length
         ? await apiWritePost("editMovement", user.email, payload)
@@ -1056,18 +1055,18 @@ function MovEditModal({
   }
 
   return /*#__PURE__*/React.createElement("div", {
-    style: { position: "fixed", inset: 0, background: "rgba(45,74,47,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 16 }
+    style: { position: "fixed", inset: 0, background: "rgba(60,40,20,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: 16 }
   }, /*#__PURE__*/React.createElement("div", {
-    style: { background: "#fefcf9", borderRadius: 16, padding: 22, width: 500, maxWidth: "100%", border: "1px solid #ddd5c8", maxHeight: "90vh", overflowY: "auto" }
+    style: { background: "#fefcf9", borderRadius: 16, padding: 22, width: 500, maxWidth: "100%", border: "1px solid #e0d2bd", maxHeight: "90vh", overflowY: "auto" }
   },
     /*#__PURE__*/React.createElement("div", {
       style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }
     },
-      /*#__PURE__*/React.createElement("div", { style: { color: "#2d4a2f", fontWeight: 800, fontSize: 15 } }, "✏️ Edit ", movement.MovementID),
-      /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: "#8a9e8b", fontSize: 22, cursor: "pointer" } }, "×")
+      /*#__PURE__*/React.createElement("div", { style: { color: "#2c211a", fontWeight: 800, fontSize: 15 } }, "✏️ Edit ", movement.MovementID),
+      /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: "#a89680", fontSize: 22, cursor: "pointer" } }, "×")
     ),
     /*#__PURE__*/React.createElement("div", {
-      style: { background: "#f3eee7", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#4a7a4e", fontWeight: 600, marginBottom: 12 }
+      style: { background: "#efe4d2", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#4a7a4e", fontWeight: 600, marginBottom: 12 }
     }, TYPE_LABEL[movement.MovementType] || movement.MovementType, " · ", LOC_LABEL[movement.SourceLocationID] || movement.SourceLocationID, " → ", LOC_LABEL[movement.DestinationLocationID] || movement.DestinationLocationID),
     err && /*#__PURE__*/React.createElement("div", { style: { color: "#ef4444", fontSize: 12, marginBottom: 10 } }, err),
     /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 10 } },
@@ -1105,7 +1104,7 @@ function MovEditModal({
         /*#__PURE__*/React.createElement("textarea", { value: notes, onChange: e => setNotes(e.target.value), rows: 2, style: { ...inp, fontFamily: "inherit", resize: "vertical" } })
       ),
       existingAtts.length > 0 && images.length === 0 && /*#__PURE__*/React.createElement("div", {
-        style: { fontSize: 11, color: "#8a9e8b" }
+        style: { fontSize: 11, color: "#a89680" }
       }, "This draft already has ", existingAtts.length, " photo(s) attached. Adding a new photo below will replace them."),
       /*#__PURE__*/React.createElement("div", null,
         /*#__PURE__*/React.createElement("label", { style: lbl }, "Replace photo (optional)"),
@@ -1119,7 +1118,7 @@ function MovEditModal({
           style: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }
         }, images.map((img, i) => /*#__PURE__*/React.createElement("div", {
           key: i,
-          style: { position: "relative", width: 56, height: 56, borderRadius: 6, overflow: "hidden", border: "1px solid #ddd5c8" }
+          style: { position: "relative", width: 56, height: 56, borderRadius: 6, overflow: "hidden", border: "1px solid #e0d2bd" }
         },
           /*#__PURE__*/React.createElement("img", { src: img.dataUrl, style: { width: "100%", height: "100%", objectFit: "cover" } }),
           /*#__PURE__*/React.createElement("div", {
@@ -1136,7 +1135,7 @@ function MovEditModal({
       /*#__PURE__*/React.createElement("button", {
         onClick: submit,
         disabled: busy || compressing > 0,
-        style: { ...btnS("#3a8a8a"), flex: 2, opacity: (busy || compressing > 0) ? 0.6 : 1 }
+        style: { ...btnS("#a97b52"), flex: 2, opacity: (busy || compressing > 0) ? 0.6 : 1 }
       }, busy ? "Saving…" : compressing > 0 ? "Processing image…" : "Save Changes")
     )
   ));
@@ -1289,7 +1288,6 @@ function MovModal({
         carrierTrackingNumber: carrier,
         notes: finalNotes,
         attachmentImages: uploads,
-        attachmentNames: imgFiles.map(f => f.name),
         lines: lines.map(l => ({
           productID: l.pid,
           quantity: Number(l.qty),
@@ -1311,7 +1309,7 @@ function MovModal({
     style: {
       position: "fixed",
       inset: 0,
-      background: "rgba(45,74,47,0.55)",
+      background: "rgba(60,40,20,0.55)",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -1325,7 +1323,7 @@ function MovModal({
       padding: 22,
       width: 500,
       maxWidth: "100%",
-      border: "1px solid #ddd5c8",
+      border: "1px solid #e0d2bd",
       maxHeight: "90vh",
       overflowY: "auto"
     }
@@ -1338,7 +1336,7 @@ function MovModal({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#2d4a2f",
+      color: "#2c211a",
       fontWeight: 800,
       fontSize: 15
     }
@@ -1347,7 +1345,7 @@ function MovModal({
     style: {
       background: "none",
       border: "none",
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 22,
       cursor: "pointer"
     }
@@ -1365,8 +1363,8 @@ function MovModal({
     onClick: () => { setCategory(g.key); setType(g.types[0]); },
     style: {
       padding: "6px 10px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer",
-      border: "1px solid " + (category === g.key ? "#3a8a8a" : "#d8dcc8"),
-      background: category === g.key ? "#3a8a8a" : "#fff",
+      border: "1px solid " + (category === g.key ? "#a97b52" : "#d8dcc8"),
+      background: category === g.key ? "#a97b52" : "#fff",
       color: category === g.key ? "#fff" : "#5a6b5b"
     }
   }, g.label))), /*#__PURE__*/React.createElement("div", {
@@ -1376,13 +1374,13 @@ function MovModal({
     onClick: () => setType(t),
     style: {
       textAlign: "left", padding: "10px 12px", borderRadius: 9, fontSize: 13, cursor: "pointer",
-      border: "1px solid " + (type === t ? "#3a8a8a" : "#d8dcc8"),
+      border: "1px solid " + (type === t ? "#a97b52" : "#d8dcc8"),
       background: type === t ? "#eaf5f5" : "#fff",
-      color: "#2d4a2f", fontWeight: type === t ? 700 : 500
+      color: "#2c211a", fontWeight: type === t ? 700 : 500
     }
   }, TYPE_LABEL[t] || t)))), type && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#f3eee7",
+      background: "#efe4d2",
       borderRadius: 8,
       padding: "8px 12px",
       fontSize: 12,
@@ -1397,7 +1395,7 @@ function MovModal({
     }
   }, LOC_LABEL[sd.src] || sd.src), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "#9aaa9b"
+      color: "#a89680"
     }
   }, "→"), /*#__PURE__*/React.createElement("span", {
     style: {
@@ -1412,13 +1410,13 @@ function MovModal({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#f3eee7",
+      background: "#efe4d2",
       borderRadius: 8,
       padding: "8px 12px"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 11,
       fontWeight: 700,
       textTransform: "uppercase",
@@ -1427,7 +1425,7 @@ function MovModal({
     }
   }, "Entered By"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#2d4a2f",
+      color: "#2c211a",
       fontWeight: 700,
       fontSize: 13
     }
@@ -1468,8 +1466,8 @@ function MovModal({
     }
   }, "+ Add Line")), lines.map((line, i) => {
     const avail = stock ? stock.filter(s => s.ProductID === line.pid && STOCK_LOCATIONS.includes(s.LocationID)).reduce((a, s) => a + Number(s.Quantity), 0) : null;
-    const availColor = avail === 0 ? "#c4534a" : avail !== null && avail < 50 ? "#c4733a" : "#5a8a5e";
-    const availBg = avail === 0 ? "#c4534a12" : avail !== null && avail < 50 ? "#c4733a12" : "#5a8a5e12";
+    const availColor = avail === 0 ? "#b23a2e" : avail !== null && avail < 50 ? "#bd5d38" : "#bd5d38";
+    const availBg = avail === 0 ? "#b23a2e12" : avail !== null && avail < 50 ? "#bd5d3812" : "#bd5d3812";
     return /*#__PURE__*/React.createElement("div", {
       key: i,
       style: {
@@ -1477,7 +1475,7 @@ function MovModal({
         borderRadius: 12,
         padding: 12,
         marginBottom: 10,
-        border: "1px solid #e8dfd4"
+        border: "1px solid #e7d9c4"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -1494,7 +1492,7 @@ function MovModal({
       style: {
         fontSize: 10,
         fontWeight: 700,
-        color: "#9aaa9b",
+        color: "#a89680",
         textTransform: "uppercase",
         letterSpacing: 0.5,
         marginBottom: 4
@@ -1514,7 +1512,7 @@ function MovModal({
         fontSize: 13,
         padding: "9px 12px",
         fontWeight: 600,
-        background: "#ffffff"
+        background: "#fdf9f1"
       }
     }, products.map(p => /*#__PURE__*/React.createElement("option", {
       key: p.ProductID,
@@ -1525,11 +1523,11 @@ function MovModal({
       style: {
         marginTop: 20,
         background: "#fff",
-        border: "1px solid #e8dfd4",
+        border: "1px solid #e7d9c4",
         borderRadius: 8,
         width: 36,
         height: 36,
-        color: "#c4534a",
+        color: "#b23a2e",
         cursor: "pointer",
         fontSize: 16,
         flexShrink: 0,
@@ -1548,7 +1546,7 @@ function MovModal({
       style: {
         fontSize: 10,
         fontWeight: 700,
-        color: "#9aaa9b",
+        color: "#a89680",
         textTransform: "uppercase",
         letterSpacing: 0.5,
         marginBottom: 4
@@ -1577,14 +1575,14 @@ function MovModal({
     }, avail !== null ? avail : "—"), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 9,
-        color: "#9aaa9b",
+        color: "#a89680",
         marginTop: 2
       }
     }, "units"))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 10,
         fontWeight: 700,
-        color: "#9aaa9b",
+        color: "#a89680",
         textTransform: "uppercase",
         letterSpacing: 0.5,
         marginBottom: 4
@@ -1600,7 +1598,7 @@ function MovModal({
         fontWeight: 900,
         fontSize: 20,
         padding: "7px 4px",
-        background: "#ffffff",
+        background: "#fdf9f1",
         height: 40
       },
       placeholder: "0"
@@ -1608,7 +1606,7 @@ function MovModal({
       style: {
         fontSize: 10,
         fontWeight: 700,
-        color: "#9aaa9b",
+        color: "#a89680",
         textTransform: "uppercase",
         letterSpacing: 0.5,
         marginBottom: 4
@@ -1624,30 +1622,30 @@ function MovModal({
         fontSize: 14,
         fontWeight: 700,
         padding: "7px 4px",
-        background: "#ffffff",
+        background: "#fdf9f1",
         height: 40
       },
       placeholder: "0"
     }))), avail !== null && avail > 0 && Number(line.qty) > avail && /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 8,
-        background: "#c4733a12",
-        border: "1px solid #c4733a30",
+        background: "#bd5d3812",
+        border: "1px solid #bd5d3830",
         borderRadius: 6,
         padding: "5px 10px",
         fontSize: 11,
-        color: "#c4733a",
+        color: "#bd5d38",
         fontWeight: 600
       }
     }, "⚠️ Qty ", line.qty, " exceeds available stock (", avail, " units)"), avail === 0 && Number(line.qty) > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 8,
-        background: "#c4534a12",
-        border: "1px solid #c4534a30",
+        background: "#b23a2e12",
+        border: "1px solid #b23a2e30",
         borderRadius: 6,
         padding: "5px 10px",
         fontSize: 11,
-        color: "#c4534a",
+        color: "#b23a2e",
         fontWeight: 600
       }
     }, "🚫 No stock available at this location"));
@@ -1689,19 +1687,19 @@ function MovModal({
     icon: "📷",
     label: "Camera",
     ref: cameraInputRef,
-    color: "#5a8a5e",
+    color: "#bd5d38",
     sub: "Take photo"
   }, {
     icon: "🖼️",
     label: "Gallery",
     ref: fileInputRef,
-    color: "#3a8a8a",
+    color: "#a97b52",
     sub: "From phone/PC"
   }, {
     icon: "📄",
     label: "Document",
     ref: fileInputRef,
-    color: "#c4733a",
+    color: "#bd5d38",
     sub: "Invoice / PDF"
   }].map(btn => /*#__PURE__*/React.createElement("button", {
     key: btn.label,
@@ -1731,24 +1729,24 @@ function MovModal({
   }, btn.label), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 10,
-      color: "#9aaa9b"
+      color: "#a89680"
     }
   }, btn.sub)))), /*#__PURE__*/React.createElement("div", {
     onDragOver: e => {
       e.preventDefault();
-      e.currentTarget.style.borderColor = "#5a8a5e";
+      e.currentTarget.style.borderColor = "#bd5d38";
     },
     onDragLeave: e => {
-      e.currentTarget.style.borderColor = "#ddd5c8";
+      e.currentTarget.style.borderColor = "#e0d2bd";
     },
     onDrop: e => {
       e.preventDefault();
-      e.currentTarget.style.borderColor = "#ddd5c8";
+      e.currentTarget.style.borderColor = "#e0d2bd";
       handleFiles(e.dataTransfer.files);
     },
     onClick: () => fileInputRef.current && fileInputRef.current.click(),
     style: {
-      border: "2px dashed #ddd5c8",
+      border: "2px dashed #e0d2bd",
       borderRadius: 10,
       padding: "14px",
       textAlign: "center",
@@ -1759,7 +1757,7 @@ function MovModal({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
-      color: "#9aaa9b"
+      color: "#a89680"
     }
   }, "or drag & drop files here")), images.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1773,7 +1771,7 @@ function MovModal({
       position: "relative",
       borderRadius: 8,
       overflow: "hidden",
-      border: "1px solid #ddd5c8",
+      border: "1px solid #e0d2bd",
       background: "#faf8f4"
     }
   }, img.type.startsWith("image/") ? /*#__PURE__*/React.createElement("img", {
@@ -1802,7 +1800,7 @@ function MovModal({
   }, "📄"), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 9,
-      color: "#8a9e8b",
+      color: "#a89680",
       marginTop: 2,
       padding: "0 4px",
       textAlign: "center",
@@ -1817,7 +1815,7 @@ function MovModal({
       bottom: 0,
       left: 0,
       right: 0,
-      background: "rgba(45,74,47,0.7)",
+      background: "rgba(60,40,20,0.7)",
       padding: "2px 4px",
       fontSize: 9,
       color: "#fff",
@@ -1848,9 +1846,9 @@ function MovModal({
     style: {
       height: 80,
       borderRadius: 8,
-      border: "2px dashed #ddd5c8",
+      border: "2px dashed #e0d2bd",
       background: "transparent",
-      color: "#9aaa9b",
+      color: "#a89680",
       fontSize: 22,
       cursor: "pointer"
     }
@@ -1858,7 +1856,7 @@ function MovModal({
     style: {
       marginTop: 6,
       fontSize: 11,
-      color: "#8a9e8b"
+      color: "#a89680"
     }
   }, images.length, " file", images.length > 1 ? "s" : "", " attached · Names will be saved in movement notes")), err && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1981,7 +1979,7 @@ function MovListModal({
     style: {
       position: "fixed",
       inset: 0,
-      background: "rgba(45,74,47,0.55)",
+      background: "rgba(60,40,20,0.55)",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -1997,12 +1995,12 @@ function MovListModal({
       maxHeight: "90vh",
       display: "flex",
       flexDirection: "column",
-      border: "1px solid #ddd5c8"
+      border: "1px solid #e0d2bd"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "14px 18px",
-      borderBottom: "1px solid #ede6dc",
+      borderBottom: "1px solid #e7d9c4",
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
@@ -2011,7 +2009,7 @@ function MovListModal({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#2d4a2f",
+      color: "#2c211a",
       fontWeight: 800,
       fontSize: 15
     }
@@ -2025,7 +2023,7 @@ function MovListModal({
   }, /*#__PURE__*/React.createElement("select", {
     value: productFilter,
     onChange: e => setProductFilter(e.target.value),
-    style: { borderRadius: 7, border: "1px solid #ddd5c8", padding: "6px 8px", fontSize: 12, color: "#2d4a2f", background: "#faf6f0", maxWidth: 150 }
+    style: { borderRadius: 7, border: "1px solid #e0d2bd", padding: "6px 8px", fontSize: 12, color: "#2c211a", background: "#faf6f0", maxWidth: 150 }
   }, /*#__PURE__*/React.createElement("option", { value: "" }, "All products"), (products || []).map(p => /*#__PURE__*/React.createElement("option", { key: p.ProductID, value: p.ProductID }, p.ProductName))), /*#__PURE__*/React.createElement("button", {
     onClick: load,
     style: {
@@ -2037,17 +2035,17 @@ function MovListModal({
     style: {
       background: "none",
       border: "none",
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 22,
       cursor: "pointer"
     }
   }, "×"))), msg && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "9px 18px",
-      background: msg.startsWith("❌") ? "#ef444420" : "#16a34a20",
+      background: msg.startsWith("❌") ? "#ef444420" : "#5f7a4f20",
       color: msg.startsWith("❌") ? "#fca5a5" : "#4ade80",
       fontSize: 13,
-      borderBottom: "1px solid #ede6dc"
+      borderBottom: "1px solid #e7d9c4"
     }
   }, msg), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -2058,18 +2056,18 @@ function MovListModal({
     style: {
       padding: 40,
       textAlign: "center",
-      color: "#9aaa9b"
+      color: "#a89680"
     }
   }, "Loading…") : displayMovs.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 40,
       textAlign: "center",
-      color: "#9aaa9b"
+      color: "#a89680"
     }
   }, "No movements found.") : displayMovs.map(m => /*#__PURE__*/React.createElement("div", {
     key: m.MovementID,
     style: {
-      borderBottom: "1px solid #ede6dc",
+      borderBottom: "1px solid #e7d9c4",
       padding: "13px 18px"
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -2095,7 +2093,7 @@ function MovListModal({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "#2d4a2f",
+      color: "#2c211a",
       fontWeight: 700,
       fontSize: 13
     }
@@ -2111,16 +2109,16 @@ function MovListModal({
     }
   }, m.Status), /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 12
     }
   }, TYPE_LABEL[m.MovementType] || m.MovementType)), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#9aaa9b",
+      color: "#a89680",
       fontSize: 12,
       marginBottom: 4
     }
-  }, LOC_LABEL[m.SourceLocationID] || m.SourceLocationID, " → ", LOC_LABEL[m.DestinationLocationID] || m.DestinationLocationID, m.ReferenceNumber ? " · " + m.ReferenceNumber : "", " · by " + (m.EnteredByEmail || "").split("@")[0]), m.lines && m.lines.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, LOC_LABEL[m.SourceLocationID] || m.SourceLocationID, " → ", LOC_LABEL[m.DestinationLocationID] || m.DestinationLocationID, m.ReferenceNumber ? " · " + m.ReferenceNumber : "", " · by " + (m.EnteredByEmail || "").split("@")[0] + (m.MovementDateTime ? " · " + String(m.MovementDateTime).slice(0, 16).replace("T", " ") : "")), m.lines && m.lines.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 5,
@@ -2129,37 +2127,37 @@ function MovListModal({
   }, m.lines.map(l => /*#__PURE__*/React.createElement("span", {
     key: l.MovementLineID,
     style: {
-      background: "#f3eee7",
+      background: "#efe4d2",
       borderRadius: 5,
       padding: "2px 7px",
       fontSize: 11,
-      color: "#6b7f6c"
+      color: "#6f6152"
     }
   }, (products || []).find(p => p.ProductID === l.ProductID)?.ProductName || l.ProductID, " × ", l.Quantity)))),
   parseAttachments(m.DocumentFile).map((img, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     onClick: () => setViewImg(img),
-    style: { cursor: "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #5a8a5e", width: 64, height: 64, flexShrink: 0, marginTop: 6 }
+    style: { cursor: "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #bd5d38", width: 64, height: 64, flexShrink: 0, marginTop: 6 }
   }, /*#__PURE__*/React.createElement("img", {
     src: img, style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
   }), /*#__PURE__*/React.createElement("div", {
-    style: { position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(45,74,47,0.75)", fontSize: 8, color: "#fff", textAlign: "center", padding: "2px 0", fontWeight: 700 }
+    style: { position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(60,40,20,0.75)", fontSize: 8, color: "#fff", textAlign: "center", padding: "2px 0", fontWeight: 700 }
   }, "👁"))),
   m.Notes && m.Notes.includes("attachment(s)") && parseAttachments(m.DocumentFile).length === 0 && /*#__PURE__*/React.createElement("span", {
-    style: { fontSize: 10, color: "#c4733a", fontWeight: 600, marginTop: 4 }
+    style: { fontSize: 10, color: "#bd5d38", fontWeight: 600, marginTop: 4 }
   }, "📄 PDF"),
   m.Status === "Draft" && user.canApprove && /*#__PURE__*/React.createElement("button", {
     onClick: () => approve(m.MovementID),
     disabled: busy === m.MovementID,
     style: {
-      ...btnS("#16a34a"),
+      ...btnS("#5f7a4f"),
       padding: "6px 13px",
       fontSize: 12,
       opacity: busy === m.MovementID ? 0.6 : 1
     }
   }, busy === m.MovementID ? "…" : "Approve"), m.Status === "Draft" && !user.canApprove && /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "#9aaa9b",
+      color: "#a89680",
       fontSize: 11
     }
   }, "Awaiting approval"),
@@ -2167,8 +2165,8 @@ function MovListModal({
     onClick: () => { setReverseModal(m.MovementID); setReverseReason(""); setMsg(""); },
     style: {
       background: "none",
-      border: "1px solid #c4733a",
-      color: "#c4733a",
+      border: "1px solid #bd5d38",
+      color: "#bd5d38",
       borderRadius: 7,
       padding: "5px 11px",
       fontSize: 11,
@@ -2178,7 +2176,7 @@ function MovListModal({
   }, "↩ Reverse"))))), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "12px 18px",
-      borderTop: "1px solid #ede6dc",
+      borderTop: "1px solid #e7d9c4",
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
@@ -2187,7 +2185,7 @@ function MovListModal({
   }, /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
-      color: "#9aaa9b"
+      color: "#a89680"
     }
   }, "Showing ", displayMovs.length, productFilter ? " filtered" : " latest", " movements"), hasMore && /*#__PURE__*/React.createElement("button", {
     onClick: () => {
@@ -2197,37 +2195,37 @@ function MovListModal({
     },
     style: {
       background: "transparent",
-      border: "1px solid #ddd5c8",
+      border: "1px solid #e0d2bd",
       borderRadius: 7,
       padding: "5px 14px",
       fontSize: 12,
-      color: "#5a8a5e",
+      color: "#bd5d38",
       fontWeight: 700,
       cursor: "pointer"
     }
   }, "Load 10 more ↓"), !hasMore && movs.length > 0 && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 11,
-      color: "#c8bfb0"
+      color: "#c8b9a3"
     }
   }, "All movements loaded")),
   reverseModal && React.createElement("div", {
-    style: { position:"fixed", inset:0, background:"rgba(45,74,47,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, padding:16 }
+    style: { position:"fixed", inset:0, background:"rgba(60,40,20,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, padding:16 }
   }, React.createElement("div", {
-    style: { background:"#fefcf9", borderRadius:16, padding:28, width:400, maxWidth:"100%", border:"1px solid #ddd5c8" }
+    style: { background:"#fefcf9", borderRadius:16, padding:28, width:400, maxWidth:"100%", border:"1px solid #e0d2bd" }
   },
-    React.createElement("div", { style:{ fontWeight:800, fontSize:16, color:"#c4733a", marginBottom:6 } }, "↩ Reverse Movement"),
-    React.createElement("div", { style:{ fontSize:13, color:"#6b7f6c", marginBottom:16 } },
+    React.createElement("div", { style:{ fontWeight:800, fontSize:16, color:"#bd5d38", marginBottom:6 } }, "↩ Reverse Movement"),
+    React.createElement("div", { style:{ fontSize:13, color:"#6f6152", marginBottom:16 } },
       "You are about to reverse ", React.createElement("strong", null, reverseModal),
       ". This creates an equal and opposite approved movement, restoring the original stock. This action cannot be undone."
     ),
-    React.createElement("div", { style:{ fontSize:12, fontWeight:700, color:"#2d4a2f", marginBottom:6 } }, "Reason for reversal *"),
+    React.createElement("div", { style:{ fontSize:12, fontWeight:700, color:"#2c211a", marginBottom:6 } }, "Reason for reversal *"),
     React.createElement("textarea", {
       value: reverseReason,
       onChange: e => setReverseReason(e.target.value),
       placeholder: "e.g. Entered wrong product, wrong quantity, duplicate entry...",
       rows: 3,
-      style: { width:"100%", borderRadius:8, border:"1px solid #ddd5c8", padding:"9px 12px", fontSize:13, fontFamily:"inherit", resize:"vertical", background:"#faf8f4", color:"#2d4a2f" }
+      style: { width:"100%", borderRadius:8, border:"1px solid #e0d2bd", padding:"9px 12px", fontSize:13, fontFamily:"inherit", resize:"vertical", background:"#faf8f4", color:"#2c211a" }
     }),
     React.createElement("div", { style:{ display:"flex", gap:10, marginTop:16, justifyContent:"flex-end" } },
       React.createElement("button", {
@@ -2237,7 +2235,7 @@ function MovListModal({
       React.createElement("button", {
         onClick: () => reverse(reverseModal, reverseReason),
         disabled: reverseBusy || !reverseReason.trim(),
-        style: { background: reverseBusy || !reverseReason.trim() ? "#ccc" : "#c4733a", color:"#fff", border:"none", borderRadius:9, padding:"9px 20px", fontWeight:700, cursor: reverseBusy || !reverseReason.trim() ? "not-allowed" : "pointer", fontSize:13 }
+        style: { background: reverseBusy || !reverseReason.trim() ? "#ccc" : "#bd5d38", color:"#fff", border:"none", borderRadius:9, padding:"9px 20px", fontWeight:700, cursor: reverseBusy || !reverseReason.trim() ? "not-allowed" : "pointer", fontSize:13 }
       }, reverseBusy ? "Reversing…" : "Confirm Reversal")
     )
   )))));
@@ -2289,11 +2287,11 @@ function StockCountModal({
     }
     setBusy(false);
   }
-  const diffColor = diff === null ? "#9aaa9b" : diff === 0 ? "#5a8a5e" : diff > 0 ? "#3a8a8a" : "#c4534a";
+  const diffColor = diff === null ? "#a89680" : diff === 0 ? "#bd5d38" : diff > 0 ? "#a97b52" : "#b23a2e";
   const MODAL_STYLE = {
     position: "fixed",
     inset: 0,
-    background: "rgba(45,74,47,0.55)",
+    background: "rgba(60,40,20,0.55)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -2306,7 +2304,7 @@ function StockCountModal({
     padding: 22,
     width: 460,
     maxWidth: "100%",
-    border: "1px solid #ddd5c8",
+    border: "1px solid #e0d2bd",
     maxHeight: "90vh",
     overflowY: "auto"
   };
@@ -2325,14 +2323,14 @@ function StockCountModal({
     style: {
       fontWeight: 800,
       fontSize: 15,
-      color: "#2d4a2f"
+      color: "#2c211a"
     }
   }, "🔢 New Stock Count"), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     style: {
       background: "none",
       border: "none",
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 22,
       cursor: "pointer"
     }
@@ -2364,7 +2362,7 @@ function StockCountModal({
       background: "#f8f4ef",
       borderRadius: 12,
       padding: 14,
-      border: "1px solid #e8dfd4"
+      border: "1px solid #e7d9c4"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -2377,7 +2375,7 @@ function StockCountModal({
     style: {
       fontSize: 10,
       fontWeight: 700,
-      color: "#9aaa9b",
+      color: "#a89680",
       textTransform: "uppercase",
       letterSpacing: 0.5,
       marginBottom: 6
@@ -2386,20 +2384,20 @@ function StockCountModal({
     style: {
       fontWeight: 900,
       fontSize: 28,
-      color: "#2d4a2f",
+      color: "#2c211a",
       letterSpacing: -1
     }
   }, systemQty), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
-      color: "#9aaa9b",
+      color: "#a89680",
       marginTop: 2
     }
   }, "calculated")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       fontWeight: 700,
-      color: "#9aaa9b",
+      color: "#a89680",
       textTransform: "uppercase",
       letterSpacing: 0.5,
       marginBottom: 6
@@ -2418,21 +2416,21 @@ function StockCountModal({
       padding: "4px",
       height: 48,
       background: "#fff",
-      border: "2px solid #5a8a5e"
+      border: "2px solid #bd5d38"
     },
     placeholder: "0",
     autoFocus: true
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
-      color: "#9aaa9b",
+      color: "#a89680",
       marginTop: 2
     }
   }, "enter here")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       fontWeight: 700,
-      color: "#9aaa9b",
+      color: "#a89680",
       textTransform: "uppercase",
       letterSpacing: 0.5,
       marginBottom: 6
@@ -2467,20 +2465,20 @@ function StockCountModal({
     style: inp
   })), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#c4733a10",
-      border: "1px solid #c4733a30",
+      background: "#bd5d3810",
+      border: "1px solid #bd5d3830",
       borderRadius: 8,
       padding: "8px 12px",
       fontSize: 12,
-      color: "#c4733a"
+      color: "#bd5d38"
     }
   }, "ℹ️ This count will be saved as ", /*#__PURE__*/React.createElement("b", null, "Pending"), ". A Manager or Owner must approve it before any stock adjustment is created."), err && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#c4534a12",
-      border: "1px solid #c4534a40",
+      background: "#b23a2e12",
+      border: "1px solid #b23a2e40",
       borderRadius: 8,
       padding: "10px 13px",
-      color: "#c4534a",
+      color: "#b23a2e",
       fontSize: 13
     }
   }, "❌ ", err)), /*#__PURE__*/React.createElement("div", {
@@ -2560,17 +2558,159 @@ function AssembleComboModal({
     setBusy(false);
   }
 
-  const MODAL_STYLE = { position: "fixed", inset: 0, background: "rgba(45,74,47,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 };
-  const BOX_STYLE = { background: "#fefcf9", borderRadius: 16, padding: 22, width: 460, maxWidth: "100%", border: "1px solid #ddd5c8", maxHeight: "90vh", overflowY: "auto" };
+  const MODAL_STYLE = { position: "fixed", inset: 0, background: "rgba(60,40,20,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 };
+  const BOX_STYLE = { background: "#fefcf9", borderRadius: 16, padding: 22, width: 460, maxWidth: "100%", border: "1px solid #e0d2bd", maxHeight: "90vh", overflowY: "auto" };
   const LBL = { fontSize: 12, fontWeight: 700, color: "#5a6b5b", marginBottom: 4, display: "block" };
   const INP = { width: "100%", padding: "9px 11px", borderRadius: 9, border: "1px solid #ccd3c4", fontSize: 14, marginBottom: 14, boxSizing: "border-box" };
 
-  return /*#__PURE__*/React.createElement("div", { style: MODAL_STYLE }, /*#__PURE__*/React.createElement("div", { style: BOX_STYLE }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 18, fontWeight: 800, color: "#2d4a2f" } }, "🧩 Assemble Combo"), /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#9aaa9b" } }, "×")), loadErr ? /*#__PURE__*/React.createElement("div", { style: { color: "#c4534a", fontSize: 13 } }, "Couldn't load recipes: " + loadErr) : bom === null ? /*#__PURE__*/React.createElement("div", { style: { color: "#9aaa9b", fontSize: 13, padding: "10px 0" } }, "Loading recipes…") : comboIDs.length === 0 ? /*#__PURE__*/React.createElement("div", { style: { color: "#9aaa9b", fontSize: 13, padding: "10px 0" } }, "No combos found. Add rows to the Combo_BOM sheet first.") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", { style: LBL }, "Combo to build"), /*#__PURE__*/React.createElement("select", { value: comboID, onChange: e => setComboID(e.target.value), style: INP }, comboIDs.map(id => /*#__PURE__*/React.createElement("option", { key: id, value: id }, nameOf(id) + " (" + id + ")"))), /*#__PURE__*/React.createElement("label", { style: LBL }, "Quantity to assemble"), /*#__PURE__*/React.createElement("input", { type: "number", min: "1", value: qty, onChange: e => setQty(e.target.value), placeholder: "e.g. 20", style: INP }), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#5a8a5e", marginTop: -8, marginBottom: 14 } }, "Buildable now from parts: " + perUnitBuildable), /*#__PURE__*/React.createElement("div", { style: { background: "#f4f1ea", borderRadius: 10, padding: "10px 12px", marginBottom: 14 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#5a6b5b", marginBottom: 6 } }, "Will consume from Main Warehouse:"), recipe.map(r => {
+  return /*#__PURE__*/React.createElement("div", { style: MODAL_STYLE }, /*#__PURE__*/React.createElement("div", { style: BOX_STYLE }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 18, fontWeight: 800, color: "#2c211a" } }, "🧩 Assemble Combo"), /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#a89680" } }, "×")), loadErr ? /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 13 } }, "Couldn't load recipes: " + loadErr) : bom === null ? /*#__PURE__*/React.createElement("div", { style: { color: "#a89680", fontSize: 13, padding: "10px 0" } }, "Loading recipes…") : comboIDs.length === 0 ? /*#__PURE__*/React.createElement("div", { style: { color: "#a89680", fontSize: 13, padding: "10px 0" } }, "No combos found. Add rows to the Combo_BOM sheet first.") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", { style: LBL }, "Combo to build"), /*#__PURE__*/React.createElement("select", { value: comboID, onChange: e => setComboID(e.target.value), style: INP }, comboIDs.map(id => /*#__PURE__*/React.createElement("option", { key: id, value: id }, nameOf(id) + " (" + id + ")"))), /*#__PURE__*/React.createElement("label", { style: LBL }, "Quantity to assemble"), /*#__PURE__*/React.createElement("input", { type: "number", min: "1", value: qty, onChange: e => setQty(e.target.value), placeholder: "e.g. 20", style: INP }), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#bd5d38", marginTop: -8, marginBottom: 14 } }, "Buildable now from parts: " + perUnitBuildable), /*#__PURE__*/React.createElement("div", { style: { background: "#f4f1ea", borderRadius: 10, padding: "10px 12px", marginBottom: 14 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#5a6b5b", marginBottom: 6 } }, "Will consume from Main Warehouse:"), recipe.map(r => {
     const need = (nQty > 0 ? nQty : 0) * Number(r.Qty);
     const have = onHandWH(r.ComponentProductID);
     const okStock = have >= need;
-    return /*#__PURE__*/React.createElement("div", { key: r.ComponentProductID, style: { display: "flex", justifyContent: "space-between", fontSize: 13, padding: "2px 0", color: okStock ? "#2d4a2f" : "#c4534a" } }, /*#__PURE__*/React.createElement("span", null, nameOf(r.ComponentProductID) + " × " + Number(r.Qty) + "/unit"), /*#__PURE__*/React.createElement("span", null, "need " + need + " · have " + have));
-  })), err && /*#__PURE__*/React.createElement("div", { style: { color: "#c4534a", fontSize: 13, marginBottom: 10 } }, err), /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end" } }, /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { padding: "9px 18px", borderRadius: 9, border: "1px solid #ccd3c4", background: "#fff", cursor: "pointer", fontSize: 14 } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: submit, disabled: busy, style: { padding: "9px 20px", borderRadius: 9, border: "none", background: busy ? "#9aaa9b" : "#6d5ae6", color: "#fff", cursor: busy ? "default" : "pointer", fontSize: 14, fontWeight: 700 } }, busy ? "Saving…" : "Assemble")))));
+    return /*#__PURE__*/React.createElement("div", { key: r.ComponentProductID, style: { display: "flex", justifyContent: "space-between", fontSize: 13, padding: "2px 0", color: okStock ? "#2c211a" : "#b23a2e" } }, /*#__PURE__*/React.createElement("span", null, nameOf(r.ComponentProductID) + " × " + Number(r.Qty) + "/unit"), /*#__PURE__*/React.createElement("span", null, "need " + need + " · have " + have));
+  })), err && /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 13, marginBottom: 10 } }, err), /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end" } }, /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { padding: "9px 18px", borderRadius: 9, border: "1px solid #ccd3c4", background: "#fff", cursor: "pointer", fontSize: 14 } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: submit, disabled: busy, style: { padding: "9px 20px", borderRadius: 9, border: "none", background: busy ? "#a89680" : "#6d5ae6", color: "#fff", cursor: busy ? "default" : "pointer", fontSize: 14, fontWeight: 700 } }, busy ? "Saving…" : "Assemble")))));
+}
+
+function FbaReconcileTab(props) {
+  var products = props.products, stock = props.stock, user = props.user, notify = props.notify;
+  var TRANSIT_DAYS = 12, TARGET_DAYS = 30;
+  var _sub = React.useState("upload"), sub = _sub[0], setSub = _sub[1];
+  var _s = React.useState("upload"), step = _s[0], setStep = _s[1];
+  var _p = React.useState([]), preview = _p[0], setPreview = _p[1];
+  var _u = React.useState([]), unmapped = _u[0], setUnmapped = _u[1];
+  var _d = React.useState(""), reportDate = _d[0], setReportDate = _d[1];
+  var _e = React.useState(""), error = _e[0], setError = _e[1];
+  var _b = React.useState(false), busy = _b[0], setBusy = _b[1];
+  var _o = React.useState(false), drag = _o[0], setDrag = _o[1];
+  var _lg = React.useState(function () { try { return JSON.parse(localStorage.getItem("syoat_fba_ledger") || "null"); } catch (e) { return null; } }), ledger = _lg[0], setLedger = _lg[1];
+  var fileRef = React.useRef(null);
+  var payloadRef = React.useRef(null);
+
+  function splitCSV(line) { var out = [], cur = "", q = false; for (var i = 0; i < line.length; i++) { var c = line[i]; if (c === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; } else if (c === "," && !q) { out.push(cur); cur = ""; } else cur += c; } out.push(cur); return out; }
+  function fbaStockOf(pid) { var t = 0; (stock || []).forEach(function (s) { if (s.ProductID === pid && s.LocationID === "AMAZON_FBA") t += Number(s.Quantity) || 0; }); return t; }
+
+  function handleFile(file) {
+    if (!file) return;
+    setError("");
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        var text = e.target.result;
+        var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
+        if (!lines.length) { setError("That file is empty."); return; }
+        var isTab = lines[0].indexOf("\t") !== -1 && lines[0].indexOf(",") === -1;
+        var pl = isTab ? function (l) { return l.split("\t").map(function (x) { return x.replace(/^"|"$/g, "").trim(); }); } : function (l) { return splitCSV(l).map(function (x) { return x.replace(/^"|"$/g, "").trim(); }); };
+        var header = pl(lines[0]), H = {};
+        header.forEach(function (h, i) { H[h.toLowerCase()] = i; });
+        if (H["amazon-order-id"] !== undefined) { setError("This is the All Orders report. Please upload Inventory Ledger — Summary view."); return; }
+        var hasEnd = H["ending warehouse balance"] !== undefined, hasDisp = H["disposition"] !== undefined, hasAsin = H["asin"] !== undefined;
+        if (H["event type"] !== undefined && !hasEnd) { setError("This is the Ledger Detailed view. Switch to the Summary view and download again."); return; }
+        if (!(hasEnd && hasDisp && hasAsin)) { setError("Unrecognised file. Upload Inventory Ledger — Summary (needs ASIN, Disposition, Ending Warehouse Balance)."); return; }
+        var iAsin = H["asin"], iDisp = H["disposition"], iEnd = H["ending warehouse balance"], iDate = H["date"], iLoc = H["location"], iShip = H["customer shipments"];
+        var asinQty = {}, endFC = {}, shipTot = {}, shipFC = {}, datesSet = {}, dateSeen = "";
+        for (var r = 1; r < lines.length; r++) {
+          var c = pl(lines[r]);
+          if (String(c[iDisp]).toUpperCase() !== "SELLABLE") continue;
+          var a = c[iAsin]; if (!a) continue;
+          var fc = (iLoc !== undefined && c[iLoc]) ? c[iLoc] : "FBA";
+          var end = parseFloat(c[iEnd]) || 0;
+          var ship = (iShip !== undefined) ? Math.abs(parseFloat(c[iShip]) || 0) : 0;
+          asinQty[a] = (asinQty[a] || 0) + end;
+          endFC[a] = endFC[a] || {}; endFC[a][fc] = (endFC[a][fc] || 0) + end;
+          shipTot[a] = (shipTot[a] || 0) + ship;
+          shipFC[a] = shipFC[a] || {}; shipFC[a][fc] = (shipFC[a][fc] || 0) + ship;
+          if (iDate !== undefined && c[iDate]) { datesSet[c[iDate]] = 1; dateSeen = c[iDate]; }
+        }
+        var a2p = {}; (products || []).forEach(function (p) { if (p.AmazonASIN) a2p[String(p.AmazonASIN).trim()] = p; });
+        var mapped = [], unm = [], snapProducts = [];
+        Object.keys(asinQty).forEach(function (a) {
+          var p = a2p[a];
+          if (!p) { unm.push({ asin: a, qty: asinQty[a] }); return; }
+          var sys = fbaStockOf(p.ProductID);
+          mapped.push({ productID: p.ProductID, name: p.ProductName, asin: a, sys: sys, ledger: asinQty[a], delta: asinQty[a] - sys });
+          var perFC = Object.keys(endFC[a] || {}).map(function (fc) { return { fc: fc, qty: endFC[a][fc], sold: (shipFC[a] && shipFC[a][fc]) || 0 }; }).filter(function (x) { return x.qty !== 0 || x.sold !== 0; }).sort(function (x, y) { return y.qty - x.qty; });
+          snapProducts.push({ productID: p.ProductID, name: p.ProductName, fnsku: p.FNSKU || "", total: asinQty[a], sold: shipTot[a] || 0, perFC: perFC });
+        });
+        mapped.sort(function (x, y) { return Math.abs(y.delta) - Math.abs(x.delta); });
+        if (!mapped.length) { setError("No Syoat products matched by ASIN. Check the AmazonASIN column in your Products sheet."); return; }
+        var rd = dateSeen, m = dateSeen.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (m) rd = m[3] + "-" + ("0" + m[1]).slice(-2) + "-" + ("0" + m[2]).slice(-2);
+        var reportDays = Math.max(1, Object.keys(datesSet).length);
+        var snapshot = { reportDate: rd, reportDays: reportDays, savedAt: new Date().toISOString().slice(0, 16).replace("T", " "), products: snapProducts };
+        try { localStorage.setItem("syoat_fba_ledger", JSON.stringify(snapshot)); } catch (e) {}
+        setLedger(snapshot);
+        payloadRef.current = { text: text, name: file.name, mime: isTab ? "text/plain" : "text/csv" };
+        setReportDate(rd); setPreview(mapped); setUnmapped(unm); setStep("preview");
+      } catch (err) { setError("Couldn't read the file: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+  function confirmImport() {
+    setBusy(true);
+    (async function () {
+      try {
+        var items = preview.filter(function (x) { return x.delta !== 0; }).map(function (x) { return { productID: x.productID, ledgerQty: x.ledger }; });
+        if (!items.length) { notify("✅ FBA already matches the ledger — nothing to adjust."); resetUp(); if (props.onCountCreated) props.onCountCreated(); return; }
+        var fp = payloadRef.current || {};
+        var res = await apiWritePost("createFbaReconciliation", user.email, { items: items, fileText: fp.text, fileName: fp.name, fileMime: fp.mime, reportDate: reportDate });
+        notify("✅ " + (res.createdCount || items.length) + " FBA count(s) created — approve them in Stock Count." + (res.driveUrl ? " File archived to Drive." : ""));
+        resetUp(); if (props.onCountCreated) props.onCountCreated();
+      } catch (e) { notify("❌ " + e.message); }
+      setBusy(false);
+    })();
+  }
+  function resetUp() { setStep("upload"); setPreview([]); setUnmapped([]); setError(""); setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
+
+  var hero = /*#__PURE__*/React.createElement("div", { style: { background: "linear-gradient(140deg,#241b14,#463017)", borderRadius: 18, padding: "18px", marginBottom: 14, color: "#f2e7d5" } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } }, /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 46, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 32, color: "#241b14" })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 600 } }, "Amazon FBA"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Weekly ledger · fulfilment-centre stock · shipment plan"))));
+
+  var SUBS = [{ k: "upload", l: "⬆️ Upload" }, { k: "fc", l: "🏬 Locations – FC" }, { k: "reco", l: "📦 Recommendations" }];
+  var subnav = /*#__PURE__*/React.createElement("div", { style: { display: "flex", background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 13, padding: 4, gap: 3, marginBottom: 14 } }, SUBS.map(function (x) { var on = sub === x.k; return /*#__PURE__*/React.createElement("button", { key: x.k, onClick: function () { setSub(x.k); }, style: { flex: 1, border: "none", background: on ? "#2a201a" : "transparent", color: on ? "#f4ead8" : "#6f6152", padding: "9px 4px", borderRadius: 9, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", boxShadow: on ? "0 1px 4px rgba(0,0,0,0.15)" : "none" } }, x.l); }));
+
+  var guide = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 14 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 16, fontWeight: 600, marginBottom: 6 } }, "📋 How to pull this report"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: "#6f6152", lineHeight: 1.7 } }, "Seller Central → Reports → Fulfilment → ", /*#__PURE__*/React.createElement("b", null, "Inventory Ledger"), " → View: ", /*#__PURE__*/React.createElement("b", null, "Summary"), " → latest date → Download (CSV or TXT)."), /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, fontSize: 11.5, color: "#5f7a4f", fontWeight: 600 } }, "✅ Right file: Inventory Ledger — Summary"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#b23a2e", fontWeight: 600 } }, "❌ Not the Detailed view · Not All Orders · Not Manage Inventory"));
+
+  function uploadTab() {
+    if (step === "preview") {
+      var totAdj = preview.filter(function (x) { return x.delta !== 0; }).length;
+      return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", margin: "2px 2px 10px" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 600 } }, "Reconcile preview"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680" } }, reportDate ? "Ledger date " + reportDate : "")), /*#__PURE__*/React.createElement("div", { style: { ...card, padding: "6px 14px 10px" } }, /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, padding: "9px 0", borderBottom: "1px solid #e7d9c4", fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "#a89680", fontWeight: 700 } }, /*#__PURE__*/React.createElement("span", null, "Product"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "System"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Ledger"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Δ")), preview.map(function (x) { var dc = x.delta === 0 ? "#a89680" : x.delta > 0 ? "#5f7a4f" : "#b23a2e"; return /*#__PURE__*/React.createElement("div", { key: x.productID, style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #f0ebe2", fontSize: 12.5 } }, /*#__PURE__*/React.createElement("span", { style: { fontWeight: 600, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (x.name || x.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600, color: "#6f6152" } }, x.sys), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600 } }, x.ledger), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 700, color: dc } }, x.delta > 0 ? "+" + x.delta : x.delta)); })), unmapped.length > 0 && /*#__PURE__*/React.createElement("div", { style: { background: "#f4e7c8", border: "1px solid #e8d09a", borderRadius: 12, padding: "10px 13px", marginTop: 10, fontSize: 11.5, color: "#6b5326" } }, /*#__PURE__*/React.createElement("b", null, "⚠️ " + unmapped.length + " unmapped ASIN(s) — not adjusted: "), unmapped.map(function (u) { return u.asin + " (" + u.qty + ")"; }).join(", ")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#6f6152", margin: "12px 2px" } }, totAdj + " product(s) will get an adjustment count at Amazon FBA, pending Manager approval in the Stock Count tab."), /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 } }, /*#__PURE__*/React.createElement("button", { onClick: resetUp, disabled: busy, style: { border: "1px solid #e0d2bd", background: "transparent", color: "#6f6152", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 600, cursor: "pointer" } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: confirmImport, disabled: busy, style: { border: "none", background: busy ? "#c8b9a3" : "#2a201a", color: "#f4ead8", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, cursor: busy ? "wait" : "pointer" } }, busy ? "Saving…" : "Confirm · create " + totAdj + " count(s)")));
+    }
+    return /*#__PURE__*/React.createElement("div", null, guide, /*#__PURE__*/React.createElement("div", { onDragOver: function (e) { e.preventDefault(); setDrag(true); }, onDragLeave: function () { setDrag(false); }, onDrop: function (e) { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }, onClick: function () { if (fileRef.current) fileRef.current.click(); }, style: { border: "2px dashed " + (drag ? "#bd5d38" : "#e0d2bd"), borderRadius: 16, padding: "40px 20px", textAlign: "center", cursor: "pointer", background: drag ? "#bd5d3808" : "#f5ecdc" } }, /*#__PURE__*/React.createElement("input", { ref: fileRef, type: "file", accept: ".csv,.txt,.tsv", style: { display: "none" }, onChange: function (e) { handleFile(e.target.files[0]); } }), /*#__PURE__*/React.createElement("div", { style: { fontSize: 34 } }, "⬆️"), /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 15, color: "#2c211a", marginTop: 8 } }, "Choose Ledger file or drop here"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680", marginTop: 4 } }, "CSV or TXT · nothing changes until you confirm the preview")), error && /*#__PURE__*/React.createElement("div", { style: { background: "#f3dcd5", border: "1px solid #e3b7ad", borderRadius: 12, padding: "12px 15px", marginTop: 12, fontSize: 12.5, color: "#b23a2e", fontWeight: 600 } }, "❌ " + error));
+  }
+
+  function emptyLedger(msg) { return /*#__PURE__*/React.createElement("div", { style: { ...card, textAlign: "center", padding: 30, color: "#a89680", fontSize: 13 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 26, marginBottom: 8 } }, "🏬"), msg, /*#__PURE__*/React.createElement("button", { onClick: function () { setSub("upload"); }, style: { display: "block", margin: "14px auto 0", border: "none", background: "#2a201a", color: "#f4ead8", borderRadius: 11, padding: "9px 18px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" } }, "Go to Upload")); }
+
+  function fcTab() {
+    if (!ledger || !ledger.products || !ledger.products.length) return emptyLedger("Upload a ledger first to see fulfilment-centre stock.");
+    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680", margin: "0 2px 10px" } }, "Per FNSKU · from ledger " + (ledger.reportDate || "") + " (" + ledger.reportDays + "-day)"), ledger.products.slice().sort(function (a, b) { return b.total - a.total; }).map(function (p) {
+      var maxfc = p.perFC.length ? p.perFC[0].qty : 1;
+      return /*#__PURE__*/React.createElement("div", { key: p.productID, style: { ...card, padding: 14, marginBottom: 12, minWidth: 0, overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 } }, /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 13.5, fontWeight: 700, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (p.name || p.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#a89680" } }, "FNSKU " + (p.fnsku || "—") + " · " + p.perFC.length + " FCs")), /*#__PURE__*/React.createElement("div", { style: { textAlign: "right", flexShrink: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 600, lineHeight: 1 } }, p.total), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.08em" } }, "total"))), p.perFC.map(function (fc) {
+        return /*#__PURE__*/React.createElement("div", { key: fc.fc, style: { display: "flex", alignItems: "center", gap: 9, padding: "6px 0", borderTop: "1px solid #f0ebe2" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 11.5, fontWeight: 600, color: "#2c211a", width: 52, flexShrink: 0 } }, fc.fc), /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 5, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, fc.qty / maxfc * 100) + "%", background: "#a97b52" } })), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 13, fontWeight: 600, width: 40, textAlign: "right" } }, fc.qty), /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: fc.sold > 0 ? "#bd5d38" : "#c8b9a3", width: 52, textAlign: "right" } }, fc.sold > 0 ? "−" + fc.sold + " sold" : "—"));
+      }));
+    }));
+  }
+
+  function recoTab() {
+    if (!ledger || !ledger.products || !ledger.products.length) return emptyLedger("Upload a ledger first to get shipment recommendations.");
+    var days = ledger.reportDays || 1;
+    var rows = ledger.products.map(function (p) {
+      var vel = p.sold / days;
+      var cover = vel > 0 ? p.total / vel : Infinity;
+      var ship = vel > 0 ? Math.max(0, Math.round(vel * TARGET_DAYS) - p.total) : 0;
+      var status = vel <= 0 ? "idle" : cover < TRANSIT_DAYS ? "urgent" : cover < (TRANSIT_DAYS + 13) ? "soon" : "ok";
+      return { p: p, vel: vel, cover: cover, ship: ship, status: status };
+    }).sort(function (a, b) { return (a.cover) - (b.cover); });
+    var SC = { urgent: { c: "#b23a2e", bg: "#f3dcd5", t: "Ship now" }, soon: { c: "#c2872f", bg: "#f4e7c8", t: "Plan soon" }, ok: { c: "#5f7a4f", bg: "#e2e8d3", t: "Healthy" }, idle: { c: "#a89680", bg: "#eee6d9", t: "No sales" } };
+    return /*#__PURE__*/React.createElement("div", null,
+      /*#__PURE__*/React.createElement("div", { style: { background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 12, padding: "10px 13px", marginBottom: 12, fontSize: 11.5, color: "#6f6152", lineHeight: 1.6 } }, "Based on sales velocity over ", /*#__PURE__*/React.createElement("b", null, days + " day(s)"), " of ledger data. Rule: keep at least ", /*#__PURE__*/React.createElement("b", null, TRANSIT_DAYS + " days"), " cover (shipment transit) and top up to ", /*#__PURE__*/React.createElement("b", null, TARGET_DAYS + " days"), ". For sharper numbers, upload a wider date-range ledger."),
+      rows.map(function (r) {
+        var sc = SC[r.status];
+        return /*#__PURE__*/React.createElement("div", { key: r.p.productID, style: { ...card, padding: 13, marginBottom: 11 } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 } }, /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 13.5, fontWeight: 700, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (r.p.name || r.p.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#a89680", marginTop: 1 } }, "FNSKU " + (r.p.fnsku || "—"))), /*#__PURE__*/React.createElement("span", { style: { background: sc.bg, color: sc.c, fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 } }, sc.t)),
+          /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 11 } }, [{ v: r.p.total, t: "At FBA" }, { v: r.vel > 0 ? r.vel.toFixed(1) + "/d" : "0", t: "Sales rate" }, { v: r.cover === Infinity ? "∞" : Math.round(r.cover) + "d", t: "Days cover" }].map(function (m) { return /*#__PURE__*/React.createElement("div", { key: m.t, style: { background: "#f5ecdc", borderRadius: 10, padding: "8px 6px", textAlign: "center" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 17, fontWeight: 600, color: "#2c211a" } }, m.v), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 2 } }, m.t)); })),
+          r.ship > 0 ? /*#__PURE__*/React.createElement("div", { style: { marginTop: 11, background: "#2a201a", color: "#f4ead8", borderRadius: 11, padding: "10px 13px", display: "flex", justifyContent: "space-between", alignItems: "center" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, fontWeight: 600 } }, "📦 Ship from Warehouse → FBA"), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 700, color: "#f0a882" } }, r.ship + " units")) : /*#__PURE__*/React.createElement("div", { style: { marginTop: 11, fontSize: 11.5, color: "#5f7a4f", fontWeight: 600, textAlign: "center" } }, r.status === "idle" ? "No recent FBA sales — no shipment needed." : "✅ Well stocked — no shipment needed."));
+      }),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", margin: "4px 2px", lineHeight: 1.5 } }, "Note: Amazon assigns the exact fulfilment centres when you create the inbound shipment (Send to Amazon). Use the Locations – FC tab to see current spread."));
+  }
+
+  return /*#__PURE__*/React.createElement("div", null, hero, subnav, sub === "upload" ? uploadTab() : sub === "fc" ? fcTab() : recoTab());
 }
 
 function AmazonImportTab({
@@ -2799,7 +2939,7 @@ function AmazonImportTab({
           actions.push({
             type: "count",
             label: "Stock Count",
-            color: "#5a8a5e",
+            color: "#bd5d38",
             detail: `Amazon has ${row.sellable_ending} sellable units · System shows ${systemFBA} · Diff ${stockDiff >= 0 ? "+" : ""}${stockDiff}`,
             qty: row.sellable_ending,
             skip: stockDiff === 0,
@@ -2808,7 +2948,7 @@ function AmazonImportTab({
           if (shipped > 0) actions.push({
             type: "shipped",
             label: "FBA Shipments",
-            color: "#3a8a8a",
+            color: "#a97b52",
             detail: `${shipped} units shipped by Amazon to customers`,
             qty: shipped,
             skip: false
@@ -2816,7 +2956,7 @@ function AmazonImportTab({
           if (dmgTotal > 0) actions.push({
             type: "damage",
             label: "Damage / Loss",
-            color: "#c4534a",
+            color: "#b23a2e",
             detail: `${dmgTotal} units (Damaged: ${row.damaged}, Lost: ${row.lost}, Disposed: ${row.disposed}, Dmg Returns: ${row.returns_damaged})`,
             qty: dmgTotal,
             skip: false
@@ -2824,7 +2964,7 @@ function AmazonImportTab({
           if (row.returns_sellable > 0) actions.push({
             type: "skip_return",
             label: "Sellable Returns",
-            color: "#8a9e8b",
+            color: "#a89680",
             detail: `${row.returns_sellable} units returned as sellable — Amazon auto-restocks, nothing to do`,
             qty: row.returns_sellable,
             skip: true,
@@ -2991,28 +3131,31 @@ function AmazonImportTab({
   }
 
   // ── STATUS COLORS ──
-  const diffColor = d => d === 0 ? "#5a8a5e" : d > 0 ? "#3a8a8a" : "#c4534a";
+  const diffColor = d => d === 0 ? "#bd5d38" : d > 0 ? "#a97b52" : "#b23a2e";
   const diffLabel = d => d === 0 ? "✅ Match" : d > 0 ? `⬆ +${d} surplus` : `⬇ ${d} shortage`;
 
   // ── RENDER ──
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: { background: "linear-gradient(140deg,#241b14,#463017)", borderRadius: 18, padding: "18px", marginBottom: 16, color: "#f2e7d5", position: "relative", overflow: "hidden" }
+  }, /*#__PURE__*/React.createElement("div", { style: { position: "absolute", right: -34, top: -34, width: 140, height: 140, borderRadius: "50%", background: "radial-gradient(circle,rgba(255,153,0,0.35),transparent 70%)" } }), /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, position: "relative" } }, /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 46, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 32, color: "#241b14" })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 600 } }, "Amazon FBA"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Upload a Seller Central report to sync stock"))), /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10, marginTop: 15, position: "relative" } }, (function(){ var fba = (stock || []).reduce(function(a,x){ return a + (x.LocationID === "AMAZON_FBA" ? Number(x.Quantity || 0) : 0); }, 0); var tr = (stock || []).reduce(function(a,x){ return a + (x.LocationID === "FBA_TRANSIT" ? Number(x.Quantity || 0) : 0); }, 0); return [{ n: fba, l: "At FBA" }, { n: tr, l: "In Transit" }, { n: fba + tr, l: "FBA-side" }]; })().map(function(x){ return /*#__PURE__*/React.createElement("div", { key: x.l, style: { flex: 1, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.13)", borderRadius: 12, padding: "9px 6px", textAlign: "center" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 600 } }, x.n), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "#c9b49a", fontWeight: 600, marginTop: 2 } }, x.l)); }))), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#5a8a5e12",
-      border: "1px solid #5a8a5e30",
-      borderRadius: 12,
+      background: "#fdf9f1",
+      border: "1px solid #e7d9c4",
+      borderRadius: 14,
       padding: "14px 18px",
-      marginBottom: 18
+      marginBottom: 16
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontWeight: 800,
-      color: "#2d4a2f",
-      fontSize: 14,
+      fontFamily: "Fraunces,serif",
+      fontWeight: 600,
+      color: "#2c211a",
+      fontSize: 16,
       marginBottom: 6
     }
-  }, "📋 FBA Inventory Event Detail Report"), /*#__PURE__*/React.createElement("div", {
+  }, "📋 How to pull this report"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#6b7f6c",
+      color: "#6f6152",
       fontSize: 13,
       lineHeight: 1.8
     }
@@ -3042,8 +3185,8 @@ function AmazonImportTab({
   }].map(t => /*#__PURE__*/React.createElement("div", {
     key: t.label,
     style: {
-      background: "#ffffff",
-      border: "1px solid #e8dfd4",
+      background: "#fdf9f1",
+      border: "1px solid #e7d9c4",
       borderRadius: 8,
       padding: "6px 12px",
       display: "flex",
@@ -3058,17 +3201,17 @@ function AmazonImportTab({
     style: {
       fontSize: 12,
       fontWeight: 700,
-      color: "#2d4a2f"
+      color: "#2c211a"
     }
   }, t.label), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
-      color: "#8a9e8b"
+      color: "#a89680"
     }
   }, t.desc)))))), step === "upload" && Object.keys(importedDates).length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#ffffff",
-      border: "1px solid #e8dfd4",
+      background: "#fdf9f1",
+      border: "1px solid #e7d9c4",
       borderRadius: 12,
       padding: "12px 16px",
       marginBottom: 14
@@ -3083,12 +3226,12 @@ function AmazonImportTab({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13,
-      color: "#2d4a2f",
+      color: "#2c211a",
       fontWeight: 600
     }
   }, "📅 ", Object.keys(importedDates).length, " dates already imported", /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "#8a9e8b",
+      color: "#a89680",
       fontWeight: 400,
       fontSize: 12,
       marginLeft: 8
@@ -3111,8 +3254,8 @@ function AmazonImportTab({
       ...ghost,
       fontSize: 11,
       padding: "3px 10px",
-      color: "#c4534a",
-      borderColor: "#c4534a40"
+      color: "#b23a2e",
+      borderColor: "#b23a2e40"
     }
   }, "Clear history"))), showHistory && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3125,15 +3268,15 @@ function AmazonImportTab({
     key: date,
     style: {
       background: "#f8f4ef",
-      border: "1px solid #e8dfd4",
+      border: "1px solid #e7d9c4",
       borderRadius: 6,
       padding: "3px 10px",
       fontSize: 11,
-      color: "#6b7f6c"
+      color: "#6f6152"
     }
   }, date, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "#c8bfb0",
+      color: "#c8b9a3",
       marginLeft: 4
     }
   }, "(uploaded ", importedOn, ")"))))), step === "upload" && /*#__PURE__*/React.createElement("div", {
@@ -3150,12 +3293,12 @@ function AmazonImportTab({
     },
     onClick: () => fileRef.current?.click(),
     style: {
-      border: `2px dashed ${dragOver ? "#5a8a5e" : "#ddd5c8"}`,
+      border: `2px dashed ${dragOver ? "#bd5d38" : "#e0d2bd"}`,
       borderRadius: 14,
       padding: "52px 24px",
       textAlign: "center",
       cursor: "pointer",
-      background: dragOver ? "#5a8a5e08" : "#ffffff",
+      background: dragOver ? "#bd5d3808" : "#fdf9f1",
       transition: "all 0.2s"
     }
   }, /*#__PURE__*/React.createElement("input", {
@@ -3175,19 +3318,19 @@ function AmazonImportTab({
     style: {
       fontWeight: 800,
       fontSize: 16,
-      color: "#2d4a2f",
+      color: "#2c211a",
       marginBottom: 8
     }
   }, "Drop your FBA Inventory Event Detail Report"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#9aaa9b",
+      color: "#a89680",
       fontSize: 13,
       marginBottom: 20
     }
   }, "Accepts .csv or .txt · Tab or comma delimited"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "inline-block",
-      background: "#5a8a5e",
+      background: "#bd5d38",
       color: "#fff",
       borderRadius: 9,
       padding: "10px 24px",
@@ -3211,42 +3354,42 @@ function AmazonImportTab({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#5a8a5e15",
-      border: "1px solid #5a8a5e30",
+      background: "#bd5d3815",
+      border: "1px solid #bd5d3830",
       borderRadius: 8,
       padding: "5px 14px",
       fontSize: 13,
-      color: "#5a8a5e",
+      color: "#bd5d38",
       fontWeight: 700
     }
   }, preview.filter(r => r.prod).length, " ASINs matched"), preview.filter(r => !r.prod).length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#c4733a15",
-      border: "1px solid #c4733a30",
+      background: "#bd5d3815",
+      border: "1px solid #bd5d3830",
       borderRadius: 8,
       padding: "5px 14px",
       fontSize: 13,
-      color: "#c4733a",
+      color: "#bd5d38",
       fontWeight: 700
     }
   }, "⚠️ ", preview.filter(r => !r.prod).length, " ASINs not in Products sheet"), effectiveDate && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#3a8a8a15",
-      border: "1px solid #3a8a8a30",
+      background: "#a97b5215",
+      border: "1px solid #a97b5230",
       borderRadius: 8,
       padding: "5px 14px",
       fontSize: 13,
-      color: "#3a8a8a",
+      color: "#a97b52",
       fontWeight: 700
     }
   }, "📅 ", manualDate ? "Date set: " : "Report: ", effectiveDate), importNote && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#5a8a5e15",
-      border: "1px solid #5a8a5e30",
+      background: "#bd5d3815",
+      border: "1px solid #bd5d3830",
       borderRadius: 8,
       padding: "5px 14px",
       fontSize: 13,
-      color: "#5a8a5e",
+      color: "#bd5d38",
       fontWeight: 600,
       maxWidth: 300,
       overflow: "hidden",
@@ -3262,8 +3405,8 @@ function AmazonImportTab({
     }
   }, "✕ Clear")), preview[0]?._overlapSkipped && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#5a8a5e12",
-      border: "1px solid #5a8a5e40",
+      background: "#bd5d3812",
+      border: "1px solid #bd5d3840",
       borderRadius: 10,
       padding: "12px 16px",
       marginBottom: 14,
@@ -3279,19 +3422,19 @@ function AmazonImportTab({
   }, "✅"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 700,
-      color: "#2d4a2f",
+      color: "#2c211a",
       fontSize: 13,
       marginBottom: 3
     }
   }, "Overlap date handled automatically"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#6b7f6c",
+      color: "#6f6152",
       fontSize: 12
     }
   }, /*#__PURE__*/React.createElement("b", null, preview[0]._overlapDate), " was in your previous upload. Events on that date have been ", /*#__PURE__*/React.createElement("b", null, "excluded from this import"), " to prevent double-counting. Only stock counts use the ending balance — those are always safe to re-import."))), preview[0] && !preview[0]._overlapSkipped && preview[0]._overlapDate && importedDates[normaliseDate(preview[0]._overlapDate)] === undefined && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#c4733a10",
-      border: "1px solid #c4733a30",
+      background: "#bd5d3810",
+      border: "1px solid #bd5d3830",
       borderRadius: 10,
       padding: "12px 16px",
       marginBottom: 14,
@@ -3306,13 +3449,13 @@ function AmazonImportTab({
     }
   }, "ℹ️"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#6b7f6c",
+      color: "#6f6152",
       fontSize: 12
     }
   }, /*#__PURE__*/React.createElement("b", null, "First import detected."), " All dates including ", /*#__PURE__*/React.createElement("b", null, preview[0]._overlapDate), " will be imported. Future uploads overlapping this date will automatically skip its events.")), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#ffffff",
-      border: "1px solid #e8dfd4",
+      background: "#fdf9f1",
+      border: "1px solid #e7d9c4",
       borderRadius: 12,
       padding: "16px 18px",
       marginBottom: 14
@@ -3320,7 +3463,7 @@ function AmazonImportTab({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 700,
-      color: "#2d4a2f",
+      color: "#2c211a",
       fontSize: 13,
       marginBottom: 12
     }
@@ -3347,7 +3490,7 @@ function AmazonImportTab({
   }), reportDate && !manualDate && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
-      color: "#8a9e8b",
+      color: "#a89680",
       marginTop: 3
     }
   }, "Auto-detected: ", reportDate)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
@@ -3360,7 +3503,7 @@ function AmazonImportTab({
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
-      color: "#8a9e8b",
+      color: "#a89680",
       marginTop: 3
     }
   }, "This note is saved with every count and movement created from this upload")))), /*#__PURE__*/React.createElement("div", {
@@ -3372,8 +3515,8 @@ function AmazonImportTab({
   }, preview.map((row, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
-      background: "#ffffff",
-      border: `1px solid ${row.prod ? "#e8dfd4" : "#c4733a50"}`,
+      background: "#fdf9f1",
+      border: `1px solid ${row.prod ? "#e7d9c4" : "#bd5d3850"}`,
       borderRadius: 12,
       overflow: "hidden"
     }
@@ -3395,29 +3538,29 @@ function AmazonImportTab({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 800,
-      color: "#2d4a2f",
+      color: "#2c211a",
       fontSize: 14,
       marginBottom: 2
     }
   }, row.prod ? row.prod.ProductName : row.title.slice(0, 50) + "…"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#9aaa9b",
+      color: "#a89680",
       fontSize: 11
     }
   }, row.asin, " · ", row.fnsku, !row.prod && /*#__PURE__*/React.createElement("span", {
     style: {
-      color: "#c4733a",
+      color: "#bd5d38",
       fontWeight: 600
     }
   }, " · ⚠️ Not in Products sheet")), row.fcBreakdown && /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#c8bfb0",
+      color: "#c8b9a3",
       fontSize: 10,
       marginTop: 2
     }
   }, "FC breakdown: ", row.fcBreakdown), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#c8bfb0",
+      color: "#c8b9a3",
       fontSize: 10,
       marginTop: 1
     }
@@ -3435,19 +3578,19 @@ function AmazonImportTab({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
-      color: "#9aaa9b",
+      color: "#a89680",
       marginBottom: 2
     }
   }, "AMAZON"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 900,
       fontSize: 22,
-      color: "#2d4a2f",
+      color: "#2c211a",
       letterSpacing: -0.5
     }
   }, row.sellable_ending)), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#ddd5c8",
+      color: "#e0d2bd",
       fontSize: 18
     }
   }, "vs"), /*#__PURE__*/React.createElement("div", {
@@ -3457,14 +3600,14 @@ function AmazonImportTab({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
-      color: "#9aaa9b",
+      color: "#a89680",
       marginBottom: 2
     }
   }, "SYSTEM"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 900,
       fontSize: 22,
-      color: "#2d4a2f",
+      color: "#2c211a",
       letterSpacing: -0.5
     }
   }, row.systemFBA)), /*#__PURE__*/React.createElement("div", {
@@ -3507,7 +3650,7 @@ function AmazonImportTab({
       width: 8,
       height: 8,
       borderRadius: "50%",
-      background: act.skip ? "#c8bfb0" : act.color,
+      background: act.skip ? "#c8b9a3" : act.color,
       flexShrink: 0
     }
   }), /*#__PURE__*/React.createElement("div", {
@@ -3518,18 +3661,18 @@ function AmazonImportTab({
     style: {
       fontSize: 12,
       fontWeight: 700,
-      color: act.skip ? "#9aaa9b" : act.color,
+      color: act.skip ? "#a89680" : act.color,
       marginRight: 8
     }
   }, act.label), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
-      color: "#6b7f6c"
+      color: "#6f6152"
     }
   }, act.detail)), act.skip && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 11,
-      color: "#9aaa9b",
+      color: "#a89680",
       fontStyle: "italic",
       whiteSpace: "nowrap"
     }
@@ -3537,7 +3680,7 @@ function AmazonImportTab({
     style: {
       position: "sticky",
       bottom: 0,
-      background: "#f3eee7",
+      background: "#efe4d2",
       padding: "14px 0",
       display: "flex",
       gap: 10
@@ -3552,7 +3695,7 @@ function AmazonImportTab({
     onClick: runImport,
     disabled: importing || preview.filter(r => r.prod).length === 0,
     style: {
-      ...btnS("#5a8a5e"),
+      ...btnS("#bd5d38"),
       flex: 2,
       fontSize: 14,
       opacity: importing || preview.filter(r => r.prod).length === 0 ? 0.6 : 1
@@ -3567,27 +3710,27 @@ function AmazonImportTab({
   }, [{
     label: "Stock Counts",
     count: importLog.filter(l => l.msg.includes("Count")).length,
-    color: "#5a8a5e",
+    color: "#bd5d38",
     icon: "📊"
   }, {
     label: "FBA Shipments",
     count: importLog.filter(l => l.msg.includes("shipment")).length,
-    color: "#3a8a8a",
+    color: "#a97b52",
     icon: "🚚"
   }, {
     label: "Damage",
     count: importLog.filter(l => l.msg.includes("Damage")).length,
-    color: "#c4534a",
+    color: "#b23a2e",
     icon: "⚠️"
   }, {
     label: "Errors",
     count: importLog.filter(l => !l.ok).length,
-    color: "#c4733a",
+    color: "#bd5d38",
     icon: "❌"
   }].map(s => /*#__PURE__*/React.createElement("div", {
     key: s.label,
     style: {
-      background: "#ffffff",
+      background: "#fdf9f1",
       border: `1px solid ${s.color}30`,
       borderRadius: 10,
       padding: "12px 14px",
@@ -3607,13 +3750,13 @@ function AmazonImportTab({
   }, s.count), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
-      color: "#8a9e8b",
+      color: "#a89680",
       marginTop: 2
     }
   }, s.label)))), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#ffffff",
-      border: "1px solid #e8dfd4",
+      background: "#fdf9f1",
+      border: "1px solid #e7d9c4",
       borderRadius: 12,
       overflow: "hidden",
       marginBottom: 16
@@ -3622,18 +3765,18 @@ function AmazonImportTab({
     style: {
       padding: "10px 16px",
       background: "#f8f4ef",
-      borderBottom: "1px solid #e8dfd4"
+      borderBottom: "1px solid #e7d9c4"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 700,
       fontSize: 13,
-      color: "#2d4a2f"
+      color: "#2c211a"
     }
   }, "Import Log"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
-      color: "#8a9e8b",
+      color: "#a89680",
       marginTop: 3,
       display: "flex",
       gap: 16
@@ -3644,22 +3787,22 @@ function AmazonImportTab({
       padding: "9px 16px",
       borderBottom: i < importLog.length - 1 ? "1px solid #f0ebe2" : "none",
       fontSize: 13,
-      color: entry.ok ? "#2d4a2f" : "#c4534a",
-      background: entry.ok ? "transparent" : "#c4534a05"
+      color: entry.ok ? "#2c211a" : "#b23a2e",
+      background: entry.ok ? "transparent" : "#b23a2e05"
     }
   }, entry.msg))), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#c4733a10",
-      border: "1px solid #c4733a30",
+      background: "#bd5d3810",
+      border: "1px solid #bd5d3830",
       borderRadius: 10,
       padding: "12px 16px",
       marginBottom: 16,
       fontSize: 13,
-      color: "#6b7f6c"
+      color: "#6f6152"
     }
   }, /*#__PURE__*/React.createElement("b", {
     style: {
-      color: "#c4733a"
+      color: "#bd5d38"
     }
   }, "Next step:"), " Go to ", /*#__PURE__*/React.createElement("b", null, "🔢 Stock Count"), " tab → Manager approves the stock counts → FBA stock updates automatically. FBA Shipment and Damage movements are saved as ", /*#__PURE__*/React.createElement("b", null, "Draft"), " — also need approval."), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3675,13 +3818,13 @@ function AmazonImportTab({
   }, "Upload Another Report"), /*#__PURE__*/React.createElement("button", {
     onClick: onCountCreated,
     style: {
-      ...btnS("#5a8a5e"),
+      ...btnS("#bd5d38"),
       flex: 2
     }
   }, "→ Go to Stock Count Tab"))), step === "preview" && preview.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#ffffff",
-      border: "1px solid #e8dfd4",
+      background: "#fdf9f1",
+      border: "1px solid #e7d9c4",
       borderRadius: 12,
       padding: 40,
       textAlign: "center"
@@ -3694,12 +3837,12 @@ function AmazonImportTab({
   }, "🔍"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 700,
-      color: "#2d4a2f",
+      color: "#2c211a",
       marginBottom: 6
     }
   }, "No ASINs found"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#9aaa9b",
+      color: "#a89680",
       fontSize: 13,
       marginBottom: 16
     }
@@ -3732,7 +3875,7 @@ function EditCountModal({
   const systemQty = stock ? stock.filter(s => s.ProductID === count.ProductID && s.LocationID === count.LocationID).reduce((a, s) => a + Number(s.Quantity), 0) : Number(count.SystemQty) || 0;
   const physNum = parseFloat(physical);
   const newDiff = !isNaN(physNum) ? physNum - systemQty : null;
-  const diffColor = newDiff === null ? "#9aaa9b" : newDiff === 0 ? "#5a8a5e" : newDiff > 0 ? "#3a8a8a" : "#c4534a";
+  const diffColor = newDiff === null ? "#a89680" : newDiff === 0 ? "#bd5d38" : newDiff > 0 ? "#a97b52" : "#b23a2e";
   async function submit() {
     if (!physical || isNaN(physNum) || physNum < 0) {
       setErr("Enter a valid physical count (0 or more).");
@@ -3760,7 +3903,7 @@ function EditCountModal({
   const MODAL_STYLE = {
     position: "fixed",
     inset: 0,
-    background: "rgba(45,74,47,0.55)",
+    background: "rgba(60,40,20,0.55)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -3773,7 +3916,7 @@ function EditCountModal({
     padding: 24,
     width: 460,
     maxWidth: "100%",
-    border: "1px solid #ddd5c8",
+    border: "1px solid #e0d2bd",
     maxHeight: "90vh",
     overflowY: "auto"
   };
@@ -3792,21 +3935,21 @@ function EditCountModal({
     style: {
       fontWeight: 800,
       fontSize: 15,
-      color: "#2d4a2f"
+      color: "#2c211a"
     }
   }, "✏️ Edit Stock Count"), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     style: {
       background: "none",
       border: "none",
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 22,
       cursor: "pointer"
     }
   }, "×")), /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#f8f4ef",
-      border: "1px solid #e8dfd4",
+      border: "1px solid #e7d9c4",
       borderRadius: 10,
       padding: "10px 14px",
       marginBottom: 14
@@ -3814,18 +3957,18 @@ function EditCountModal({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 700,
-      color: "#2d4a2f",
+      color: "#2c211a",
       fontSize: 13
     }
   }, prod ? prod.ProductName : count.ProductID), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 12,
       marginTop: 2
     }
   }, count.CountID, " · ", LOC_LABEL[count.LocationID] || count.LocationID, " · ", count.Reason), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#c4733a",
+      color: "#bd5d38",
       fontSize: 12,
       marginTop: 4,
       fontWeight: 600
@@ -3840,7 +3983,7 @@ function EditCountModal({
       background: "#f8f4ef",
       borderRadius: 12,
       padding: 14,
-      border: "1px solid #e8dfd4"
+      border: "1px solid #e7d9c4"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3853,7 +3996,7 @@ function EditCountModal({
     style: {
       fontSize: 10,
       fontWeight: 700,
-      color: "#9aaa9b",
+      color: "#a89680",
       textTransform: "uppercase",
       letterSpacing: 0.5,
       marginBottom: 6
@@ -3862,20 +4005,20 @@ function EditCountModal({
     style: {
       fontWeight: 900,
       fontSize: 28,
-      color: "#2d4a2f",
+      color: "#2c211a",
       letterSpacing: -1
     }
   }, systemQty), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
-      color: "#9aaa9b",
+      color: "#a89680",
       marginTop: 2
     }
   }, "calculated")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       fontWeight: 700,
-      color: "#9aaa9b",
+      color: "#a89680",
       textTransform: "uppercase",
       letterSpacing: 0.5,
       marginBottom: 6
@@ -3894,21 +4037,21 @@ function EditCountModal({
       padding: "4px",
       height: 48,
       background: "#fff",
-      border: "2px solid #5a8a5e"
+      border: "2px solid #bd5d38"
     },
     placeholder: "0",
     autoFocus: true
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
-      color: "#9aaa9b",
+      color: "#a89680",
       marginTop: 2
     }
   }, "correct count")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       fontWeight: 700,
-      color: "#9aaa9b",
+      color: "#a89680",
       textTransform: "uppercase",
       letterSpacing: 0.5,
       marginBottom: 6
@@ -3943,20 +4086,20 @@ function EditCountModal({
     style: inp
   })), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#3a8a8a10",
-      border: "1px solid #3a8a8a30",
+      background: "#a97b5210",
+      border: "1px solid #a97b5230",
       borderRadius: 8,
       padding: "8px 12px",
       fontSize: 12,
-      color: "#3a8a8a"
+      color: "#a97b52"
     }
   }, "ℹ️ This creates a new corrected count (", count.CountID, " stays as-is). A Manager must approve the new count to apply the adjustment."), err && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#c4534a12",
-      border: "1px solid #c4534a40",
+      background: "#b23a2e12",
+      border: "1px solid #b23a2e40",
       borderRadius: 8,
       padding: "10px 13px",
-      color: "#c4534a",
+      color: "#b23a2e",
       fontSize: 13
     }
   }, "❌ ", err)), /*#__PURE__*/React.createElement("div", {
@@ -3975,7 +4118,7 @@ function EditCountModal({
     onClick: submit,
     disabled: busy || !physical,
     style: {
-      ...btnS("#3a8a8a"),
+      ...btnS("#a97b52"),
       flex: 2,
       opacity: busy || !physical ? 0.6 : 1
     }
@@ -3985,15 +4128,180 @@ function EditCountModal({
 // ─────────────────────────────────────────────────────────────
 //  MAIN APP
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+//  Redesign helpers — Amazon smile icon, Home dashboard, Bottom nav
+//  (added for warm-editorial redesign; all data/permission logic reused)
+// ─────────────────────────────────────────────────────────────
+function nextImgExt(e){
+  var img = e.currentTarget;
+  var base = img.getAttribute("data-base") || "";
+  var exts = ["jpg","jpeg","webp","JPG","JPEG","PNG"];
+  var i = parseInt(img.getAttribute("data-i") || "0", 10);
+  if (base && i < exts.length) { img.setAttribute("data-i", String(i + 1)); img.src = base + "." + exts[i]; }
+  else { img.style.display = "none"; }
+}
+
+function AmazonIcon(props) {
+  var size = props.size || 20, color = props.color || "#2c211a";
+  return /*#__PURE__*/React.createElement("svg", { width: size, height: size * 0.68, viewBox: "0 0 50 34" },
+    /*#__PURE__*/React.createElement("text", { x: 25, y: 20, textAnchor: "middle", fontFamily: "Fraunces,serif", fontWeight: 700, fontSize: 21, fill: color }, "a"),
+    /*#__PURE__*/React.createElement("path", { d: "M8 25 C 19 32, 31 32, 42 25", fill: "none", stroke: "#ff9900", strokeWidth: 3.4, strokeLinecap: "round" }),
+    /*#__PURE__*/React.createElement("path", { d: "M39.5 26.2 l4 -2.2 -1 4.4 z", fill: "#ff9900" })
+  );
+}
+
+function HomeView(props) {
+  var user = props.user, products = props.products, stock = props.stock,
+      alertThresholds = props.alertThresholds, drafts = props.drafts;
+  var byProd = {};
+  stock.forEach(function(s){
+    if (STOCK_LOCATIONS.indexOf(s.LocationID) !== -1)
+      byProd[s.ProductID] = (byProd[s.ProductID] || 0) + Number(s.Quantity || 0);
+  });
+  var meta = {}; products.forEach(function(p){ meta[p.ProductID] = p; });
+  var ok = 0, low = 0, crit = 0, oos = 0, lowItems = [];
+  Object.keys(byProd).forEach(function(pid){
+    var p = meta[pid]; if (!p) return;
+    var qty = byProd[pid], at = alertThresholds[pid] || ALERT_FALLBACK, st = statusOf(qty, at);
+    if (st === "ok") ok++;
+    else { if (st === "low") low++; else if (st === "critical") crit++; else oos++;
+           lowItems.push({ p: p, qty: qty, at: at, st: st }); }
+  });
+  lowItems.sort(function(a,b){ return a.qty - b.qty; });
+  var first = (user.name || "there").split(" ")[0];
+  var hr = new Date().getHours();
+  var greet = hr < 12 ? "Good morning" : (hr < 17 ? "Good afternoon" : "Good evening");
+  var eyebrow = { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 600, color: "#2c211a", margin: "18px 2px 8px" };
+  var actBtn = { background: "#2a201a", color: "#f4ead8", border: "none", borderRadius: 14, height: 50, fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", fontFamily: "inherit" };
+  var bic = { width: 22, height: 22, borderRadius: "50%", background: "#bd5d38", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 };
+  function prodImg(pid, emoji) {
+    return /*#__PURE__*/React.createElement("div", { style: { width: 40, height: 46, borderRadius: 8, overflow: "hidden", position: "relative", background: "linear-gradient(160deg,#e7dcc9,#cdbb9f)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 } },
+      emoji,
+      /*#__PURE__*/React.createElement("img", { src: "images/" + pid + ".png", "data-base": "images/" + pid, onError: nextImgExt, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover" } })
+    );
+  }
+  var healthCells = [
+    { t: "OK", v: ok, c: "#5f7a4f", bg: "#e2e8d3", ic: "💚" },
+    { t: "Low", v: low, c: "#c2872f", bg: "#f4e7c8", ic: "⬇️" },
+    { t: "Critical", v: crit, c: "#b23a2e", bg: "#f3dcd5", ic: "❗" },
+    { t: "Out", v: oos, c: "#a89680", bg: "#e6ddd0", ic: "🚫" }
+  ];
+  return /*#__PURE__*/React.createElement("div", { style: { maxWidth: 460, margin: "0 auto", paddingTop: 6 } },
+    /*#__PURE__*/React.createElement("div", { style: { margin: "10px 2px 4px" } },
+      /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 600, color: "#2c211a" } }, greet + ", " + first),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: "#6f6152", marginTop: 2 } }, "Here's what's happening with your inventory today.")
+    ),
+    /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11, margin: "12px 0" } },
+      /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14 } },
+        /*#__PURE__*/React.createElement("div", { style: { width: 34, height: 34, borderRadius: 10, background: "#f5ecdc", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 9 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 22, color: "#2c211a" })),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 28, fontWeight: 900, color: "#bd5d38", letterSpacing: -1, lineHeight: 1 } }, props.totFBA),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#6f6152", marginTop: 4 } }, "Amazon FBA")
+      ),
+      /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14 } },
+        /*#__PURE__*/React.createElement("div", { style: { width: 34, height: 34, borderRadius: 10, background: "#f5ecdc", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 9, fontSize: 16 } }, "🏠"),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 28, fontWeight: 900, color: "#a97b52", letterSpacing: -1, lineHeight: 1 } }, props.totWH),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#6f6152", marginTop: 4 } }, "Warehouse")
+      )
+    ),
+    user.canCreate && /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11, margin: "4px 0" } },
+      /*#__PURE__*/React.createElement("button", { onClick: props.onRecord, style: actBtn },
+        /*#__PURE__*/React.createElement("span", { style: bic }, "+"), " Record Movement"),
+      /*#__PURE__*/React.createElement("button", { onClick: props.onAssemble, style: actBtn },
+        /*#__PURE__*/React.createElement("span", { style: { ...bic, fontSize: 12 } }, "🧩"), " Assemble Combo")
+    ),
+    /*#__PURE__*/React.createElement("div", { style: eyebrow }, "Stock Health"),
+    /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 } },
+      healthCells.map(function(h){
+        return /*#__PURE__*/React.createElement("div", { key: h.t, style: { ...card, padding: "11px 6px", textAlign: "center" } },
+          /*#__PURE__*/React.createElement("div", { style: { width: 26, height: 26, borderRadius: "50%", margin: "0 auto 6px", background: h.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 } }, h.ic),
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: h.c } }, h.t),
+          /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 600, color: "#2c211a", marginTop: 2 } }, h.v)
+        );
+      })
+    ),
+    lowItems.length > 0 && /*#__PURE__*/React.createElement("div", { style: { ...card, borderLeft: "4px solid #b23a2e", marginTop: 12, padding: "13px 15px" } },
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 13.5, fontWeight: 700 } }, "❗ Low Stock Alert"),
+        /*#__PURE__*/React.createElement("button", { onClick: function(){ props.setTab("product"); }, style: { background: "none", border: "none", color: "#bd5d38", fontSize: 11.5, fontWeight: 700, cursor: "pointer" } }, "View All ›")
+      ),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#6f6152", marginTop: 2 } }, lowItems.length + " item" + (lowItems.length > 1 ? "s" : "") + " need attention"),
+      lowItems.slice(0,4).map(function(it,i){
+        var nm = (it.p.ProductName || "").replace("Syoat ", "");
+        return /*#__PURE__*/React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", gap: 11, padding: "10px 0", borderTop: i === 0 ? "none" : "1px solid #e7d9c4", marginTop: 8 } },
+          prodImg(it.p.ProductID, "🧴"),
+          /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+            /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "#2c211a" } }, nm),
+            /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#a89680" } }, it.p.SKU || it.p.ProductID)
+          ),
+          /*#__PURE__*/React.createElement("div", { style: { textAlign: "right" } },
+            /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 600, color: (it.st === "critical" || it.st === "oos") ? "#b23a2e" : "#c2872f", lineHeight: 1 } }, it.qty),
+            /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: 0.5 } }, "vs " + it.at)
+          )
+        );
+      })
+    ),
+    /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1.15fr", gap: 11, marginTop: 12 } },
+      /*#__PURE__*/React.createElement("div", { style: card },
+        /*#__PURE__*/React.createElement("div", { style: { width: 32, height: 32, borderRadius: 9, background: "#f5ecdc", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, marginBottom: 9 } }, "📋"),
+        /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 26, fontWeight: 600, color: "#2c211a", lineHeight: 1 } }, drafts.length),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#6f6152", marginTop: 3 } }, "Pending Approval"),
+        /*#__PURE__*/React.createElement("button", { onClick: props.onOpenList, style: { marginTop: 10, fontSize: 11, color: "#bd5d38", fontWeight: 700, background: "none", border: "none", cursor: "pointer", padding: 0 } }, "View history ›")
+      ),
+      /*#__PURE__*/React.createElement("div", { style: { ...card, padding: "12px 13px" } },
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+          /*#__PURE__*/React.createElement("b", { style: { fontSize: 13, color: "#2c211a" } }, "Recent Activity"),
+          /*#__PURE__*/React.createElement("button", { onClick: props.onOpenList, style: { background: "none", border: "none", color: "#bd5d38", fontSize: 11, fontWeight: 700, cursor: "pointer" } }, "All ›")
+        ),
+        drafts.length > 0
+          ? drafts.slice(0,3).map(function(d,i){
+              return /*#__PURE__*/React.createElement("div", { key: i, style: { display: "flex", gap: 9, padding: "7px 0", borderTop: i === 0 ? "none" : "1px solid #e7d9c4" } },
+                /*#__PURE__*/React.createElement("div", { style: { width: 26, height: 26, borderRadius: 7, background: "#f5ecdc", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 } }, "📝"),
+                /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                  /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, fontWeight: 700, color: "#2c211a" } }, d.MovementID),
+                  /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#6f6152" } }, d.MovementType)
+                )
+              );
+            })
+          : /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680", padding: "6px 0" } }, "No pending items. Tap All to view history.")
+      )
+    )
+  );
+}
+
+function BottomNav(props) {
+  var tab = props.tab, setTab = props.setTab, user = props.user, showList = props.showList;
+  var items = [
+    { k: "home", label: "Home", icon: "🏠" },
+    { k: "product", label: "Inventory", icon: "📦" },
+    { k: "amazon", label: "Amazon", amazon: true },
+    { k: "movements", label: "Movements", icon: "🔄" },
+    { k: "analytics", label: "Analytics", icon: "📊" }
+  ];
+  // Permission: Warehouse role has no Amazon import access — hide that tab.
+  if (user.role === "Warehouse") items = items.filter(function(it){ return it.k !== "amazon"; });
+  var active = showList ? "movements" : ((tab === "product" || tab === "location" || tab === "counts") ? "product" : tab);
+  return /*#__PURE__*/React.createElement("div", { style: { position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 120, background: "rgba(253,249,241,0.94)", backdropFilter: "blur(10px)", borderTop: "1px solid #e7d9c4", display: "flex", padding: "8px 4px 18px" } },
+    items.map(function(it){
+      var on = active === it.k;
+      return /*#__PURE__*/React.createElement("button", { key: it.k, onClick: it.k === "movements" ? props.onMovements : function(){ setTab(it.k); },
+        style: { flex: 1, background: "transparent", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: on ? "#bd5d38" : "#a89680", fontWeight: 700, fontSize: 9.5, fontFamily: "inherit" } },
+        it.amazon
+          ? /*#__PURE__*/React.createElement(AmazonIcon, { size: 20, color: on ? "#bd5d38" : "#2c211a" })
+          : /*#__PURE__*/React.createElement("span", { style: { fontSize: 18, lineHeight: 1, filter: on ? "none" : "grayscale(1) opacity(0.55)" } }, it.icon),
+        /*#__PURE__*/React.createElement("span", null, it.label)
+      );
+    })
+  );
+}
+
 function App() {
   const [user, setUser] = React.useState(null);
-  const [restoringSession, setRestoringSession] = React.useState(!!AUTH_TOKEN);
   const [products, setProducts] = React.useState([]);
   const [stock, setStock] = React.useState([]);
   const [drafts, setDrafts] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
-  const [tab, setTab] = React.useState("product");
+  const [tab, setTab] = React.useState("home");
   const [showMov, setShowMov] = React.useState(false);
   const [showList, setShowList] = React.useState(false);
   const [editingMov, setEditingMov] = React.useState(null); // draft movement being edited, or null
@@ -4015,16 +4323,6 @@ function App() {
     setToast(msg);
     setTimeout(() => setToast(""), 5000);
   };
-  React.useEffect(() => {
-    if (!AUTH_TOKEN) { setRestoringSession(false); return; }
-    api("getSession").then(profile => {
-      if (!profile || !profile.email) throw new Error("Invalid session profile");
-      setUser(profile);
-    }).catch(() => {
-      AUTH_TOKEN = "";
-      sessionStorage.removeItem("syoat_session_token");
-    }).finally(() => setRestoringSession(false));
-  }, []);
   const load = React.useCallback(async () => {
     setSyncing(true);
     try {
@@ -4069,10 +4367,8 @@ function App() {
           : "Google Sheet is slow — using offline mode. Refresh to retry."
         );
       }
-    }, 7000);
+    }, 12000);
     api("getAppLogins").then(data => {
-      if (done) return;  // timeout already fired — ignore late response
-      done = true;
       clearTimeout(loginTimer);
       if (Array.isArray(data) && data.length > 0) {
         // Merge sheet roles with permission map
@@ -4130,7 +4426,13 @@ function App() {
         // Cache enriched list in localStorage — used by timeout/error fallback so PINs stay current.
         try { localStorage.setItem("syoat_staff_cache", JSON.stringify(enriched)); } catch {}
         setStaffDB(enriched);
-      } else if (data && data.error) {
+        setStaffLoadError(null);
+        done = true;
+        return;
+      }
+      if (done) return; // timeout already applied a fallback — keep it rather than replace with another fallback
+      done = true;
+      if (data && data.error) {
         const _c1 = (() => { try { return JSON.parse(localStorage.getItem("syoat_staff_cache") || "null"); } catch { return null; } })();
         setStaffDB(_c1 || STAFF_DB_FALLBACK);
         setStaffLoadError("Sheet error: " + data.error);
@@ -4261,9 +4563,9 @@ function App() {
     cursor: "pointer",
     fontWeight: 700,
     fontSize: 13,
-    borderColor: tab === t ? "#5a8a5e" : "#ddd5c8",
-    background: tab === t ? "#5a8a5e" : "transparent",
-    color: tab === t ? "#ffffff" : "#8a9e8b",
+    borderColor: tab === t ? "#bd5d38" : "#e0d2bd",
+    background: tab === t ? "#bd5d38" : "transparent",
+    color: tab === t ? "#fdf9f1" : "#a89680",
     transition: "all 0.15s"
   });
 
@@ -4275,7 +4577,7 @@ function App() {
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      background: "#f3eee7",
+      background: "#efe4d2",
       gap: 12
     }
   }, /*#__PURE__*/React.createElement("img", {
@@ -4287,14 +4589,14 @@ function App() {
     }
   }), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#5a8a5e",
+      color: "#bd5d38",
       fontWeight: 700,
       fontSize: 14,
       marginTop: 8
     }
   }, "Loading staff list..."), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#9aaa9b",
+      color: "#a89680",
       fontSize: 12
     }
   }, "Connecting to Google Sheet"));
@@ -4344,8 +4646,8 @@ function App() {
   return /*#__PURE__*/React.createElement("div", {
     style: {
       minHeight: "100vh",
-      background: "#f3eee7",
-      color: "#2d4a2f",
+      background: "#efe4d2",
+      color: "#2c211a",
       fontFamily: "'Plus Jakarta Sans',system-ui,sans-serif",
       paddingBottom: 50
     }
@@ -4355,26 +4657,26 @@ function App() {
       top: 12,
       right: 12,
       zIndex: 999,
-      background: "#ffffff",
-      border: `1px solid ${toast.startsWith("❌") ? "#ef4444" : "#ddd5c8"}`,
+      background: "#fdf9f1",
+      border: `1px solid ${toast.startsWith("❌") ? "#ef4444" : "#e0d2bd"}`,
       borderRadius: 10,
       padding: "11px 18px",
-      color: toast.startsWith("❌") ? "#fca5a5" : "#2d4a2f",
+      color: toast.startsWith("❌") ? "#fca5a5" : "#2c211a",
       fontSize: 13,
-      boxShadow: "0 8px 32px rgba(45,74,47,0.15)",
+      boxShadow: "0 8px 32px rgba(60,40,20,0.15)",
       maxWidth: 340
     }
   }, toast),
   showLowStockAlert && React.createElement("div", {
-    style: { position:"fixed", inset:0, background:"rgba(45,74,47,0.65)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:500, padding:16 }
+    style: { position:"fixed", inset:0, background:"rgba(60,40,20,0.65)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:500, padding:16 }
   }, React.createElement("div", {
-    style: { background:"#fefcf9", borderRadius:18, padding:"28px 28px 24px", width:460, maxWidth:"100%", border:"1px solid #ddd5c8", boxShadow:"0 20px 60px rgba(45,74,47,0.2)" }
+    style: { background:"#fefcf9", borderRadius:18, padding:"28px 28px 24px", width:460, maxWidth:"100%", border:"1px solid #e0d2bd", boxShadow:"0 20px 60px rgba(60,40,20,0.2)" }
   },
     React.createElement("div", { style:{ display:"flex", alignItems:"center", gap:10, marginBottom:18 } },
       React.createElement("span", { style:{ fontSize:28 } }, "⚠️"),
       React.createElement("div", null,
-        React.createElement("div", { style:{ fontWeight:800, fontSize:17, color:"#c4733a" } }, "Low Stock Alert"),
-        React.createElement("div", { style:{ fontSize:12, color:"#6b7f6c" } }, lowStockItems.length + " product" + (lowStockItems.length > 1 ? "s" : "") + " need attention")
+        React.createElement("div", { style:{ fontWeight:800, fontSize:17, color:"#bd5d38" } }, "Low Stock Alert"),
+        React.createElement("div", { style:{ fontSize:12, color:"#6f6152" } }, lowStockItems.length + " product" + (lowStockItems.length > 1 ? "s" : "") + " need attention")
       )
     ),
     lowStockItems.map(p => React.createElement("div", {
@@ -4382,150 +4684,39 @@ function App() {
       style: { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", background: p.status === "oos" ? "#fef2f2" : "#fff8f0", borderRadius:10, marginBottom:8, border: "1px solid " + (p.status === "oos" ? "#fca5a5" : "#f4c98a") }
     },
       React.createElement("div", null,
-        React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#2d4a2f" } }, p.ProductName || p.ProductID),
-        React.createElement("div", { style:{ fontSize:11, color:"#6b7f6c", marginTop:2 } }, "Reorder level: " + p.threshold + " units")
+        React.createElement("div", { style:{ fontWeight:700, fontSize:13, color:"#2c211a" } }, p.ProductName || p.ProductID),
+        React.createElement("div", { style:{ fontSize:11, color:"#6f6152", marginTop:2 } }, "Reorder level: " + p.threshold + " units")
       ),
       React.createElement("div", { style:{ textAlign:"right" } },
-        React.createElement("div", { style:{ fontWeight:800, fontSize:18, color: p.status === "oos" ? "#ef4444" : "#c4733a" } }, p.totalQty),
-        React.createElement("div", { style:{ fontSize:10, fontWeight:700, color: p.status === "oos" ? "#ef4444" : "#c4733a", textTransform:"uppercase", letterSpacing:"0.05em" } },
+        React.createElement("div", { style:{ fontWeight:800, fontSize:18, color: p.status === "oos" ? "#ef4444" : "#bd5d38" } }, p.totalQty),
+        React.createElement("div", { style:{ fontSize:10, fontWeight:700, color: p.status === "oos" ? "#ef4444" : "#bd5d38", textTransform:"uppercase", letterSpacing:"0.05em" } },
           p.status === "oos" ? "OUT OF STOCK" : p.status === "critical" ? "CRITICAL" : "LOW"
         )
       )
     )),
-    React.createElement("div", { style:{ fontSize:11, color:"#9aaa9b", marginTop:6, marginBottom:18 } },
+    React.createElement("div", { style:{ fontSize:11, color:"#a89680", marginTop:6, marginBottom:18 } },
       "Total stock across all physical locations (excludes virtual like FBA in-transit)."
     ),
     React.createElement("div", { style:{ display:"flex", gap:10, justifyContent:"flex-end" } },
       React.createElement("button", {
         onClick: () => setShowLowStockAlert(false),
-        style: { background:"#5a8a5e", color:"#fff", border:"none", borderRadius:9, padding:"10px 24px", fontWeight:700, cursor:"pointer", fontSize:14 }
+        style: { background:"#bd5d38", color:"#fff", border:"none", borderRadius:9, padding:"10px 24px", fontWeight:700, cursor:"pointer", fontSize:14 }
       }, "Noted — Go to Dashboard")
     )
   )),
   /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: "#faf6f0",
-      borderBottom: "1px solid #ddd5c8",
-      padding: "12px 18px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      flexWrap: "wrap",
-      gap: 10
-    }
+    style: { position: "sticky", top: 0, zIndex: 60, background: "rgba(239,228,210,0.92)", backdropFilter: "blur(10px)", borderBottom: "1px solid #e7d9c4", padding: "10px 16px", display: "flex", alignItems: "center", gap: 11 }
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 10
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: "#fff",
-      borderRadius: 10,
-      padding: "4px 10px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      boxShadow: "0 1px 6px rgba(0,0,0,0.08)"
-    }
-  }, /*#__PURE__*/React.createElement("img", {
-    src: SYOAT_LOGO,
-    alt: "Syoat",
-    style: {
-      height: 32,
-      width: "auto",
-      display: "block",
-      filter: "brightness(0) saturate(100%) invert(27%) sepia(30%) saturate(600%) hue-rotate(90deg) brightness(85%)"
-    }
-  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontWeight: 800,
-      fontSize: 14
-    }
-  }, "Inventory ERP"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: "#8a9e8b",
-      fontSize: 11
-    }
-  }, "Aashya Cosmetics · Hyderabad")), /*#__PURE__*/React.createElement("span", {
-    style: {
-      background: "#16a34a20",
-      color: "#4ade80",
-      border: "1px solid #16a34a40",
-      borderRadius: 6,
-      padding: "2px 7px",
-      fontSize: 11,
-      fontWeight: 700
-    }
-  }, "● LIVE")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 8,
-      alignItems: "center",
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: ROLE_COLOR[user.role] + "15",
-      border: `1px solid ${ROLE_COLOR[user.role]}30`,
-      borderRadius: 8,
-      padding: "5px 12px",
-      display: "flex",
-      alignItems: "center",
-      gap: 8
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 14
-    }
-  }, {
-    Founder: "🌟",
-    "Co-Founder": "💎",
-    Owner: "👑",
-    Admin: "🛡️",
-    Manager: "📋",
-    Warehouse: "📦",
-    Auditor: "🔍"
-  }[user.role]), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: "#2d4a2f",
-      fontWeight: 700,
-      fontSize: 12
-    }
-  }, user.name.split(" ")[0]), /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: ROLE_COLOR[user.role],
-      fontSize: 10,
-      fontWeight: 600
-    }
-  }, user.role))), /*#__PURE__*/React.createElement("button", {
-    onClick: load,
-    style: ghost
-  }, syncing ? "⟳ Syncing…" : "⟳ Sync" + (lastSync ? " · " + tsAgo(lastSync) : "")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowList(true),
-    style: ghost
-  }, "📋 Movements"), user.canViewAll && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setTab("amazon"),
-    style: ghost,
-    title: "Open the guided Amazon report upload and validation workflow"
-  }, "Amazon Upload"), user.canCreate && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowMov(true),
-    style: btnS()
-  }, "+ Record Movement"), (user.role === "Founder" || user.role === "Co-Founder") && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowAssemble(true),
-    style: {
-      ...btnS(),
-      background: "#6d5ae6"
-    }
-  }, "🧩 Assemble Combo"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => { apiWritePost("logout", "", {}).catch(() => {}).finally(() => { AUTH_TOKEN = ""; sessionStorage.removeItem("syoat_session_token"); setUser(null); }); },
-    style: {
-      ...ghost,
-      color: "#ef4444",
-      borderColor: "#ef444430"
-    }
-  }, "Logout"))), /*#__PURE__*/React.createElement("div", {
+    style: { width: 44, height: 44, borderRadius: 13, background: "#fff", border: "1px solid #e7d9c4", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 2px 6px -3px rgba(0,0,0,0.2)" }
+  }, /*#__PURE__*/React.createElement("img", { src: SYOAT_LOGO, alt: "Syoat", style: { width: "100%", height: "100%", objectFit: "contain", padding: 4 } })), /*#__PURE__*/React.createElement("div", {
+    style: { flex: 1, minWidth: 0 }
+  }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 600, color: "#2c211a", lineHeight: 1.05 } }, "Inventory ERP"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#6f6152", display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" } }, "Aashya Cosmetics · Hyderabad", /*#__PURE__*/React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 4, background: "#e2e8d3", color: "#5f7a4f", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", padding: "2px 7px", borderRadius: 20, textTransform: "uppercase" } }, /*#__PURE__*/React.createElement("span", { style: { width: 5, height: 5, borderRadius: "50%", background: "#5f9e6a" } }), "Live"))), /*#__PURE__*/React.createElement("button", {
+    onClick: load, title: "Sync now",
+    style: { width: 38, height: 38, borderRadius: "50%", border: "1px solid #e7d9c4", background: "#fdf9f1", color: syncing ? "#bd5d38" : "#6f6152", fontSize: 16, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }
+  }, "⟳"), /*#__PURE__*/React.createElement("button", {
+    onClick: function(){ if (window.confirm("Log out of Syoat ERP?")) setUser(null); }, title: user.name + " · tap to log out",
+    style: { width: 40, height: 40, borderRadius: "50%", background: "#2a201a", color: "#f2e7d5", border: "none", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0, cursor: "pointer", position: "relative" }
+  }, (user.name || "?").split(" ").map(function(w){ return w[0] || ""; }).slice(0, 2).join("").toUpperCase(), /*#__PURE__*/React.createElement("span", { style: { position: "absolute", bottom: 1, right: 1, width: 9, height: 9, borderRadius: "50%", background: "#5f9e6a", border: "2px solid #efe4d2" } }))), /*#__PURE__*/React.createElement("div", {
     style: {
       maxWidth: 940,
       margin: "0 auto",
@@ -4549,7 +4740,12 @@ function App() {
     onApproveAll: approveAll,
     onEdit: m => setEditingMov(m),
     onReject: rejectDraft
-  }), /*#__PURE__*/React.createElement("div", {
+  }), tab === "home" && /*#__PURE__*/React.createElement(HomeView, {
+    user: user, products: products, stock: stock, alertThresholds: alertThresholds,
+    totFBA: totFBA, totWH: totWH, drafts: drafts,
+    onRecord: function(){ setShowMov(true); }, onAssemble: function(){ setShowAssemble(true); },
+    onOpenList: function(){ setShowList(true); }, setTab: setTab
+  }), (tab === "product" || tab === "location" || tab === "counts") && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
@@ -4566,7 +4762,7 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#5a8a5e18",
+      background: "#bd5d3818",
       borderRadius: 10,
       width: 44,
       height: 44,
@@ -4580,13 +4776,13 @@ function App() {
     style: {
       fontSize: 28,
       fontWeight: 900,
-      color: "#5a8a5e",
+      color: "#bd5d38",
       letterSpacing: -1,
       lineHeight: 1
     }
   }, loading ? "…" : totFBA), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 12,
       marginTop: 3
     }
@@ -4599,7 +4795,7 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#3a8a8a18",
+      background: "#a97b5218",
       borderRadius: 10,
       width: 44,
       height: 44,
@@ -4613,39 +4809,30 @@ function App() {
     style: {
       fontSize: 28,
       fontWeight: 900,
-      color: "#3a8a8a",
+      color: "#a97b52",
       letterSpacing: -1,
       lineHeight: 1
     }
   }, loading ? "…" : totWH), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 12,
       marginTop: 3
     }
-  }, "Warehouse")))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6,
-      marginBottom: 16,
-      flexWrap: "wrap"
-    }
+  }, "Warehouse")))), (tab === "product" || tab === "location" || tab === "counts") && user.canCreate && /*#__PURE__*/React.createElement("div", {
+    style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11, margin: "2px 0 12px", maxWidth: 400 }
   }, /*#__PURE__*/React.createElement("button", {
-    style: tabSt("product"),
-    onClick: () => setTab("product")
-  }, "📦 By Product"), /*#__PURE__*/React.createElement("button", {
-    style: tabSt("location"),
-    onClick: () => setTab("location")
-  }, "📍 By Location"), /*#__PURE__*/React.createElement("button", {
-    style: tabSt("counts"),
-    onClick: () => setTab("counts")
-  }, "🔢 Stock Count"), user.role !== "Warehouse" && /*#__PURE__*/React.createElement("button", {
-    style: tabSt("amazon"),
-    onClick: () => setTab("amazon")
-  }, "🔴 Amazon Import"), /*#__PURE__*/React.createElement("button", {
-    style: tabSt("analytics"),
-    onClick: () => setTab("analytics")
-  }, "📊 Analytics")), tab === "product" && /*#__PURE__*/React.createElement("div", {
+    onClick: function(){ setShowMov(true); },
+    style: { background: "#2a201a", color: "#f4ead8", border: "none", borderRadius: 14, height: 48, fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", fontFamily: "inherit" }
+  }, /*#__PURE__*/React.createElement("span", { style: { width: 22, height: 22, borderRadius: "50%", background: "#bd5d38", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 } }, "+"), " Record Movement"), /*#__PURE__*/React.createElement("button", {
+    onClick: function(){ setShowAssemble(true); },
+    style: { background: "#2a201a", color: "#f4ead8", border: "none", borderRadius: 14, height: 48, fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", fontFamily: "inherit" }
+  }, /*#__PURE__*/React.createElement("span", { style: { width: 22, height: 22, borderRadius: "50%", background: "#bd5d38", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 } }, "🧩"), " Assemble Combo")), (tab === "product" || tab === "location" || tab === "counts") && /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 13, padding: 4, gap: 3, marginBottom: 16, maxWidth: 420 }
+  }, [{ k: "product", l: "📦 By Product" }, { k: "location", l: "📍 By Location" }, { k: "counts", l: "🔢 Stock Count" }].map(function(x){
+    var on = tab === x.k;
+    return /*#__PURE__*/React.createElement("button", { key: x.k, onClick: function(){ setTab(x.k); }, style: { flex: 1, border: "none", background: on ? "#2a201a" : "transparent", color: on ? "#f4ead8" : "#6f6152", padding: "9px 4px", borderRadius: 9, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", boxShadow: on ? "0 1px 4px rgba(0,0,0,0.15)" : "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 } }, x.l);
+  })), tab === "product" && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gap: 10
@@ -4666,8 +4853,15 @@ function App() {
       key: p.ProductID,
       style: {
         ...card,
-        border: `1px solid ${st !== "ok" ? SC[st] + "50" : "#ddd5c8"}`
+        display: "flex",
+        gap: 12,
+        alignItems: "flex-start",
+        border: `1px solid ${st !== "ok" ? SC[st] + "50" : "#e0d2bd"}`
       }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { width: 50, height: 58, borderRadius: 9, overflow: "hidden", position: "relative", flexShrink: 0, background: "linear-gradient(160deg,#e7dcc9,#cdbb9f)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }
+    }, p.ItemType === "Freebie" ? "🎁" : "🧴", /*#__PURE__*/React.createElement("img", { src: "images/" + p.ProductID + ".png", "data-base": "images/" + p.ProductID, onError: nextImgExt, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover" } })), /*#__PURE__*/React.createElement("div", {
+      style: { flex: 1, minWidth: 0 }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
@@ -4692,9 +4886,9 @@ function App() {
       status: st
     }), p.ProductID === "PRD-P001" && /*#__PURE__*/React.createElement("span", {
       style: {
-        background: "#c4733a18",
-        color: "#c4733a",
-        border: "1px solid #c4733a40",
+        background: "#bd5d3818",
+        color: "#bd5d38",
+        border: "1px solid #bd5d3840",
         borderRadius: 6,
         padding: "1px 6px",
         fontSize: 10,
@@ -4714,12 +4908,12 @@ function App() {
       style: {
         fontWeight: 700,
         fontSize: 14,
-        color: "#2d4a2f",
+        color: "#2c211a",
         marginBottom: 2
       }
     }, p.ProductName), /*#__PURE__*/React.createElement("div", {
       style: {
-        color: "#9aaa9b",
+        color: "#a89680",
         fontSize: 11
       }
     }, p.SKU, p.AmazonASIN ? " · " + p.AmazonASIN : "", p.FNSKU ? " · " + p.FNSKU : "")), /*#__PURE__*/React.createElement("div", {
@@ -4732,19 +4926,19 @@ function App() {
     }, [{
       label: "FBA",
       val: sk.fba,
-      c: "#5a8a5e"
+      c: "#bd5d38"
     }, {
       label: "Warehouse",
       val: sk.wh,
-      c: "#3a8a8a"
+      c: "#a97b52"
     }, {
       label: "Transit",
       val: sk.transit,
-      c: "#c4733a"
+      c: "#bd5d38"
     }, {
       label: "Returns",
       val: sk.returns,
-      c: "#c4534a"
+      c: "#b23a2e"
     }].map(loc => /*#__PURE__*/React.createElement("div", {
       key: loc.label,
       style: {
@@ -4752,25 +4946,26 @@ function App() {
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
+        fontFamily: "Fraunces,serif",
         fontSize: loc.label === "FBA" || loc.label === "Warehouse" ? 24 : 18,
-        fontWeight: 900,
-        color: loc.val > 0 ? loc.c : "#c8bfb0",
-        letterSpacing: -1
+        fontWeight: 600,
+        color: loc.val > 0 ? loc.c : "#c8b9a3",
+        letterSpacing: -0.5
       }
     }, loc.val), /*#__PURE__*/React.createElement("div", {
       style: {
-        color: "#9aaa9b",
+        color: "#a89680",
         fontSize: 10
       }
     }, loc.label))))), /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 10,
         paddingTop: 8,
-        borderTop: "1px solid #ede6dc"
+        borderTop: "1px solid #e7d9c4"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
-        background: "#f3eee7",
+        background: "#efe4d2",
         borderRadius: 5,
         overflow: "hidden",
         height: 4,
@@ -4785,72 +4980,30 @@ function App() {
       }
     })), /*#__PURE__*/React.createElement("div", {
       style: {
-        color: "#9aaa9b",
+        color: "#a89680",
         fontSize: 11,
         marginTop: 3
       }
-    }, "Alert at ", at, " · MRP ₹", p.MRP || "—", " · Cost ₹", p.UnitCost || "—")));
-  })), tab === "location" && /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
-      gap: 12
-    }
-  }, Object.entries(LOC_LABEL).filter(([lid]) => STOCK_LOCATIONS.includes(lid)).map(([lid, lname]) => {
-    const rows = stock.filter(s => s.LocationID === lid);
-    const total = rows.reduce((a, s) => a + Number(s.Quantity), 0);
-    return /*#__PURE__*/React.createElement("div", {
-      key: lid,
-      style: card
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontWeight: 700,
-        fontSize: 14,
-        color: "#2d4a2f",
-        marginBottom: 10
-      }
-    }, lname), rows.length === 0 ? /*#__PURE__*/React.createElement("div", {
-      style: {
-        color: "#c8bfb0",
-        fontSize: 13
-      }
-    }, "No stock") : rows.map(r => {
-      const p = products.find(x => x.ProductID === r.ProductID);
-      return /*#__PURE__*/React.createElement("div", {
-        key: r.ProductID,
-        style: {
-          display: "flex",
-          justifyContent: "space-between",
-          borderBottom: "1px solid #ede6dc",
-          padding: "7px 0",
-          fontSize: 12
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#6b7f6c"
-        }
-      }, (p?.ProductName || r.ProductID).split(" ").slice(0, 4).join(" ")), /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 800,
-          color: "#2d4a2f"
-        }
-      }, r.Quantity));
-    }), /*#__PURE__*/React.createElement("div", {
-      style: {
-        marginTop: 8,
-        paddingTop: 7,
-        borderTop: "1px solid #ede6dc",
-        display: "flex",
-        justifyContent: "space-between",
-        fontSize: 12,
-        color: "#8a9e8b"
-      }
-    }, /*#__PURE__*/React.createElement("span", null, "Total"), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontWeight: 800,
-        color: "#5a8a5e"
-      }
-    }, total)));
+    }, "Alert at ", at, " · MRP ₹", p.MRP || "—", " · Cost ₹", p.UnitCost || "—"))));
+  })), tab === "location" && /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 12, gridTemplateColumns: "minmax(0,1fr)" } }, [{ id: "MAIN_WH", ic: "🏠", bg: "#efe4d2", sub: "Physical in-house stock" }, { id: "AMAZON_FBA", ic: "AMZ", bg: "#f2ddd0", sub: "Held by Amazon" }, { id: "FBA_TRANSIT", ic: "🚚", bg: "#f4e7c8", sub: "Shipped, not yet received" }, { id: "RETURNS", ic: "↩️", bg: "#f3dcd5", sub: "Awaiting inspection" }].map(function(loc){
+    var rows = (stock || []).filter(function(s){ return s.LocationID === loc.id; }).map(function(s){ var p = (products || []).find(function(x){ return x.ProductID === s.ProductID; }); return { name: (p && p.ProductName) || s.ProductID, pid: s.ProductID, qty: Number(s.Quantity) || 0, freebie: p && p.ItemType === "Freebie" }; }).filter(function(r){ return r.qty !== 0; }).sort(function(a,b){ return b.qty - a.qty; });
+    var total = rows.reduce(function(a,r){ return a + r.qty; }, 0);
+    var maxq = rows.length ? rows[0].qty : 1;
+    return /*#__PURE__*/React.createElement("div", { key: loc.id, style: { ...card, padding: 14, minWidth: 0, overflow: "hidden" } },
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 11, marginBottom: rows.length ? 12 : 0 } },
+        /*#__PURE__*/React.createElement("div", { style: { width: 40, height: 40, borderRadius: 11, background: loc.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19, flexShrink: 0 } }, loc.ic === "AMZ" ? /*#__PURE__*/React.createElement(AmazonIcon, { size: 22, color: "#2c211a" }) : loc.ic),
+        /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#2c211a" } }, LOC_LABEL[loc.id] || loc.id), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680" } }, loc.sub)),
+        /*#__PURE__*/React.createElement("div", { style: { textAlign: "right" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 600, color: total > 0 ? "#2c211a" : "#cbbca4", lineHeight: 1 } }, total.toLocaleString("en-IN")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.08em" } }, "units"))
+      ),
+      rows.length === 0 ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680", paddingTop: 2 } }, "No stock at this location") : rows.map(function(r){
+        return /*#__PURE__*/React.createElement("div", { key: r.pid, style: { display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderTop: "1px solid #e7d9c4" } },
+          /*#__PURE__*/React.createElement("div", { style: { width: 28, height: 32, borderRadius: 6, overflow: "hidden", position: "relative", background: "linear-gradient(160deg,#e7dcc9,#cdbb9f)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 } }, r.freebie ? "🎁" : "🧴", /*#__PURE__*/React.createElement("img", { src: "images/" + r.pid + ".png", "data-base": "images/" + r.pid, onError: nextImgExt, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover" } })),
+          /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, r.name.replace("Syoat ", "")),
+          /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 5, borderRadius: 5, background: "#f5ecdc", overflow: "hidden", flexShrink: 0 } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(6, r.qty / maxq * 100) + "%", background: "#5f7a4f" } })),
+          /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 15, fontWeight: 600, width: 46, textAlign: "right" } }, r.qty.toLocaleString("en-IN"))
+        );
+      })
+    );
   })), tab === "counts" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -4862,7 +5015,7 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#9aaa9b",
+      color: "#a89680",
       fontSize: 13
     }
   }, countsLoading ? "Loading…" : `${stockCounts.length} counts recorded`), /*#__PURE__*/React.createElement("div", {
@@ -4886,20 +5039,20 @@ function App() {
     }
   }, "+ New Count"))), /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#3a8a8a10",
-      border: "1px solid #3a8a8a30",
+      background: "#a97b5210",
+      border: "1px solid #a97b5230",
       borderRadius: 10,
       padding: "10px 16px",
       marginBottom: 14,
       fontSize: 13,
-      color: "#3a8a8a"
+      color: "#a97b52"
     }
   }, "📋 ", /*#__PURE__*/React.createElement("b", null, "How cycle counting works:"), " Enter your physical count for any product at any location. The system compares it to the calculated stock and shows the difference. When approved by a Manager, a stock adjustment movement is created automatically."), countsLoading ? /*#__PURE__*/React.createElement("div", {
     style: {
       ...card,
       textAlign: "center",
       padding: 32,
-      color: "#9aaa9b"
+      color: "#a89680"
     }
   }, "Loading counts…") : stockCounts.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4919,7 +5072,7 @@ function App() {
     }
   }, "No stock counts recorded"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#9aaa9b",
+      color: "#a89680",
       fontSize: 13,
       marginBottom: 16
     }
@@ -4933,7 +5086,7 @@ function App() {
     }
   }, stockCounts.map((c, i) => {
     const diff = Number(c.Difference) || 0;
-    const diffColor = diff === 0 ? "#5a8a5e" : diff > 0 ? "#3a8a8a" : "#c4534a";
+    const diffColor = diff === 0 ? "#bd5d38" : diff > 0 ? "#a97b52" : "#b23a2e";
     const isPending = c.Status === "Pending";
     return /*#__PURE__*/React.createElement("div", {
       key: c.CountID || i,
@@ -4965,14 +5118,14 @@ function App() {
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 800,
-        color: "#2d4a2f",
+        color: "#2c211a",
         fontSize: 14
       }
     }, c.CountID), /*#__PURE__*/React.createElement("span", {
       style: {
-        background: isPending ? "#c4733a15" : "#5a8a5e15",
-        color: isPending ? "#c4733a" : "#5a8a5e",
-        border: `1px solid ${isPending ? "#c4733a40" : "#5a8a5e40"}`,
+        background: isPending ? "#bd5d3815" : "#bd5d3815",
+        color: isPending ? "#bd5d38" : "#bd5d38",
+        border: `1px solid ${isPending ? "#bd5d3840" : "#bd5d3840"}`,
         borderRadius: 5,
         padding: "1px 7px",
         fontSize: 11,
@@ -4981,18 +5134,18 @@ function App() {
     }, c.Status)), /*#__PURE__*/React.createElement("div", {
       style: {
         fontWeight: 700,
-        color: "#2d4a2f",
+        color: "#2c211a",
         fontSize: 13,
         marginBottom: 3
       }
-    }, c.ProductID, " @ ", LOC_LABEL[c.LocationID] || c.LocationID), /*#__PURE__*/React.createElement("div", {
+    }, ((products || []).find(function(p){ return p.ProductID === c.ProductID; }) || {}).ProductName || c.ProductID, " @ ", LOC_LABEL[c.LocationID] || c.LocationID), /*#__PURE__*/React.createElement("div", {
       style: {
-        color: "#8a9e8b",
+        color: "#a89680",
         fontSize: 12
       }
     }, "Counted by ", (c.CountedByEmail || "").split("@")[0], c.CountDateTime && /*#__PURE__*/React.createElement("span", null, " · ", String(c.CountDateTime).substring(0, 16)), c.Reason && /*#__PURE__*/React.createElement("span", null, " · ", c.Reason)), c.AdjustmentMovementID && /*#__PURE__*/React.createElement("div", {
       style: {
-        color: "#5a8a5e",
+        color: "#bd5d38",
         fontSize: 11,
         marginTop: 3,
         fontWeight: 600
@@ -5010,14 +5163,14 @@ function App() {
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11,
-        color: "#9aaa9b",
+        color: "#a89680",
         marginBottom: 2
       }
     }, "SYSTEM"), /*#__PURE__*/React.createElement("div", {
       style: {
         fontWeight: 900,
         fontSize: 20,
-        color: "#2d4a2f"
+        color: "#2c211a"
       }
     }, c.SystemQty ?? "—")), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -5026,14 +5179,14 @@ function App() {
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11,
-        color: "#9aaa9b",
+        color: "#a89680",
         marginBottom: 2
       }
     }, "PHYSICAL"), /*#__PURE__*/React.createElement("div", {
       style: {
         fontWeight: 900,
         fontSize: 20,
-        color: "#2d4a2f"
+        color: "#2c211a"
       }
     }, c.PhysicalQty ?? "—")), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -5042,7 +5195,7 @@ function App() {
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11,
-        color: "#9aaa9b",
+        color: "#a89680",
         marginBottom: 2
       }
     }, "DIFF"), /*#__PURE__*/React.createElement("div", {
@@ -5071,7 +5224,7 @@ function App() {
         }
       },
       style: {
-        ...btnS("#16a34a"),
+        ...btnS("#5f7a4f"),
         padding: "7px 16px",
         fontSize: 12,
         whiteSpace: "nowrap"
@@ -5086,9 +5239,9 @@ function App() {
         padding: "6px 16px",
         fontSize: 12,
         whiteSpace: "nowrap",
-        color: "#3a8a8a",
-        borderColor: "#3a8a8a40",
-        background: "#3a8a8a10"
+        color: "#a97b52",
+        borderColor: "#a97b5240",
+        background: "#a97b5210"
       }
     }, "✏️ Edit"), user.canApprove && /*#__PURE__*/React.createElement("button", {
       onClick: async () => {
@@ -5109,15 +5262,15 @@ function App() {
         padding: "6px 16px",
         fontSize: 12,
         whiteSpace: "nowrap",
-        color: "#c4534a",
-        borderColor: "#c4534a40",
-        background: "#c4534a08"
+        color: "#b23a2e",
+        borderColor: "#b23a2e40",
+        background: "#b23a2e08"
       }
     }, "🚫 Reject")))));
   }))), tab === "amazon" && (user.role === "Warehouse" ? /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#ffffff",
-      border: "1px solid #e8dfd4",
+      background: "#fdf9f1",
+      border: "1px solid #e7d9c4",
       borderRadius: 12,
       padding: 40,
       textAlign: "center"
@@ -5130,15 +5283,15 @@ function App() {
   }, "🔒"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 700,
-      color: "#2d4a2f",
+      color: "#2c211a",
       marginBottom: 6
     }
   }, "Access Restricted"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#9aaa9b",
+      color: "#a89680",
       fontSize: 13
     }
-  }, "Amazon report imports are handled by Managers and above.")) : /*#__PURE__*/React.createElement(AmazonImportTab, {
+  }, "Amazon report imports are handled by Managers and above.")) : /*#__PURE__*/React.createElement(FbaReconcileTab, {
     products: products,
     stock: stock,
     user: user,
@@ -5153,24 +5306,112 @@ function App() {
       display: "grid",
       gap: 16
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 24, fontWeight: 600, color: "#2c211a", margin: "2px 0 -6px" } }, "Analytics"), (function(){
+    var totalUnits = 0, cost = 0, mrp = 0, crit = 0, cats = {};
+    (products || []).forEach(function(p){
+      var sk = stockFor(p.ProductID);
+      var tot = sk.fba + sk.wh + sk.transit + (sk.returns || 0);
+      totalUnits += tot;
+      cost += tot * (parseFloat(p.UnitCost) || 0);
+      mrp += tot * (parseFloat(p.MRP) || 0);
+      var at = alertThresholds[p.ProductID] || parseInt(p.ReorderLevel) || ALERT_FALLBACK;
+      var st = statusOf(tot, at);
+      if (st === "critical" || st === "oos") crit++;
+      var c = p.Category || "Other";
+      cats[c] = (cats[c] || 0) + tot;
+    });
+    function inrShort(n){ if (n >= 100000) return "₹" + (n / 100000).toFixed(2) + "L"; if (n >= 1000) return "₹" + (n / 1000).toFixed(1) + "k"; return "₹" + Math.round(n); }
+    var kpis = [
+      { v: totalUnits.toLocaleString("en-IN"), t: "Total Units", dark: true },
+      { v: inrShort(cost), t: "Inventory Cost" },
+      { v: inrShort(mrp), t: "MRP Value" },
+      { v: crit, t: "Critical Products", crit: true }
+    ];
+    var catArr = Object.keys(cats).map(function(k){ return { k: k, v: cats[k] }; }).filter(function(x){ return x.v > 0; }).sort(function(a,b){ return b.v - a.v; });
+    var palette = ["#bd5d38","#c2872f","#5f7a4f","#a97b52","#7a8b9a","#8a6d3b"];
+    var totalCat = catArr.reduce(function(a,x){ return a + x.v; }, 0) || 1;
+    var acc = 0, segs = [];
+    catArr.forEach(function(x, idx){ var start = acc / totalCat * 100; acc += x.v; var end = acc / totalCat * 100; segs.push(palette[idx % palette.length] + " " + start.toFixed(2) + "% " + end.toFixed(2) + "%"); });
+    var conic = "conic-gradient(" + segs.join(",") + ")";
+    return /*#__PURE__*/React.createElement(React.Fragment, null,
+      /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } }, kpis.map(function(k){
+        return /*#__PURE__*/React.createElement("div", { key: k.t, style: { background: k.dark ? "linear-gradient(135deg,#2a201a,#4a3626)" : "#fdf9f1", border: k.dark ? "none" : "1px solid #e7d9c4", borderRadius: 16, padding: 14 } },
+          /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 600, color: k.crit ? "#b23a2e" : (k.dark ? "#f2e7d5" : "#2c211a"), lineHeight: 1 } }, k.v),
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: k.dark ? "#c9b49a" : "#6f6152", marginTop: 6, fontWeight: 500 } }, k.t)
+        );
+      })),
+      /*#__PURE__*/React.createElement("div", { style: card },
+        /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 15, fontWeight: 600, color: "#2c211a", marginBottom: 14 } }, "Stock by Category"),
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 16 } },
+          /*#__PURE__*/React.createElement("div", { style: { width: 120, height: 120, borderRadius: "50%", flexShrink: 0, background: conic, display: "flex", alignItems: "center", justifyContent: "center" } },
+            /*#__PURE__*/React.createElement("div", { style: { width: 74, height: 74, borderRadius: "50%", background: "#fdf9f1", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" } },
+              /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 600, color: "#2c211a", lineHeight: 1 } }, totalUnits.toLocaleString("en-IN")),
+              /*#__PURE__*/React.createElement("div", { style: { fontSize: 8, letterSpacing: "0.1em", textTransform: "uppercase", color: "#a89680" } }, "units")
+            )
+          ),
+          /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } }, catArr.slice(0, 6).map(function(x, idx){
+            return /*#__PURE__*/React.createElement("div", { key: x.k, style: { display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, marginBottom: 8 } },
+              /*#__PURE__*/React.createElement("span", { style: { width: 10, height: 10, borderRadius: 3, background: palette[idx % palette.length], flexShrink: 0 } }),
+              /*#__PURE__*/React.createElement("span", { style: { flex: 1, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, x.k),
+              /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontWeight: 600, color: "#6f6152" } }, x.v.toLocaleString("en-IN"))
+            );
+          }))
+        )
+      )
+    );
+  })(), /*#__PURE__*/React.createElement("div", { style: card },
+    /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 15, fontWeight: 600, color: "#2c211a" } }, "⏳ Warehouse Stock Runway"),
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#a89680", marginBottom: 12 } }, "Days of cover at the current warehouse-out pace \u2014 last 30 days of Website, Flipkart, Samples and shipments to Amazon FBA. (FBA on-hand cover is a separate metric in the Amazon tab.)"),
+    analyticsMovs === null
+      ? /*#__PURE__*/React.createElement("div", { style: { color: "#c8b9a3", fontSize: 13, padding: "6px 0" } }, "Loading movement data…")
+      : (function () {
+          var cutoff = Date.now() - 30 * 86400000;
+          var out = {};
+          (analyticsMovs || []).forEach(function (m) {
+            if (!(m.SourceLocationID === "MAIN_WH" && m.DestinationLocationID !== "MAIN_WH")) return;
+            var t = new Date(String(m.MovementDateTime).replace(" ", "T")).getTime();
+            if (isNaN(t) || t < cutoff) return;
+            (m.lines || []).forEach(function (l) { out[l.ProductID] = (out[l.ProductID] || 0) + (Number(l.Quantity) || 0); });
+          });
+          var rows = (products || []).map(function (p) {
+            var sk = stockFor(p.ProductID);
+            var sold = out[p.ProductID] || 0;
+            var rate = sold / 30;
+            var cover = rate > 0 ? sk.wh / rate : Infinity;
+            return { p: p, wh: sk.wh, rate: rate, cover: cover, sold: sold };
+          }).filter(function (r) { return r.wh > 0 || r.sold > 0; }).sort(function (a, b) { return a.cover - b.cover; });
+          if (!rows.length) return /*#__PURE__*/React.createElement("div", { style: { color: "#a89680", fontSize: 12.5, padding: "6px 0" } }, "No dispatch movements in the last 30 days.");
+          return /*#__PURE__*/React.createElement("div", null,
+            /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1.7fr .7fr .8fr .9fr", gap: 6, padding: "6px 0", borderBottom: "1px solid #e7d9c4", fontSize: 9.5, letterSpacing: "0.04em", textTransform: "uppercase", color: "#a89680", fontWeight: 700 } },
+              /*#__PURE__*/React.createElement("span", null, "Product"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "WH"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Per day"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "right" } }, "Days left")),
+            rows.map(function (r) {
+              var col = r.cover === Infinity ? "#5f7a4f" : r.cover < 15 ? "#b23a2e" : r.cover < 30 ? "#c2872f" : "#5f7a4f";
+              var lab = r.cover === Infinity ? "—" : Math.round(r.cover) + "d";
+              return /*#__PURE__*/React.createElement("div", { key: r.p.ProductID, style: { display: "grid", gridTemplateColumns: "1.7fr .7fr .8fr .9fr", gap: 6, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #f0ebe2", fontSize: 12.5 } },
+                /*#__PURE__*/React.createElement("span", { style: { fontWeight: 600, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (r.p.ProductName || r.p.ProductID).replace("Syoat ", "")),
+                /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600, color: "#6f6152" } }, r.wh),
+                /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", color: "#6f6152" } }, r.rate > 0 ? r.rate.toFixed(1) : "0"),
+                /*#__PURE__*/React.createElement("span", { style: { textAlign: "right", fontFamily: "Fraunces,serif", fontWeight: 700, color: col } }, lab));
+            }));
+        })()
+  ), /*#__PURE__*/React.createElement("div", {
     style: card
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 800,
       fontSize: 15,
-      color: "#2d4a2f",
+      color: "#2c211a",
       marginBottom: 4
     }
   }, "📊 Stock by Product"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 12,
       marginBottom: 18
     }
   }, "Units across Warehouse + FBA + Transit"), loading ? /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#c8bfb0"
+      color: "#c8b9a3"
     }
   }, "Loading…") : products.map(p => {
     const sk = stockFor(p.ProductID);
@@ -5195,7 +5436,7 @@ function App() {
       style: {
         fontSize: 13,
         fontWeight: 600,
-        color: "#2d4a2f"
+        color: "#2c211a"
       }
     }, shortName), /*#__PURE__*/React.createElement("span", {
       style: {
@@ -5214,7 +5455,7 @@ function App() {
     }, sk.wh > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         width: sk.wh / Math.max(tot, 1) * 100 + "%",
-        background: "#5a8a5e",
+        background: "#bd5d38",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -5227,7 +5468,7 @@ function App() {
     }, sk.wh > 0 ? sk.wh : ""), sk.fba > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         width: sk.fba / Math.max(tot, 1) * 100 + "%",
-        background: "#3a8a8a",
+        background: "#a97b52",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -5240,7 +5481,7 @@ function App() {
     }, sk.fba > 0 ? sk.fba : ""), sk.transit > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         width: sk.transit / Math.max(tot, 1) * 100 + "%",
-        background: "#c4733a",
+        background: "#bd5d38",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -5253,7 +5494,7 @@ function App() {
     }, sk.transit > 0 ? sk.transit : ""), sk.returns > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         width: sk.returns / Math.max(tot, 1) * 100 + "%",
-        background: "#c4534a",
+        background: "#b23a2e",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -5270,7 +5511,7 @@ function App() {
         alignItems: "center",
         paddingLeft: 10,
         fontSize: 11,
-        color: "#c8bfb0"
+        color: "#c8b9a3"
       }
     }, "No stock")), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -5282,40 +5523,40 @@ function App() {
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
-        color: "#5a8a5e",
+        color: "#bd5d38",
         fontWeight: 600
       }
     }, "■ WH (", sk.wh, ")"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
-        color: "#8a9e8b"
+        color: "#a89680"
       }
     }, "·"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
-        color: "#3a8a8a",
+        color: "#a97b52",
         fontWeight: 600
       }
     }, "■ FBA (", sk.fba, ")"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
-        color: "#8a9e8b"
+        color: "#a89680"
       }
     }, "·"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
-        color: "#c4733a",
+        color: "#bd5d38",
         fontWeight: 600
       }
     }, "■ Transit (", sk.transit, ")"), sk.returns > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
-        color: "#8a9e8b"
+        color: "#a89680"
       }
     }, "·"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
-        color: "#c4534a",
+        color: "#b23a2e",
         fontWeight: 600
       }
     }, "■ Returns (", sk.returns, ")"))));
@@ -5331,12 +5572,12 @@ function App() {
     style: {
       fontWeight: 800,
       fontSize: 14,
-      color: "#2d4a2f",
+      color: "#2c211a",
       marginBottom: 12
     }
   }, "🏭 FBA vs Warehouse Split"), loading ? /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#c8bfb0"
+      color: "#c8b9a3"
     }
   }, "Loading…") : (() => {
     const total = totFBA + totWH;
@@ -5353,7 +5594,7 @@ function App() {
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         width: fbaPct + "%",
-        background: "#5a8a5e",
+        background: "#bd5d38",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -5365,7 +5606,7 @@ function App() {
     }, fbaPct > 10 ? fbaPct + "%" : ""), /*#__PURE__*/React.createElement("div", {
       style: {
         width: whPct + "%",
-        background: "#3a8a8a",
+        background: "#a97b52",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -5381,7 +5622,7 @@ function App() {
         display: "flex",
         alignItems: "center",
         paddingLeft: 12,
-        color: "#c8bfb0",
+        color: "#c8b9a3",
         fontSize: 12
       }
     }, "No stock")), /*#__PURE__*/React.createElement("div", {
@@ -5399,13 +5640,13 @@ function App() {
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 12,
-        color: "#5a8a5e",
+        color: "#bd5d38",
         fontWeight: 700
       }
     }, "🏭 Amazon FBA"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 900,
-        color: "#2d4a2f",
+        color: "#2c211a",
         fontSize: 14
       }
     }, totFBA)), /*#__PURE__*/React.createElement("div", {
@@ -5417,18 +5658,18 @@ function App() {
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 12,
-        color: "#3a8a8a",
+        color: "#a97b52",
         fontWeight: 700
       }
     }, "🏠 Warehouse"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 900,
-        color: "#2d4a2f",
+        color: "#2c211a",
         fontSize: 14
       }
     }, totWH)), /*#__PURE__*/React.createElement("div", {
       style: {
-        borderTop: "1px solid #ede6dc",
+        borderTop: "1px solid #e7d9c4",
         paddingTop: 6,
         display: "flex",
         justifyContent: "space-between",
@@ -5437,13 +5678,13 @@ function App() {
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 12,
-        color: "#8a9e8b",
+        color: "#a89680",
         fontWeight: 600
       }
     }, "Total"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 900,
-        color: "#5a8a5e",
+        color: "#bd5d38",
         fontSize: 16
       }
     }, total))));
@@ -5453,12 +5694,12 @@ function App() {
     style: {
       fontWeight: 800,
       fontSize: 14,
-      color: "#2d4a2f",
+      color: "#2c211a",
       marginBottom: 12
     }
   }, "🚦 Stock Health"), loading ? /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#c8bfb0"
+      color: "#c8b9a3"
     }
   }, "Loading…") : (() => {
     const statuses = products.map(p => {
@@ -5476,22 +5717,22 @@ function App() {
     const items = [{
       label: "OK",
       count: counts.ok,
-      color: "#16a34a",
+      color: "#5f7a4f",
       icon: "✅"
     }, {
       label: "Low",
       count: counts.low,
-      color: "#c4733a",
+      color: "#bd5d38",
       icon: "⚠️"
     }, {
       label: "Critical",
       count: counts.critical,
-      color: "#dc2626",
+      color: "#b23a2e",
       icon: "🔴"
     }, {
       label: "Out of Stock",
       count: counts.oos,
-      color: "#7c3aed",
+      color: "#8a6d3b",
       icon: "🚫"
     }];
     return /*#__PURE__*/React.createElement("div", {
@@ -5532,7 +5773,7 @@ function App() {
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 12,
-        color: "#6b7f6c",
+        color: "#6f6152",
         fontWeight: 600
       }
     }, it.label), /*#__PURE__*/React.createElement("span", {
@@ -5562,18 +5803,18 @@ function App() {
     style: {
       fontWeight: 800,
       fontSize: 14,
-      color: "#2d4a2f",
+      color: "#2c211a",
       marginBottom: 4
     }
   }, "📦 Dispatches by Channel"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 12,
       marginBottom: 14
     }
   }, "Units shipped out from all approved movements"), loading ? /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#c8bfb0"
+      color: "#c8b9a3"
     }
   }, "Loading…") : (() => {
     // Compute dispatches per channel from approved movement lines (accurate).
@@ -5583,22 +5824,22 @@ function App() {
     const channels = [{
       key: "WEBSITE_SALES",
       label: "Website Orders",
-      color: "#5a8a5e",
+      color: "#bd5d38",
       icon: "🌐"
     }, {
       key: "FLIPKART_SALES",
       label: "Flipkart",
-      color: "#c4733a",
+      color: "#bd5d38",
       icon: "🛒"
     }, {
       key: "SAMPLES",
       label: "Samples",
-      color: "#8a9e8b",
+      color: "#a89680",
       icon: "🎁"
     }, {
       key: "DAMAGE",
       label: "Damage / Loss",
-      color: "#c4534a",
+      color: "#b23a2e",
       icon: "⚠️"
     }];
     // Sum line quantities from approved movements whose destination matches each channel
@@ -5606,13 +5847,13 @@ function App() {
     channels.forEach(ch => { dispatchTotals[ch.key] = 0; });
     if (analyticsMovs) {
       analyticsMovs.forEach(m => {
-        if (dispatchTotals.hasOwnProperty(m.DstLocationID) && Array.isArray(m.Lines)) {
-          m.Lines.forEach(l => { dispatchTotals[m.DstLocationID] += Number(l.Quantity) || 0; });
+        if (dispatchTotals.hasOwnProperty(m.DestinationLocationID) && Array.isArray(m.lines)) {
+          m.lines.forEach(l => { dispatchTotals[m.DestinationLocationID] += Number(l.Quantity) || 0; });
         }
       });
     }
     const totalOut = Object.values(dispatchTotals).reduce((a, v) => a + v, 0);
-    if (!analyticsMovs) return /*#__PURE__*/React.createElement("div", {style:{color:"#c8bfb0",fontSize:13,padding:"8px 0"}}, "Loading dispatch data…");
+    if (!analyticsMovs) return /*#__PURE__*/React.createElement("div", {style:{color:"#c8b9a3",fontSize:13,padding:"8px 0"}}, "Loading dispatch data…");
     return /*#__PURE__*/React.createElement("div", null, channels.map(ch => {
       const qty = dispatchTotals[ch.key] || 0;
       const pct = totalOut > 0 ? Math.round(qty / totalOut * 100) : 0;
@@ -5642,12 +5883,12 @@ function App() {
         style: {
           fontSize: 13,
           fontWeight: 600,
-          color: "#2d4a2f"
+          color: "#2c211a"
         }
       }, ch.label), ch.note && /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 10,
-          color: "#9aaa9b"
+          color: "#a89680"
         }
       }, "(", ch.note, ")")), /*#__PURE__*/React.createElement("div", {
         style: {
@@ -5658,7 +5899,7 @@ function App() {
       }, /*#__PURE__*/React.createElement("span", {
         style: {
           fontSize: 12,
-          color: "#8a9e8b"
+          color: "#a89680"
         }
       }, pct, "%"), /*#__PURE__*/React.createElement("span", {
         style: {
@@ -5685,7 +5926,7 @@ function App() {
     }), totalOut === 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         textAlign: "center",
-        color: "#c8bfb0",
+        color: "#c8b9a3",
         fontSize: 13,
         padding: "20px 0"
       }
@@ -5700,12 +5941,12 @@ function App() {
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        color: "#8a9e8b"
+        color: "#a89680"
       }
     }, "Total dispatched"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontWeight: 900,
-        color: "#2d4a2f"
+        color: "#2c211a"
       }
     }, totalOut, " units")));
   })()), /*#__PURE__*/React.createElement("div", {
@@ -5714,12 +5955,12 @@ function App() {
     style: {
       fontWeight: 800,
       fontSize: 14,
-      color: "#2d4a2f",
+      color: "#2c211a",
       marginBottom: 12
     }
   }, "💰 Inventory Value (at Cost)"), loading ? /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#c8bfb0"
+      color: "#c8b9a3"
     }
   }, "Loading…") : (() => {
     const rows = products.map(p => {
@@ -5749,7 +5990,7 @@ function App() {
       style: {
         fontSize: 10,
         fontWeight: 700,
-        color: "#8a9e8b",
+        color: "#a89680",
         textTransform: "uppercase",
         letterSpacing: 0.5
       }
@@ -5757,7 +5998,7 @@ function App() {
       style: {
         fontSize: 10,
         fontWeight: 700,
-        color: "#8a9e8b",
+        color: "#a89680",
         textTransform: "uppercase",
         letterSpacing: 0.5,
         textAlign: "center"
@@ -5766,7 +6007,7 @@ function App() {
       style: {
         fontSize: 10,
         fontWeight: 700,
-        color: "#8a9e8b",
+        color: "#a89680",
         textTransform: "uppercase",
         letterSpacing: 0.5,
         textAlign: "right"
@@ -5775,7 +6016,7 @@ function App() {
       style: {
         fontSize: 10,
         fontWeight: 700,
-        color: "#8a9e8b",
+        color: "#a89680",
         textTransform: "uppercase",
         letterSpacing: 0.5,
         textAlign: "right"
@@ -5792,19 +6033,19 @@ function App() {
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 13,
-        color: "#2d4a2f",
+        color: "#2c211a",
         fontWeight: 600
       }
     }, r.name.split(" ").slice(0, 3).join(" ")), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 13,
-        color: "#6b7f6c",
+        color: "#6f6152",
         textAlign: "center"
       }
     }, r.tot), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 13,
-        color: "#c4733a",
+        color: "#bd5d38",
         fontWeight: 700,
         textAlign: "right"
       }
@@ -5813,7 +6054,7 @@ function App() {
     })), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 13,
-        color: "#5a8a5e",
+        color: "#bd5d38",
         fontWeight: 700,
         textAlign: "right"
       }
@@ -5831,19 +6072,19 @@ function App() {
       style: {
         fontSize: 13,
         fontWeight: 800,
-        color: "#2d4a2f"
+        color: "#2c211a"
       }
     }, "Total"), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 13,
-        color: "#6b7f6c",
+        color: "#6f6152",
         fontWeight: 700,
         textAlign: "center"
       }
     }, rows.reduce((a, r) => a + r.tot, 0)), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 14,
-        color: "#c4733a",
+        color: "#bd5d38",
         fontWeight: 900,
         textAlign: "right"
       }
@@ -5852,7 +6093,7 @@ function App() {
     })), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 14,
-        color: "#5a8a5e",
+        color: "#bd5d38",
         fontWeight: 900,
         textAlign: "right"
       }
@@ -5865,18 +6106,18 @@ function App() {
     style: {
       fontWeight: 800,
       fontSize: 14,
-      color: "#2d4a2f",
+      color: "#2c211a",
       marginBottom: 12
     }
   }, "📋 Recent Movement Activity"), drafts.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
-      background: "#c4733a12",
-      border: "1px solid #c4733a30",
+      background: "#bd5d3812",
+      border: "1px solid #bd5d3830",
       borderRadius: 8,
       padding: "8px 12px",
       marginBottom: 12,
       fontSize: 13,
-      color: "#c4733a",
+      color: "#bd5d38",
       fontWeight: 600
     }
   }, "⚠️ ", drafts.length, " Draft movement", drafts.length > 1 ? "s" : "", " pending approval"), /*#__PURE__*/React.createElement("div", {
@@ -5889,17 +6130,17 @@ function App() {
     label: "Total Movements",
     value: "—",
     icon: "📦",
-    color: "#5a8a5e"
+    color: "#bd5d38"
   }, {
     label: "Pending Approval",
     value: drafts.length,
     icon: "⏳",
-    color: "#c4733a"
+    color: "#bd5d38"
   }, {
     label: "Locations Active",
     value: Object.keys(LOC_LABEL).length,
     icon: "📍",
-    color: "#3a8a8a"
+    color: "#a97b52"
   }].map(s => /*#__PURE__*/React.createElement("div", {
     key: s.label,
     style: {
@@ -5922,7 +6163,7 @@ function App() {
   }, s.value), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
-      color: "#8a9e8b",
+      color: "#a89680",
       marginTop: 2
     }
   }, s.label)))))), !loading && stock.length === 0 && !error && drafts.length === 0 && /*#__PURE__*/React.createElement("div", {
@@ -5939,7 +6180,7 @@ function App() {
     }
   }, "🌾"), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "#8a9e8b",
+      color: "#a89680",
       fontSize: 13,
       marginBottom: 18
     }
@@ -6002,6 +6243,9 @@ function App() {
       load();
       setEditingMov(null);
     }
+  }), /*#__PURE__*/React.createElement("div", { style: { height: 88 } }), /*#__PURE__*/React.createElement(BottomNav, {
+    tab: tab, setTab: setTab, showList: showList,
+    onMovements: function(){ setShowList(true); }, user: user
   }));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(

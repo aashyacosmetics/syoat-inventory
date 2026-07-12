@@ -5,9 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Syoat · Inventory ERP</title>
 
-  <!-- Fonts -->
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
-  <link href="syoat-theme.css?v=20260711a" rel="stylesheet"/>
+  <!-- Fonts: Fraunces (serif headings) + Inter (UI) + Plus Jakarta Sans (fallback) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,900&family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
 
   <!-- React 18 from CDN -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -15,15 +16,15 @@
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: "Plus Jakarta Sans", system-ui, sans-serif; background: #f3eee7; }
+    body { font-family: "Inter", "Plus Jakarta Sans", system-ui, sans-serif; background: #efe4d2; }
     #root { min-height: 100vh; }
     /* Loading screen — shown until React mounts */
     #splash {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      min-height: 100vh; background: #f3eee7; gap: 14px;
+      min-height: 100vh; background: #efe4d2; gap: 14px;
     }
     #splash img { width: 90px; }
-    #splash p { font-size: 13px; color: #6b7f6c; letter-spacing: 0.04em; }
+    #splash p { font-size: 13px; color: #a89680; letter-spacing: 0.04em; font-family: "Fraunces", serif; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
     #splash p { animation: pulse 1.6s ease-in-out infinite; }
   </style>
@@ -40,7 +41,7 @@
 <div id="root"></div>
 
 <!-- App — all logic lives here; update only this file for new features -->
-<script src="syoat-app.js?v=20260711a"></script>
+<script src="syoat-app.js?v=20260712live1"></script>
 
 </body>
 </html>
