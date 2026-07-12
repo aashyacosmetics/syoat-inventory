@@ -4843,11 +4843,11 @@ function App() {
         marginTop: 3
       }
     }, "Alert at ", at, " · MRP ₹", p.MRP || "—", " · Cost ₹", p.UnitCost || "—"))));
-  })), tab === "location" && /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 12 } }, [{ id: "MAIN_WH", ic: "🏠", bg: "#efe4d2", sub: "Physical in-house stock" }, { id: "AMAZON_FBA", ic: "AMZ", bg: "#f2ddd0", sub: "Held by Amazon" }, { id: "FBA_TRANSIT", ic: "🚚", bg: "#f4e7c8", sub: "Shipped, not yet received" }, { id: "RETURNS", ic: "↩️", bg: "#f3dcd5", sub: "Awaiting inspection" }].map(function(loc){
+  })), tab === "location" && /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 12, gridTemplateColumns: "minmax(0,1fr)" } }, [{ id: "MAIN_WH", ic: "🏠", bg: "#efe4d2", sub: "Physical in-house stock" }, { id: "AMAZON_FBA", ic: "AMZ", bg: "#f2ddd0", sub: "Held by Amazon" }, { id: "FBA_TRANSIT", ic: "🚚", bg: "#f4e7c8", sub: "Shipped, not yet received" }, { id: "RETURNS", ic: "↩️", bg: "#f3dcd5", sub: "Awaiting inspection" }].map(function(loc){
     var rows = (stock || []).filter(function(s){ return s.LocationID === loc.id; }).map(function(s){ var p = (products || []).find(function(x){ return x.ProductID === s.ProductID; }); return { name: (p && p.ProductName) || s.ProductID, pid: s.ProductID, qty: Number(s.Quantity) || 0, freebie: p && p.ItemType === "Freebie" }; }).filter(function(r){ return r.qty !== 0; }).sort(function(a,b){ return b.qty - a.qty; });
     var total = rows.reduce(function(a,r){ return a + r.qty; }, 0);
     var maxq = rows.length ? rows[0].qty : 1;
-    return /*#__PURE__*/React.createElement("div", { key: loc.id, style: { ...card, padding: 14 } },
+    return /*#__PURE__*/React.createElement("div", { key: loc.id, style: { ...card, padding: 14, minWidth: 0, overflow: "hidden" } },
       /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 11, marginBottom: rows.length ? 12 : 0 } },
         /*#__PURE__*/React.createElement("div", { style: { width: 40, height: 40, borderRadius: 11, background: loc.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19, flexShrink: 0 } }, loc.ic === "AMZ" ? /*#__PURE__*/React.createElement(AmazonIcon, { size: 22, color: "#2c211a" }) : loc.ic),
         /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#2c211a" } }, LOC_LABEL[loc.id] || loc.id), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680" } }, loc.sub)),
@@ -4857,7 +4857,7 @@ function App() {
         return /*#__PURE__*/React.createElement("div", { key: r.pid, style: { display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderTop: "1px solid #e7d9c4" } },
           /*#__PURE__*/React.createElement("div", { style: { width: 28, height: 32, borderRadius: 6, overflow: "hidden", position: "relative", background: "linear-gradient(160deg,#e7dcc9,#cdbb9f)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 } }, r.freebie ? "🎁" : "🧴", /*#__PURE__*/React.createElement("img", { src: "images/" + r.pid + ".png", "data-base": "images/" + r.pid, onError: nextImgExt, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover" } })),
           /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, r.name.replace("Syoat ", "")),
-          /*#__PURE__*/React.createElement("div", { style: { width: 64, height: 5, borderRadius: 5, background: "#f5ecdc", overflow: "hidden", flexShrink: 0 } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(6, r.qty / maxq * 100) + "%", background: "#5f7a4f" } })),
+          /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 5, borderRadius: 5, background: "#f5ecdc", overflow: "hidden", flexShrink: 0 } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(6, r.qty / maxq * 100) + "%", background: "#5f7a4f" } })),
           /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 15, fontWeight: 600, width: 46, textAlign: "right" } }, r.qty.toLocaleString("en-IN"))
         );
       })
