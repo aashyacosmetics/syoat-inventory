@@ -2571,6 +2571,145 @@ function AssembleComboModal({
   })), err && /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 13, marginBottom: 10 } }, err), /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end" } }, /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { padding: "9px 18px", borderRadius: 9, border: "1px solid #ccd3c4", background: "#fff", cursor: "pointer", fontSize: 14 } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: submit, disabled: busy, style: { padding: "9px 20px", borderRadius: 9, border: "none", background: busy ? "#a89680" : "#6d5ae6", color: "#fff", cursor: busy ? "default" : "pointer", fontSize: 14, fontWeight: 700 } }, busy ? "Saving…" : "Assemble")))));
 }
 
+function FbaReconcileTab(props) {
+  var products = props.products, stock = props.stock, user = props.user, notify = props.notify;
+  var _s = React.useState("upload"), step = _s[0], setStep = _s[1];
+  var _p = React.useState([]), preview = _p[0], setPreview = _p[1];
+  var _u = React.useState([]), unmapped = _u[0], setUnmapped = _u[1];
+  var _d = React.useState(""), reportDate = _d[0], setReportDate = _d[1];
+  var _e = React.useState(""), error = _e[0], setError = _e[1];
+  var _b = React.useState(false), busy = _b[0], setBusy = _b[1];
+  var _o = React.useState(false), drag = _o[0], setDrag = _o[1];
+  var fileRef = React.useRef(null);
+  var payloadRef = React.useRef(null);
+
+  function splitCSV(line) {
+    var out = [], cur = "", q = false;
+    for (var i = 0; i < line.length; i++) {
+      var c = line[i];
+      if (c === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; }
+      else if (c === "," && !q) { out.push(cur); cur = ""; }
+      else cur += c;
+    }
+    out.push(cur); return out;
+  }
+  function fbaStockOf(pid) {
+    var t = 0; (stock || []).forEach(function (s) { if (s.ProductID === pid && s.LocationID === "AMAZON_FBA") t += Number(s.Quantity) || 0; }); return t;
+  }
+  function handleFile(file) {
+    if (!file) return;
+    setError("");
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        var text = e.target.result;
+        var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
+        if (!lines.length) { setError("That file is empty."); return; }
+        var isTab = lines[0].indexOf("\t") !== -1 && lines[0].indexOf(",") === -1;
+        var pl = isTab
+          ? function (l) { return l.split("\t").map(function (x) { return x.replace(/^"|"$/g, "").trim(); }); }
+          : function (l) { return splitCSV(l).map(function (x) { return x.replace(/^"|"$/g, "").trim(); }); };
+        var header = pl(lines[0]), H = {};
+        header.forEach(function (h, i) { H[h.toLowerCase()] = i; });
+        if (H["amazon-order-id"] !== undefined) { setError("This is the All Orders report. Please upload Inventory Ledger — Summary view."); return; }
+        var hasEnd = H["ending warehouse balance"] !== undefined, hasDisp = H["disposition"] !== undefined, hasAsin = H["asin"] !== undefined;
+        if (H["event type"] !== undefined && !hasEnd) { setError("This is the Ledger Detailed view. Switch to the Summary view and download again."); return; }
+        if (!(hasEnd && hasDisp && hasAsin)) { setError("Unrecognised file. Upload Inventory Ledger — Summary (needs ASIN, Disposition, Ending Warehouse Balance)."); return; }
+        var iAsin = H["asin"], iDisp = H["disposition"], iEnd = H["ending warehouse balance"], iDate = H["date"];
+        var asinQty = {}, dateSeen = "";
+        for (var r = 1; r < lines.length; r++) {
+          var c = pl(lines[r]);
+          if (String(c[iDisp]).toUpperCase() !== "SELLABLE") continue;
+          var a = c[iAsin]; if (!a) continue;
+          asinQty[a] = (asinQty[a] || 0) + (parseFloat(c[iEnd]) || 0);
+          if (iDate !== undefined && c[iDate]) dateSeen = c[iDate];
+        }
+        var a2p = {}; (products || []).forEach(function (p) { if (p.AmazonASIN) a2p[String(p.AmazonASIN).trim()] = p; });
+        var mapped = [], unm = [];
+        Object.keys(asinQty).forEach(function (a) {
+          var p = a2p[a];
+          if (p) { var sys = fbaStockOf(p.ProductID); mapped.push({ productID: p.ProductID, name: p.ProductName, asin: a, sys: sys, ledger: asinQty[a], delta: asinQty[a] - sys }); }
+          else unm.push({ asin: a, qty: asinQty[a] });
+        });
+        mapped.sort(function (x, y) { return Math.abs(y.delta) - Math.abs(x.delta); });
+        if (!mapped.length) { setError("No Syoat products matched by ASIN. Check the AmazonASIN column in your Products sheet."); return; }
+        var rd = dateSeen, m = dateSeen.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (m) rd = m[3] + "-" + ("0" + m[1]).slice(-2) + "-" + ("0" + m[2]).slice(-2);
+        payloadRef.current = { text: text, name: file.name, mime: isTab ? "text/plain" : "text/csv" };
+        setReportDate(rd); setPreview(mapped); setUnmapped(unm); setStep("preview");
+      } catch (err) { setError("Couldn't read the file: " + err.message); }
+    };
+    reader.readAsText(file);
+  }
+  function confirmImport() {
+    setBusy(true);
+    (async function () {
+      try {
+        var items = preview.filter(function (x) { return x.delta !== 0; }).map(function (x) { return { productID: x.productID, ledgerQty: x.ledger }; });
+        if (!items.length) { notify("✅ FBA already matches the ledger — nothing to adjust."); reset(); if (props.onCountCreated) props.onCountCreated(); return; }
+        var f = payloadRef.current || {};
+        var res = await apiWritePost("createFbaReconciliation", user.email, { items: items, fileText: f.text, fileName: f.name, fileMime: f.mime, reportDate: reportDate });
+        notify("✅ " + (res.createdCount || items.length) + " FBA count(s) created — approve them in Stock Count." + (res.driveUrl ? " File archived to Drive." : ""));
+        reset(); if (props.onCountCreated) props.onCountCreated();
+      } catch (e) { notify("❌ " + e.message); }
+      setBusy(false);
+    })();
+  }
+  function reset() { setStep("upload"); setPreview([]); setUnmapped([]); setError(""); setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
+
+  var hero = /*#__PURE__*/React.createElement("div", { style: { background: "linear-gradient(140deg,#241b14,#463017)", borderRadius: 18, padding: "18px", marginBottom: 16, color: "#f2e7d5" } },
+    /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+      /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 46, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 32, color: "#241b14" })),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 600 } }, "Amazon FBA"),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Weekly · upload the Inventory Ledger to sync FBA stock"))));
+
+  var guide = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 14 } },
+    /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 16, fontWeight: 600, marginBottom: 6 } }, "📋 How to pull this report"),
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: "#6f6152", lineHeight: 1.7 } },
+      "Seller Central → Reports → Fulfilment → ", /*#__PURE__*/React.createElement("b", null, "Inventory Ledger"), " → View: ", /*#__PURE__*/React.createElement("b", null, "Summary"), " → latest date → Download (CSV or TXT)."),
+    /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, fontSize: 11.5, color: "#5f7a4f", fontWeight: 600 } }, "✅ Right file: Inventory Ledger — Summary"),
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#b23a2e", fontWeight: 600 } }, "❌ Not the Detailed view · Not All Orders · Not Manage Inventory"));
+
+  if (step === "preview") {
+    var totAdj = preview.filter(function (x) { return x.delta !== 0; }).length;
+    return /*#__PURE__*/React.createElement("div", null, hero,
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", margin: "2px 2px 10px" } },
+        /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 600 } }, "Reconcile preview"),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680" } }, reportDate ? "Ledger date " + reportDate : "")),
+      /*#__PURE__*/React.createElement("div", { style: { ...card, padding: "6px 14px 10px" } },
+        /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, padding: "9px 0", borderBottom: "1px solid #e7d9c4", fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "#a89680", fontWeight: 700 } },
+          /*#__PURE__*/React.createElement("span", null, "Product"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "System"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Ledger"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Δ")),
+        preview.map(function (x) {
+          var dc = x.delta === 0 ? "#a89680" : x.delta > 0 ? "#5f7a4f" : "#b23a2e";
+          return /*#__PURE__*/React.createElement("div", { key: x.productID, style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #f0ebe2", fontSize: 12.5 } },
+            /*#__PURE__*/React.createElement("span", { style: { fontWeight: 600, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (x.name || x.productID).replace("Syoat ", "")),
+            /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600, color: "#6f6152" } }, x.sys),
+            /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600 } }, x.ledger),
+            /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 700, color: dc } }, x.delta > 0 ? "+" + x.delta : x.delta));
+        })),
+      unmapped.length > 0 && /*#__PURE__*/React.createElement("div", { style: { background: "#f4e7c8", border: "1px solid #e8d09a", borderRadius: 12, padding: "10px 13px", marginTop: 10, fontSize: 11.5, color: "#6b5326" } },
+        /*#__PURE__*/React.createElement("b", null, "⚠️ " + unmapped.length + " unmapped ASIN(s) — not adjusted: "), unmapped.map(function (u) { return u.asin + " (" + u.qty + ")"; }).join(", ")),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#6f6152", margin: "12px 2px" } }, totAdj + " product(s) will get an adjustment count at Amazon FBA, pending Manager approval in the Stock Count tab."),
+      /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 } },
+        /*#__PURE__*/React.createElement("button", { onClick: reset, disabled: busy, style: { border: "1px solid #e0d2bd", background: "transparent", color: "#6f6152", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 600, cursor: "pointer" } }, "Cancel"),
+        /*#__PURE__*/React.createElement("button", { onClick: confirmImport, disabled: busy, style: { border: "none", background: busy ? "#c8b9a3" : "#2a201a", color: "#f4ead8", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, cursor: busy ? "wait" : "pointer" } }, busy ? "Saving…" : "Confirm · create " + totAdj + " count(s)")));
+  }
+
+  return /*#__PURE__*/React.createElement("div", null, hero, guide,
+    /*#__PURE__*/React.createElement("div", {
+      onDragOver: function (e) { e.preventDefault(); setDrag(true); },
+      onDragLeave: function () { setDrag(false); },
+      onDrop: function (e) { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); },
+      onClick: function () { if (fileRef.current) fileRef.current.click(); },
+      style: { border: "2px dashed " + (drag ? "#bd5d38" : "#e0d2bd"), borderRadius: 16, padding: "40px 20px", textAlign: "center", cursor: "pointer", background: drag ? "#bd5d3808" : "#f5ecdc" } },
+      /*#__PURE__*/React.createElement("input", { ref: fileRef, type: "file", accept: ".csv,.txt,.tsv", style: { display: "none" }, onChange: function (e) { handleFile(e.target.files[0]); } }),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 34 } }, "⬆️"),
+      /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 15, color: "#2c211a", marginTop: 8 } }, "Choose Ledger file or drop here"),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680", marginTop: 4 } }, "CSV or TXT · nothing changes until you confirm the preview")),
+    error && /*#__PURE__*/React.createElement("div", { style: { background: "#f3dcd5", border: "1px solid #e3b7ad", borderRadius: 12, padding: "12px 15px", marginTop: 12, fontSize: 12.5, color: "#b23a2e", fontWeight: 600 } }, "❌ " + error));
+}
+
 function AmazonImportTab({
   products,
   stock,
@@ -5149,7 +5288,7 @@ function App() {
       color: "#a89680",
       fontSize: 13
     }
-  }, "Amazon report imports are handled by Managers and above.")) : /*#__PURE__*/React.createElement(AmazonImportTab, {
+  }, "Amazon report imports are handled by Managers and above.")) : /*#__PURE__*/React.createElement(FbaReconcileTab, {
     products: products,
     stock: stock,
     user: user,
