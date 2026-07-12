@@ -2571,6 +2571,10 @@ function AssembleComboModal({
   })), err && /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 13, marginBottom: 10 } }, err), /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end" } }, /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { padding: "9px 18px", borderRadius: 9, border: "1px solid #ccd3c4", background: "#fff", cursor: "pointer", fontSize: 14 } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: submit, disabled: busy, style: { padding: "9px 20px", borderRadius: 9, border: "none", background: busy ? "#a89680" : "#6d5ae6", color: "#fff", cursor: busy ? "default" : "pointer", fontSize: 14, fontWeight: 700 } }, busy ? "Saving…" : "Assemble")))));
 }
 
+var FC_REGIONS = { DEL4: "Delhi NCR", DEL5: "Delhi NCR", DED4: "Delhi NCR", BOM5: "Maharashtra", PNQ3: "Maharashtra", BOM7: "Maharashtra", NAX1: "Maharashtra", HYD3: "Hyderabad", HYD8: "Hyderabad", BLR7: "Karnataka", BLR8: "Karnataka", SBLL: "Karnataka", CJB1: "Tamil Nadu", MAA4: "Tamil Nadu" };
+var REGION_ORDER = ["Delhi NCR", "Maharashtra", "Hyderabad", "Karnataka", "Tamil Nadu", "Other"];
+function regionOf(fc) { return FC_REGIONS[fc] || "Other"; }
+
 function FbaReconcileTab(props) {
   var products = props.products, stock = props.stock, user = props.user, notify = props.notify;
   var TRANSIT_DAYS = 12, TARGET_DAYS = 30;
@@ -2680,11 +2684,22 @@ function FbaReconcileTab(props) {
 
   function fcTab() {
     if (!ledger || !ledger.products || !ledger.products.length) return emptyLedger("Upload a ledger first to see fulfilment-centre stock.");
-    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680", margin: "0 2px 10px" } }, "Per FNSKU · from ledger " + (ledger.reportDate || "") + " (" + ledger.reportDays + "-day)"), ledger.products.slice().sort(function (a, b) { return b.total - a.total; }).map(function (p) {
+    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680", margin: "0 2px 10px" } }, "Per FNSKU · grouped by region · ledger " + (ledger.reportDate || "") + " (" + ledger.reportDays + "-day)"), ledger.products.slice().sort(function (a, b) { return b.total - a.total; }).map(function (p) {
       var maxfc = p.perFC.length ? p.perFC[0].qty : 1;
-      return /*#__PURE__*/React.createElement("div", { key: p.productID, style: { ...card, padding: 14, marginBottom: 12, minWidth: 0, overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 } }, /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 13.5, fontWeight: 700, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (p.name || p.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#a89680" } }, "FNSKU " + (p.fnsku || "—") + " · " + p.perFC.length + " FCs")), /*#__PURE__*/React.createElement("div", { style: { textAlign: "right", flexShrink: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 600, lineHeight: 1 } }, p.total), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.08em" } }, "total"))), p.perFC.map(function (fc) {
-        return /*#__PURE__*/React.createElement("div", { key: fc.fc, style: { display: "flex", alignItems: "center", gap: 9, padding: "6px 0", borderTop: "1px solid #f0ebe2" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 11.5, fontWeight: 600, color: "#2c211a", width: 52, flexShrink: 0 } }, fc.fc), /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 5, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, fc.qty / maxfc * 100) + "%", background: "#a97b52" } })), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 13, fontWeight: 600, width: 40, textAlign: "right" } }, fc.qty), /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: fc.sold > 0 ? "#bd5d38" : "#c8b9a3", width: 52, textAlign: "right" } }, fc.sold > 0 ? "−" + fc.sold + " sold" : "—"));
-      }));
+      var byReg = {};
+      p.perFC.forEach(function (fc) { var r = regionOf(fc.fc); (byReg[r] = byReg[r] || []).push(fc); });
+      return /*#__PURE__*/React.createElement("div", { key: p.productID, style: { ...card, padding: 14, marginBottom: 12, minWidth: 0, overflow: "hidden" } },
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 } }, /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 13.5, fontWeight: 700, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (p.name || p.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#a89680" } }, "FNSKU " + (p.fnsku || "—") + " · " + p.perFC.length + " FCs")), /*#__PURE__*/React.createElement("div", { style: { textAlign: "right", flexShrink: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 600, lineHeight: 1 } }, p.total), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.08em" } }, "total"))),
+        REGION_ORDER.filter(function (r) { return byReg[r]; }).map(function (r) {
+          var fcs = byReg[r];
+          var rtot = fcs.reduce(function (a, fc) { return a + fc.qty; }, 0);
+          var rsold = fcs.reduce(function (a, fc) { return a + fc.sold; }, 0);
+          return /*#__PURE__*/React.createElement("div", { key: r },
+            /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 6, borderTop: "1px solid #e7d9c4" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, color: "#bd5d38", textTransform: "uppercase", letterSpacing: "0.05em" } }, r), /*#__PURE__*/React.createElement("span", { style: { fontSize: 10.5, color: "#a89680" } }, rtot + " units" + (rsold > 0 ? " · −" + rsold + " sold" : ""))),
+            fcs.map(function (fc) {
+              return /*#__PURE__*/React.createElement("div", { key: fc.fc, style: { display: "flex", alignItems: "center", gap: 9, padding: "5px 0 5px 6px" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 11.5, fontWeight: 600, color: "#2c211a", width: 48, flexShrink: 0 } }, fc.fc), /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 5, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, fc.qty / maxfc * 100) + "%", background: "#a97b52" } })), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 13, fontWeight: 600, width: 38, textAlign: "right" } }, fc.qty), /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: fc.sold > 0 ? "#bd5d38" : "#c8b9a3", width: 46, textAlign: "right" } }, fc.sold > 0 ? "−" + fc.sold : "—"));
+            }));
+        }));
     }));
   }
 
@@ -2696,18 +2711,42 @@ function FbaReconcileTab(props) {
       var cover = vel > 0 ? p.total / vel : Infinity;
       var ship = vel > 0 ? Math.max(0, Math.round(vel * TARGET_DAYS) - p.total) : 0;
       var status = vel <= 0 ? "idle" : cover < TRANSIT_DAYS ? "urgent" : cover < (TRANSIT_DAYS + 13) ? "soon" : "ok";
-      return { p: p, vel: vel, cover: cover, ship: ship, status: status };
-    }).sort(function (a, b) { return (a.cover) - (b.cover); });
+      var totalSold = p.perFC.reduce(function (a, fc) { return a + fc.sold; }, 0);
+      var alloc = [];
+      if (ship > 0 && totalSold > 0) {
+        p.perFC.forEach(function (fc) { if (fc.sold > 0) { var q = Math.round(ship * fc.sold / totalSold); if (q > 0) alloc.push({ fc: fc.fc, region: regionOf(fc.fc), units: q, stock: fc.qty }); } });
+        var sum = alloc.reduce(function (a, x) { return a + x.units; }, 0);
+        if (alloc.length && sum !== ship) { alloc.sort(function (a, b) { return b.units - a.units; }); alloc[0].units += (ship - sum); if (alloc[0].units < 0) alloc[0].units = 0; }
+      }
+      var regAlloc = {};
+      alloc.forEach(function (a) { (regAlloc[a.region] = regAlloc[a.region] || []).push(a); });
+      return { p: p, vel: vel, cover: cover, ship: ship, status: status, regAlloc: regAlloc };
+    }).sort(function (a, b) { return a.cover - b.cover; });
     var SC = { urgent: { c: "#b23a2e", bg: "#f3dcd5", t: "Ship now" }, soon: { c: "#c2872f", bg: "#f4e7c8", t: "Plan soon" }, ok: { c: "#5f7a4f", bg: "#e2e8d3", t: "Healthy" }, idle: { c: "#a89680", bg: "#eee6d9", t: "No sales" } };
     return /*#__PURE__*/React.createElement("div", null,
-      /*#__PURE__*/React.createElement("div", { style: { background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 12, padding: "10px 13px", marginBottom: 12, fontSize: 11.5, color: "#6f6152", lineHeight: 1.6 } }, "Based on sales velocity over ", /*#__PURE__*/React.createElement("b", null, days + " day(s)"), " of ledger data. Rule: keep at least ", /*#__PURE__*/React.createElement("b", null, TRANSIT_DAYS + " days"), " cover (shipment transit) and top up to ", /*#__PURE__*/React.createElement("b", null, TARGET_DAYS + " days"), ". For sharper numbers, upload a wider date-range ledger."),
+      /*#__PURE__*/React.createElement("div", { style: { background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 12, padding: "10px 13px", marginBottom: 12, fontSize: 11.5, color: "#6f6152", lineHeight: 1.6 } }, "Velocity over ", /*#__PURE__*/React.createElement("b", null, days + " day(s)"), " of ledger. Keep ≥ ", /*#__PURE__*/React.createElement("b", null, TRANSIT_DAYS + " days"), " cover, top up to ", /*#__PURE__*/React.createElement("b", null, TARGET_DAYS + " days"), ". Centre split is by each FC’s recent sales share — upload a wider date-range ledger for sharper numbers."),
       rows.map(function (r) {
         var sc = SC[r.status];
-        return /*#__PURE__*/React.createElement("div", { key: r.p.productID, style: { ...card, padding: 13, marginBottom: 11 } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 } }, /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 13.5, fontWeight: 700, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (r.p.name || r.p.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#a89680", marginTop: 1 } }, "FNSKU " + (r.p.fnsku || "—"))), /*#__PURE__*/React.createElement("span", { style: { background: sc.bg, color: sc.c, fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 } }, sc.t)),
+        return /*#__PURE__*/React.createElement("div", { key: r.p.productID, style: { ...card, padding: 13, marginBottom: 11 } },
+          /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 } }, /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 13.5, fontWeight: 700, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (r.p.name || r.p.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#a89680", marginTop: 1 } }, "FNSKU " + (r.p.fnsku || "—"))), /*#__PURE__*/React.createElement("span", { style: { background: sc.bg, color: sc.c, fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 } }, sc.t)),
           /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 11 } }, [{ v: r.p.total, t: "At FBA" }, { v: r.vel > 0 ? r.vel.toFixed(1) + "/d" : "0", t: "Sales rate" }, { v: r.cover === Infinity ? "∞" : Math.round(r.cover) + "d", t: "Days cover" }].map(function (m) { return /*#__PURE__*/React.createElement("div", { key: m.t, style: { background: "#f5ecdc", borderRadius: 10, padding: "8px 6px", textAlign: "center" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 17, fontWeight: 600, color: "#2c211a" } }, m.v), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 2 } }, m.t)); })),
-          r.ship > 0 ? /*#__PURE__*/React.createElement("div", { style: { marginTop: 11, background: "#2a201a", color: "#f4ead8", borderRadius: 11, padding: "10px 13px", display: "flex", justifyContent: "space-between", alignItems: "center" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, fontWeight: 600 } }, "📦 Ship from Warehouse → FBA"), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 700, color: "#f0a882" } }, r.ship + " units")) : /*#__PURE__*/React.createElement("div", { style: { marginTop: 11, fontSize: 11.5, color: "#5f7a4f", fontWeight: 600, textAlign: "center" } }, r.status === "idle" ? "No recent FBA sales — no shipment needed." : "✅ Well stocked — no shipment needed."));
+          r.ship > 0
+            ? /*#__PURE__*/React.createElement("div", null,
+                /*#__PURE__*/React.createElement("div", { style: { marginTop: 11, background: "#2a201a", color: "#f4ead8", borderRadius: 11, padding: "10px 13px", display: "flex", justifyContent: "space-between", alignItems: "center" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, fontWeight: 600 } }, "📦 Ship Warehouse → FBA (total)"), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 700, color: "#f0a882" } }, r.ship + " units")),
+                Object.keys(r.regAlloc).length > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 10 } },
+                  /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 } }, "Suggested split by centre"),
+                  REGION_ORDER.filter(function (rg) { return r.regAlloc[rg]; }).map(function (rg) {
+                    var list = r.regAlloc[rg];
+                    var rtot = list.reduce(function (a, x) { return a + x.units; }, 0);
+                    return /*#__PURE__*/React.createElement("div", { key: rg, style: { marginTop: 7 } },
+                      /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 10.5, fontWeight: 700, color: "#bd5d38", textTransform: "uppercase", letterSpacing: "0.05em" } }, /*#__PURE__*/React.createElement("span", null, rg), /*#__PURE__*/React.createElement("span", null, rtot + " u")),
+                      list.map(function (a) {
+                        return /*#__PURE__*/React.createElement("div", { key: a.fc, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0 4px 6px", fontSize: 12 } }, /*#__PURE__*/React.createElement("span", { style: { color: "#2c211a", fontWeight: 600 } }, a.fc + "  ·  now " + a.stock), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontWeight: 700, color: "#2c211a" } }, "send " + a.units));
+                      }));
+                  })))
+            : /*#__PURE__*/React.createElement("div", { style: { marginTop: 11, fontSize: 11.5, color: "#5f7a4f", fontWeight: 600, textAlign: "center" } }, r.status === "idle" ? "No recent FBA sales — no shipment needed." : "✅ Well stocked — no shipment needed."));
       }),
-      /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", margin: "4px 2px", lineHeight: 1.5 } }, "Note: Amazon assigns the exact fulfilment centres when you create the inbound shipment (Send to Amazon). Use the Locations – FC tab to see current spread."));
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", margin: "4px 2px", lineHeight: 1.5 } }, "Note: Amazon may reassign fulfilment centres at Send-to-Amazon; use these as demand-based targets."));
   }
 
   return /*#__PURE__*/React.createElement("div", null, hero, subnav, sub === "upload" ? uploadTab() : sub === "fc" ? fcTab() : recoTab());
