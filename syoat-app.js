@@ -14,6 +14,8 @@
 //  Logo — reference by filename (lives in same folder as index.html)
 // ─────────────────────────────────────────────────────────────
 const SYOAT_LOGO = "syoat-logo.png";
+const BUILD_VERSION = "20260712-live5";
+try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
 //  ErrorBoundary — catches React crashes gracefully
@@ -562,9 +564,9 @@ function LoginScreen({
         marginBottom: 2,
         textAlign: "right"
       }
-    }, staffSource === "sheet"
+    }, (staffSource === "sheet"
       ? "✓ " + staffDB.length + " staff from sheet"
-      : "⚠ offline — sheet not connected"
+      : "⚠ offline — sheet not connected") + " · build " + BUILD_VERSION
     ), /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 16,
@@ -6298,7 +6300,7 @@ function App() {
     }
   }), /*#__PURE__*/React.createElement("div", { style: { height: 88 } }), /*#__PURE__*/React.createElement(BottomNav, {
     tab: tab, setTab: setTab, showList: showList,
-    onMovements: function(){ setShowList(true); }, user: user
+    onMovements: function () { setShowList(true); }, user: user
   }));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(
