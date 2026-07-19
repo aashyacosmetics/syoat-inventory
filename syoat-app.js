@@ -2837,14 +2837,20 @@ function SupportModal({ tickets, products, returnMovements, user, onClose, onDon
 
 // ─────────────────────────────────────────────────────────────
 //  MODULE B: PURCHASING / SUPPLIER PO MODAL (2026-07-19)
-//  Create/Approve/Reject/Close restricted to Founder/Co-Founder/Owner/Admin/
-//  Manager — deliberately NOT Warehouse Manager, since a PO commits real
-//  money (Lalith's call, kept separate from who can approve movements).
-//  Everyone else (Warehouse, Warehouse Manager, Accounts) still sees the
-//  list read-only, since Zubedha/Pushpanjali need to see what's expected
-//  when linking a Stock In movement to a PO.
+//  Roles revised 2026-07-19: Owner retired ("There is no Owner any more").
+//  Create and approve are now two separate tiers:
+//    - Create:  Founder, Co-Founder, Warehouse Manager (Pushpanjali creates POs)
+//    - Approve/Reject/Close: Founder, Co-Founder only — a PO commits real
+//      money, so Warehouse Manager creates but can't sign off on her own.
+//  Tab visibility is its own, narrower list (see BottomNav / PURCHASE_ORDER_VIEW_ROLES_FE):
+//  only Founder, Co-Founder, Warehouse Manager, and Warehouse Operator (Zubedha,
+//  view-only — she needs to see what's expected when linking a Stock In to a PO)
+//  see the Purchasing tab at all. Admin, Manager, Accounts, Operations Manager
+//  no longer see it.
 // ─────────────────────────────────────────────────────────────
-const PURCHASE_ORDER_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Admin", "Manager"];
+const PURCHASE_ORDER_CREATE_ROLES_FE  = ["Founder", "Co-Founder", "Warehouse Manager"];
+const PURCHASE_ORDER_APPROVE_ROLES_FE = ["Founder", "Co-Founder"];
+const PURCHASE_ORDER_VIEW_ROLES_FE    = ["Founder", "Co-Founder", "Warehouse Manager", "Warehouse Operator", "Warehouse"];
 const PO_STATUS_COLOR = { "Draft": "#a97b52", "Approved": "#4a7c59", "Rejected": "#b23a2e", "Closed": "#a89680" };
 // Fixed company header + boilerplate terms — matches the existing Aashya
 // Cosmetics PO template exactly (Lalith's choice: fixed, not editable per PO).
@@ -2870,7 +2876,9 @@ const PO_TERMS = [
 ];
 
 function PurchasingModal({ purchaseOrders, suppliers, products, user, onClose, onDone, reload }) {
-  const canManage = PURCHASE_ORDER_ROLES_FE.includes(user.role);
+  const canCreate = PURCHASE_ORDER_CREATE_ROLES_FE.includes(user.role);
+  const canApprove = PURCHASE_ORDER_APPROVE_ROLES_FE.includes(user.role);
+  const canManage = canCreate || canApprove; // used only for shared list-view chrome, not for gating individual buttons below
   const [view, setView] = React.useState("list");
   const [printingPO, setPrintingPO] = React.useState(null);
   const [supplierID, setSupplierID] = React.useState("");
@@ -3073,12 +3081,11 @@ function PurchasingModal({ purchaseOrders, suppliers, products, user, onClose, o
       err && /*#__PURE__*/React.createElement("div", { style: { background: "#fbeae7", color: "#b23a2e", padding: "8px 12px", borderRadius: 8, fontSize: 12, marginBottom: 12 } }, err),
       view === "list"
         ? /*#__PURE__*/React.createElement("div", null,
-            canManage && /*#__PURE__*/React.createElement("button", { onClick: () => setView("new"), style: { ...btnS(), width: "100%", marginBottom: 14 } }, "+ New Purchase Order"),
+            canCreate && /*#__PURE__*/React.createElement("button", { onClick: () => setView("new"), style: { ...btnS(), width: "100%", marginBottom: 14 } }, "+ New Purchase Order"),
             purchaseOrders.length === 0
               ? /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", color: "#a89680", fontSize: 13, padding: "20px 0" } }, "No purchase orders yet.")
               : /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 10 } },
                   purchaseOrders.map(po => {
-                    var isSelfLocked = po.Status === "Draft" && po.CreatedByEmail === user.email && ["Admin","Manager"].includes(user.role);
                     return /*#__PURE__*/React.createElement("div", { key: po.POID, style: { border: "1px solid #e7d9c4", borderRadius: 12, padding: 12, background: "#f8f4ef" } },
                       /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
                         /*#__PURE__*/React.createElement("div", null,
@@ -3098,12 +3105,12 @@ function PurchasingModal({ purchaseOrders, suppliers, products, user, onClose, o
                           );
                         })
                       ),
-                      isSelfLocked && /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a97b52", marginTop: 6 } }, "Created by you — needs another approver."),
+                      (po.Status === "Draft" && po.CreatedByEmail === user.email && !canApprove) && /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a97b52", marginTop: 6 } }, "Created by you — waiting on Founder/Co-Founder to approve."),
                       /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" } },
                         /*#__PURE__*/React.createElement("button", { onClick: () => { setPrintingPO(po); setView("print"); }, style: { ...ghost, fontSize: 11, padding: "5px 10px" } }, "🖨 Print"),
-                        canManage && po.Status === "Draft" && !isSelfLocked && /*#__PURE__*/React.createElement("button", { disabled: updatingID === po.POID, onClick: () => approve(po.POID), style: { ...btnS("#4a7c59"), fontSize: 11, padding: "5px 10px" } }, "✅ Approve"),
-                        canManage && po.Status === "Draft" && /*#__PURE__*/React.createElement("button", { disabled: updatingID === po.POID, onClick: () => reject(po.POID), style: { ...ghost, fontSize: 11, padding: "5px 10px", color: "#b23a2e" } }, "🚫 Reject"),
-                        canManage && po.Status === "Approved" && /*#__PURE__*/React.createElement("button", { disabled: updatingID === po.POID, onClick: () => closePO(po.POID), style: { ...ghost, fontSize: 11, padding: "5px 10px" } }, "Close PO")
+                        canApprove && po.Status === "Draft" && /*#__PURE__*/React.createElement("button", { disabled: updatingID === po.POID, onClick: () => approve(po.POID), style: { ...btnS("#4a7c59"), fontSize: 11, padding: "5px 10px" } }, "✅ Approve"),
+                        canApprove && po.Status === "Draft" && /*#__PURE__*/React.createElement("button", { disabled: updatingID === po.POID, onClick: () => reject(po.POID), style: { ...ghost, fontSize: 11, padding: "5px 10px", color: "#b23a2e" } }, "🚫 Reject"),
+                        canApprove && po.Status === "Approved" && /*#__PURE__*/React.createElement("button", { disabled: updatingID === po.POID, onClick: () => closePO(po.POID), style: { ...ghost, fontSize: 11, padding: "5px 10px" } }, "Close PO")
                       )
                     );
                   })
@@ -5000,10 +5007,11 @@ function BottomNav(props) {
   // Operator", so both strings are blocked here in case that field is ever wired in later.
   var NO_SUPPORT_ROLES = ["Warehouse", "Warehouse Operator", "Warehouse Manager"];
   if (NO_SUPPORT_ROLES.includes(user.role)) items = items.filter(function(it){ return it.k !== "support"; });
-  // Permission: Purchasing is view-only for everyone except Operations Manager (Sravanthi),
-  // who is scoped to Support Tickets only and has no role in warehouse/purchasing at all —
-  // hide the tab entirely for her rather than showing an empty/disabled view.
-  if (user.role === "Operations Manager") items = items.filter(function(it){ return it.k !== "purchasing"; });
+  // Permission (revised 2026-07-19): Purchasing is visible only to Founder, Co-Founder,
+  // Warehouse Manager (creates POs), and Warehouse Operator/Warehouse (Zubedha — view-only,
+  // she needs to see what's expected when linking a Stock In to a PO). Admin, Manager,
+  // Accounts, and Operations Manager no longer see this tab at all.
+  if (!PURCHASE_ORDER_VIEW_ROLES_FE.includes(user.role)) items = items.filter(function(it){ return it.k !== "purchasing"; });
   var active = showList ? "movements" : (props.showSupportModal ? "support" : (props.showPurchasingModal ? "purchasing" : ((tab === "product" || tab === "location" || tab === "counts") ? "product" : tab)));
   return /*#__PURE__*/React.createElement("div", { style: { position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 120, background: "rgba(253,249,241,0.94)", backdropFilter: "blur(10px)", borderTop: "1px solid #e7d9c4", display: "flex", padding: "8px 4px 18px" } },
     items.map(function(it){
