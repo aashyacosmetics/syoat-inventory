@@ -4498,6 +4498,10 @@ function BottomNav(props) {
   ];
   // Permission: Warehouse role has no Amazon import access — hide that tab.
   if (user.role === "Warehouse") items = items.filter(function(it){ return it.k !== "amazon"; });
+  // Permission: Support tickets are Sravanthi (Operations Manager) / Founder / Co-Founder / Owner
+  // only — Zubedha (Warehouse) and Pushpanjali (Warehouse Manager) have no role in this workflow,
+  // so hide the tab entirely for them rather than showing an empty/disabled view.
+  if (user.role === "Warehouse" || user.role === "Warehouse Manager") items = items.filter(function(it){ return it.k !== "support"; });
   var active = showList ? "movements" : (props.showSupportModal ? "support" : ((tab === "product" || tab === "location" || tab === "counts") ? "product" : tab));
   return /*#__PURE__*/React.createElement("div", { style: { position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 120, background: "rgba(253,249,241,0.94)", backdropFilter: "blur(10px)", borderTop: "1px solid #e7d9c4", display: "flex", padding: "8px 4px 18px" } },
     items.map(function(it){
