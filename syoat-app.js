@@ -4501,7 +4501,11 @@ function BottomNav(props) {
   // Permission: Support tickets are Sravanthi (Operations Manager) / Founder / Co-Founder / Owner
   // only — Zubedha (Warehouse) and Pushpanjali (Warehouse Manager) have no role in this workflow,
   // so hide the tab entirely for them rather than showing an empty/disabled view.
-  if (user.role === "Warehouse" || user.role === "Warehouse Manager") items = items.filter(function(it){ return it.k !== "support"; });
+  // "Warehouse Operator" is included defensively — App_Logins.Role (the sheet actually read at
+  // login) has Zubedha as "Warehouse", but the separate Staff sheet lists her as "Warehouse
+  // Operator", so both strings are blocked here in case that field is ever wired in later.
+  var NO_SUPPORT_ROLES = ["Warehouse", "Warehouse Operator", "Warehouse Manager"];
+  if (NO_SUPPORT_ROLES.includes(user.role)) items = items.filter(function(it){ return it.k !== "support"; });
   var active = showList ? "movements" : (props.showSupportModal ? "support" : ((tab === "product" || tab === "location" || tab === "counts") ? "product" : tab));
   return /*#__PURE__*/React.createElement("div", { style: { position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 120, background: "rgba(253,249,241,0.94)", backdropFilter: "blur(10px)", borderTop: "1px solid #e7d9c4", display: "flex", padding: "8px 4px 18px" } },
     items.map(function(it){
