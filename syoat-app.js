@@ -82,19 +82,19 @@ const STAFF_DB_FALLBACK = [{
 }];
 // What each role can CREATE
 const CAN_CREATE_TYPES = {
-  Founder: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  "Co-Founder": ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  Owner: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  Admin: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  Manager: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  Founder: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  "Co-Founder": ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  Owner: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  Admin: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  Manager: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   // Warehouse Manager (added 2026-07-19): treated as Manager-tier — same movement-type
   // access as Manager. Update here if scope should differ.
-  "Warehouse Manager": ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  "Warehouse Manager": ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   // v3.4 (2026-07-19): Operations Manager (Sravanthi) does no warehouse/Amazon work —
   // scoped to Support Tickets only. No movement types creatable.
   "Operations Manager": [],
   // Warehouse ships from WH only — cannot touch FBA stock
-  Warehouse: ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  Warehouse: ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Accounts: []
 };
 
@@ -205,6 +205,10 @@ const SRC_DST = {
     src: "MAIN_WH",
     dst: "FLIPKART_SALES"
   },
+  "Firstcry Dispatch": {
+    src: "MAIN_WH",
+    dst: "FIRSTCRY_SALES"
+  },
   "Samples": {
     src: "MAIN_WH",
     dst: "SAMPLES"
@@ -238,6 +242,7 @@ const TYPE_LABEL = {
   "Website – WH Ship":     "Website Order — ship from Warehouse",
   "Website – FBA Ship":    "Website Order — ship from Amazon FBA",
   "Flipkart Dispatch":     "Flipkart Order — WH → Flipkart",
+  "Firstcry Dispatch":     "Firstcry Order — WH → Firstcry",
   "Samples":               "Samples / Office Use — WH → Samples",
   "Damage":                "Damage in Warehouse — WH → Damage",
   "Returns – to WH":       "Return → back to Warehouse (good stock)",
@@ -251,7 +256,7 @@ const TYPE_LABEL = {
 // The 'types' are stored MovementType keys — display uses TYPE_LABEL.
 const TYPE_GROUPS = [
   { key: "receive", label: "📥 Receive",         types: ["Stock In", "FBA Receipt"] },
-  { key: "ship",    label: "📤 Ship Orders",     types: ["FBA Dispatch", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch"] },
+  { key: "ship",    label: "📤 Ship Orders",     types: ["FBA Dispatch", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch"] },
   { key: "returns", label: "↩️ Returns",          types: ["Return Received", "Returns – to WH", "Returns – Damaged"] },
   { key: "adjust",  label: "🗑️ Damage / Samples", types: ["Damage", "Samples"] },
   { key: "setup",   label: "⚙️ Setup",           types: ["Opening Balance – WH", "Opening Balance – FBA"] }
@@ -264,13 +269,14 @@ const LOC_LABEL = {
   DAMAGE: "Damage",
   WEBSITE_SALES: "Website Sales",
   FLIPKART_SALES: "Flipkart Sales",
+  FIRSTCRY_SALES: "Firstcry Sales",
   SAMPLES: "Samples"
 };
 
 // Locations that hold physical, sellable stock (shown on dashboard)
 const STOCK_LOCATIONS = ["MAIN_WH", "AMAZON_FBA", "FBA_TRANSIT", "RETURNS"];
 // Locations that are outbound sinks (consumed stock — shown in analytics only)
-const SALES_LOCATIONS = ["WEBSITE_SALES", "FLIPKART_SALES", "SAMPLES", "DAMAGE"];
+const SALES_LOCATIONS = ["WEBSITE_SALES", "FLIPKART_SALES", "FIRSTCRY_SALES", "SAMPLES", "DAMAGE"];
 // Virtual pass-through (ignored in stock calc)
 const VIRTUAL_LOCATIONS = ["SUPPLIER", "CUSTOMER"];
 const ROLE_COLOR = {
@@ -1473,7 +1479,7 @@ function MovModal({
     onChange: e => setRefNo(e.target.value),
     placeholder: "Invoice / Order ID",
     style: inp
-  }))), (type === "FBA Dispatch" || type === "Website – WH Ship" || type === "Website – FBA Ship" || type === "Flipkart Dispatch") && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+  }))), (type === "FBA Dispatch" || type === "Website – WH Ship" || type === "Website – FBA Ship" || type === "Flipkart Dispatch" || type === "Firstcry Dispatch") && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
   }, "Carrier / AWB"), /*#__PURE__*/React.createElement("input", {
     value: carrier,
@@ -2565,8 +2571,12 @@ const TICKET_STATUS_COLOR = { "Open": "#b23a2e", "In Progress": "#a97b52", "Reso
 // can create or resolve tickets. Zubedha (Warehouse) and Pushpanjali (Warehouse Manager) are
 // not part of this workflow at all.
 const SUPPORT_TICKET_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Operations Manager"];
-// v3.5: movement types a ticket may link to — keep in sync with RETURN_MOVEMENT_TYPES in AppScript.
-const RETURN_MOVEMENT_TYPES_FE = ["Return Received", "Returns – to WH", "Returns – Damaged", "Damage"];
+// v3.6: a ticket links to the order that was actually shipped to the customer (most Support
+// queries are about a new order, before or after delivery) — plus Return-type movements for
+// tickets opened after a physical return. Website – FBA Ship and FBA Dispatch are deliberately
+// excluded. Keep in sync with TICKET_LINKABLE_MOVEMENT_TYPES in AppScript.
+const TICKET_LINKABLE_MOVEMENT_TYPES_FE = ["Website – WH Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage"];
+const TICKET_LINK_OTHER = "__OTHER__";
 
 function SupportModal({ tickets, products, returnMovements, user, onClose, onDone, reload }) {
   const canManage = SUPPORT_TICKET_ROLES_FE.includes(user.role);
@@ -2578,6 +2588,7 @@ function SupportModal({ tickets, products, returnMovements, user, onClose, onDon
   const [reasonCode, setReasonCode] = React.useState(SUPPORT_REASONS[0]);
   const [description, setDescription] = React.useState("");
   const [linkedMovementID, setLinkedMovementID] = React.useState("");
+  const [otherRef, setOtherRef] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState("");
   const [updatingID, setUpdatingID] = React.useState(null);
@@ -2585,13 +2596,24 @@ function SupportModal({ tickets, products, returnMovements, user, onClose, onDon
   const draftFor = t => resolutionDrafts[t.TicketID] !== undefined ? resolutionDrafts[t.TicketID] : (t.Resolution || "");
   const [linkDrafts, setLinkDrafts] = React.useState({});
   const linkDraftFor = t => linkDrafts[t.TicketID] !== undefined ? linkDrafts[t.TicketID] : (t.LinkedMovementID || "");
+  const [linkOtherDrafts, setLinkOtherDrafts] = React.useState({});
   const movLabel = mv => mv.MovementID + " — " + (TYPE_LABEL[mv.MovementType] || mv.MovementType) + (mv.ReferenceNumber ? " (" + mv.ReferenceNumber + ")" : "");
 
-  async function saveLink(ticketID, movementID) {
-    setUpdatingID(ticketID); setErr("");
+  async function saveLink(t, movementID, otherText) {
+    setUpdatingID(t.TicketID); setErr("");
     try {
-      await apiWrite("updateSupportTicket", user.email, { ticketID, linkedMovementID: movementID });
-      onDone(movementID ? `✅ ${ticketID} linked to ${movementID}` : `✅ ${ticketID} link cleared`);
+      if (movementID === TICKET_LINK_OTHER) {
+        const ref = (otherText || "").trim();
+        if (!ref) { setErr("Type the order reference before saving."); setUpdatingID(null); return; }
+        await apiWrite("updateSupportTicket", user.email, {
+          ticketID: t.TicketID, linkedMovementID: "",
+          notes: ((t.Notes || "") + " | Order ref (not in list): " + ref).trim()
+        });
+        onDone(`✅ ${t.TicketID} — order ref saved as a note`);
+      } else {
+        await apiWrite("updateSupportTicket", user.email, { ticketID: t.TicketID, linkedMovementID: movementID });
+        onDone(movementID ? `✅ ${t.TicketID} linked to ${movementID}` : `✅ ${t.TicketID} link cleared`);
+      }
       reload();
     } catch (e) { setErr(e.message); }
     setUpdatingID(null);
@@ -2599,16 +2621,20 @@ function SupportModal({ tickets, products, returnMovements, user, onClose, onDon
 
   async function submit() {
     if (!customerName.trim() || !description.trim()) { setErr("Customer name and description are required."); return; }
+    if (linkedMovementID === TICKET_LINK_OTHER && !otherRef.trim()) { setErr("Type the order reference, or clear the Linked Movement field."); return; }
     setBusy(true); setErr("");
     try {
+      const isOther = linkedMovementID === TICKET_LINK_OTHER;
       const res = await apiWrite("createSupportTicket", user.email, {
         customerName: customerName.trim(), contactInfo, channel, productID: pid,
-        reasonCode, description: description.trim(), linkedMovementID
+        reasonCode, description: description.trim(),
+        linkedMovementID: isOther ? "" : linkedMovementID,
+        notes: isOther ? "Order ref (not in list): " + otherRef.trim() : ""
       });
       onDone(`✅ Ticket ${res.ticketID} created`);
       reload();
       setView("list");
-      setCustomerName(""); setContactInfo(""); setPid(""); setDescription(""); setLinkedMovementID("");
+      setCustomerName(""); setContactInfo(""); setPid(""); setDescription(""); setLinkedMovementID(""); setOtherRef("");
     } catch (e) { setErr(e.message); }
     setBusy(false);
   }
@@ -2652,20 +2678,29 @@ function SupportModal({ tickets, products, returnMovements, user, onClose, onDon
                       /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#5a4a3a", marginTop: 8 } }, t.Description),
                       !canManage && t.LinkedMovementID && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#a89680", marginTop: 4 } }, "Linked movement: " + t.LinkedMovementID),
                       t.Resolution && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#4a7c59", marginTop: 4 } }, "Resolution: " + t.Resolution),
-                      canManage && /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 8, alignItems: "center" } },
-                        /*#__PURE__*/React.createElement("select", {
-                          value: linkDraftFor(t),
-                          onChange: e => setLinkDrafts(function(d){ var n = Object.assign({}, d); n[t.TicketID] = e.target.value; return n; }),
-                          style: { ...inp, marginBottom: 0, flex: 1, fontSize: 11, padding: "6px 8px" }
-                        },
-                          /*#__PURE__*/React.createElement("option", { value: "" }, "— No linked movement —"),
-                          returnMovements.map(mv => /*#__PURE__*/React.createElement("option", { key: mv.MovementID, value: mv.MovementID }, movLabel(mv)))
+                      canManage && /*#__PURE__*/React.createElement("div", { style: { marginTop: 8 } },
+                        /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+                          /*#__PURE__*/React.createElement("select", {
+                            value: linkDraftFor(t),
+                            onChange: e => setLinkDrafts(function(d){ var n = Object.assign({}, d); n[t.TicketID] = e.target.value; return n; }),
+                            style: { ...inp, marginBottom: 0, flex: 1, fontSize: 11, padding: "6px 8px" }
+                          },
+                            /*#__PURE__*/React.createElement("option", { value: "" }, "— No linked movement —"),
+                            returnMovements.map(mv => /*#__PURE__*/React.createElement("option", { key: mv.MovementID, value: mv.MovementID }, movLabel(mv))),
+                            /*#__PURE__*/React.createElement("option", { value: TICKET_LINK_OTHER }, "🔧 Other / not listed (order didn't appear)")
+                          ),
+                          /*#__PURE__*/React.createElement("button", {
+                            disabled: updatingID === t.TicketID || (linkDraftFor(t) === (t.LinkedMovementID || "")),
+                            onClick: () => saveLink(t, linkDraftFor(t), linkOtherDrafts[t.TicketID]),
+                            style: { ...ghost, fontSize: 11, padding: "6px 10px", whiteSpace: "nowrap", opacity: (updatingID === t.TicketID || linkDraftFor(t) === (t.LinkedMovementID || "")) ? 0.5 : 1 }
+                          }, "🔗 Save Link")
                         ),
-                        /*#__PURE__*/React.createElement("button", {
-                          disabled: updatingID === t.TicketID || linkDraftFor(t) === (t.LinkedMovementID || ""),
-                          onClick: () => saveLink(t.TicketID, linkDraftFor(t)),
-                          style: { ...ghost, fontSize: 11, padding: "6px 10px", whiteSpace: "nowrap", opacity: (updatingID === t.TicketID || linkDraftFor(t) === (t.LinkedMovementID || "")) ? 0.5 : 1 }
-                        }, "🔗 Save Link")
+                        linkDraftFor(t) === TICKET_LINK_OTHER && /*#__PURE__*/React.createElement("input", {
+                          value: linkOtherDrafts[t.TicketID] || "",
+                          onChange: e => setLinkOtherDrafts(function(d){ var n = Object.assign({}, d); n[t.TicketID] = e.target.value; return n; }),
+                          placeholder: "Type the order/Amazon order ID reference",
+                          style: { ...inp, marginTop: 6, marginBottom: 0, fontSize: 11, padding: "6px 8px" }
+                        })
                       ),
                       canManage && t.Status !== "Closed" && /*#__PURE__*/React.createElement("textarea", {
                         value: draftFor(t),
@@ -2692,7 +2727,7 @@ function SupportModal({ tickets, products, returnMovements, user, onClose, onDon
               /*#__PURE__*/React.createElement("input", { value: contactInfo, onChange: e => setContactInfo(e.target.value), style: inp, placeholder: "Optional" })),
             /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Channel"),
               /*#__PURE__*/React.createElement("select", { value: channel, onChange: e => setChannel(e.target.value), style: inp },
-                ["Website", "Amazon", "Flipkart", "Phone", "Email", "Instagram", "WhatsApp", "Other"].map(c => /*#__PURE__*/React.createElement("option", { key: c, value: c }, c)))),
+                ["Website", "Amazon", "Flipkart", "Firstcry", "Phone", "Email", "Instagram", "WhatsApp", "Other"].map(c => /*#__PURE__*/React.createElement("option", { key: c, value: c }, c)))),
             /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Product (optional)"),
               /*#__PURE__*/React.createElement("select", { value: pid, onChange: e => setPid(e.target.value), style: inp },
                 /*#__PURE__*/React.createElement("option", { value: "" }, "— None —"),
@@ -2702,10 +2737,16 @@ function SupportModal({ tickets, products, returnMovements, user, onClose, onDon
                 SUPPORT_REASONS.map(r => /*#__PURE__*/React.createElement("option", { key: r, value: r }, r)))),
             /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Description"),
               /*#__PURE__*/React.createElement("textarea", { value: description, onChange: e => setDescription(e.target.value), style: { ...inp, minHeight: 70 }, placeholder: "What happened?" })),
-            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Linked Movement (optional — Return/Damage movements only)"),
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Linked Order / Movement (optional)"),
               /*#__PURE__*/React.createElement("select", { value: linkedMovementID, onChange: e => setLinkedMovementID(e.target.value), style: inp },
                 /*#__PURE__*/React.createElement("option", { value: "" }, "— None yet (link it later once recorded) —"),
-                returnMovements.map(mv => /*#__PURE__*/React.createElement("option", { key: mv.MovementID, value: mv.MovementID }, movLabel(mv))))),
+                returnMovements.map(mv => /*#__PURE__*/React.createElement("option", { key: mv.MovementID, value: mv.MovementID }, movLabel(mv))),
+                /*#__PURE__*/React.createElement("option", { value: TICKET_LINK_OTHER }, "🔧 Other / not listed (e.g. Amazon order)")
+              ),
+              linkedMovementID === TICKET_LINK_OTHER && /*#__PURE__*/React.createElement("input", {
+                value: otherRef, onChange: e => setOtherRef(e.target.value), style: { ...inp, marginTop: 6 },
+                placeholder: "Type the order/Amazon order ID reference"
+              })),
             /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10 } },
               /*#__PURE__*/React.createElement("button", { onClick: () => setView("list"), style: { ...ghost, flex: 1 } }, "Cancel"),
               /*#__PURE__*/React.createElement("button", {
@@ -4788,7 +4829,7 @@ function App() {
   async function loadReturnMovements() {
     try {
       const data = await api("getMovements", { includeLines: "false", limit: "300" });
-      setReturnMovements(Array.isArray(data) ? data.filter(m => RETURN_MOVEMENT_TYPES_FE.includes(m.MovementType)) : []);
+      setReturnMovements(Array.isArray(data) ? data.filter(m => TICKET_LINKABLE_MOVEMENT_TYPES_FE.includes(m.MovementType)) : []);
     } catch (e) {
       console.error("Return movements:", e.message);
     }
@@ -6137,7 +6178,7 @@ function App() {
     }
   }, "Loading…") : (() => {
     // Compute dispatches per channel from approved movement lines (accurate).
-    // IMPORTANT: getStock treats sales destinations (WEBSITE_SALES, FLIPKART_SALES, etc.)
+    // IMPORTANT: getStock treats sales destinations (WEBSITE_SALES, FLIPKART_SALES, FIRSTCRY_SALES, etc.)
     // as VIRTUAL — no stock accumulates there. We must use movement data instead.
     // AMAZON_FBA is a holding location (not a sales channel) so it is excluded here.
     const channels = [{
@@ -6150,6 +6191,11 @@ function App() {
       label: "Flipkart",
       color: "#bd5d38",
       icon: "🛒"
+    }, {
+      key: "FIRSTCRY_SALES",
+      label: "Firstcry",
+      color: "#bd5d38",
+      icon: "🍼"
     }, {
       key: "SAMPLES",
       label: "Samples",
