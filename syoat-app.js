@@ -2543,6 +2543,130 @@ function StockCountModal({
 }
 
 // ─────────────────────────────────────────────────────────────
+//  MODULE A: SUPPORT / RETURNS TICKETS MODAL
+//  Same role gate as Return movement creation (Warehouse, Admin,
+//  Manager, Warehouse Manager, Operations Manager, Founder/Co-Founder/Owner).
+//  Simple lifecycle, no stock impact: Open → In Progress → Resolved → Closed.
+// ─────────────────────────────────────────────────────────────
+const SUPPORT_REASONS = ["Product Damaged on Arrival", "Wrong Item Received", "Missing Item", "Quality Issue", "Size / Fit Issue", "Delayed Delivery", "Refund Request", "Exchange Request", "General Inquiry", "Other"];
+const TICKET_STATUSES = ["Open", "In Progress", "Resolved", "Closed"];
+const TICKET_STATUS_COLOR = { "Open": "#b23a2e", "In Progress": "#a97b52", "Resolved": "#4a7c59", "Closed": "#a89680" };
+
+const SUPPORT_TICKET_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Admin", "Manager", "Warehouse Manager", "Operations Manager", "Warehouse"];
+
+function SupportModal({ tickets, products, user, onClose, onDone, reload }) {
+  const canManage = SUPPORT_TICKET_ROLES_FE.includes(user.role);
+  const [view, setView] = React.useState("list");
+  const [customerName, setCustomerName] = React.useState("");
+  const [contactInfo, setContactInfo] = React.useState("");
+  const [channel, setChannel] = React.useState("Website");
+  const [pid, setPid] = React.useState("");
+  const [reasonCode, setReasonCode] = React.useState(SUPPORT_REASONS[0]);
+  const [description, setDescription] = React.useState("");
+  const [linkedMovementID, setLinkedMovementID] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  const [updatingID, setUpdatingID] = React.useState(null);
+
+  async function submit() {
+    if (!customerName.trim() || !description.trim()) { setErr("Customer name and description are required."); return; }
+    setBusy(true); setErr("");
+    try {
+      const res = await apiWrite("createSupportTicket", user.email, {
+        customerName: customerName.trim(), contactInfo, channel, productID: pid,
+        reasonCode, description: description.trim(), linkedMovementID
+      });
+      onDone(`✅ Ticket ${res.ticketID} created`);
+      reload();
+      setView("list");
+      setCustomerName(""); setContactInfo(""); setPid(""); setDescription(""); setLinkedMovementID("");
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
+
+  async function updateStatus(ticketID, status) {
+    setUpdatingID(ticketID); setErr("");
+    try {
+      await apiWrite("updateSupportTicket", user.email, { ticketID, status });
+      onDone(`✅ ${ticketID} → ${status}`);
+      reload();
+    } catch (e) { setErr(e.message); }
+    setUpdatingID(null);
+  }
+
+  const MODAL_STYLE = { position: "fixed", inset: 0, background: "rgba(60,40,20,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 };
+  const BOX_STYLE = { background: "#fefcf9", borderRadius: 16, padding: 22, width: 520, maxWidth: "100%", border: "1px solid #e0d2bd", maxHeight: "90vh", overflowY: "auto" };
+
+  return /*#__PURE__*/React.createElement("div", { style: MODAL_STYLE },
+    /*#__PURE__*/React.createElement("div", { style: BOX_STYLE },
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
+        /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 15, color: "#2c211a" } }, "🎫 Support Tickets"),
+        /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: "#a89680", fontSize: 22, cursor: "pointer" } }, "×")
+      ),
+      err && /*#__PURE__*/React.createElement("div", { style: { background: "#fbeae7", color: "#b23a2e", padding: "8px 12px", borderRadius: 8, fontSize: 12, marginBottom: 12 } }, err),
+      view === "list"
+        ? /*#__PURE__*/React.createElement("div", null,
+            canManage && /*#__PURE__*/React.createElement("button", { onClick: () => setView("new"), style: { ...btnS(), width: "100%", marginBottom: 14 } }, "+ New Ticket"),
+            tickets.length === 0
+              ? /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", color: "#a89680", fontSize: 13, padding: "20px 0" } }, "No tickets yet.")
+              : /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 10 } },
+                  tickets.map(t => {
+                    const prod = products.find(p => p.ProductID === t.ProductID);
+                    return /*#__PURE__*/React.createElement("div", { key: t.TicketID, style: { border: "1px solid #e7d9c4", borderRadius: 12, padding: 12, background: "#f8f4ef" } },
+                      /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
+                        /*#__PURE__*/React.createElement("div", null,
+                          /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 13, color: "#2c211a" } }, t.TicketID + " · " + t.CustomerName),
+                          /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#a89680", marginTop: 2 } }, t.ReasonCode + (prod ? " · " + prod.ProductName : "") + (t.Channel ? " · " + t.Channel : ""))
+                        ),
+                        /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#fff", background: TICKET_STATUS_COLOR[t.Status] || "#a89680", padding: "3px 8px", borderRadius: 20 } }, t.Status)
+                      ),
+                      /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#5a4a3a", marginTop: 8 } }, t.Description),
+                      t.LinkedMovementID && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#a89680", marginTop: 4 } }, "Linked movement: " + t.LinkedMovementID),
+                      t.Resolution && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#4a7c59", marginTop: 4 } }, "Resolution: " + t.Resolution),
+                      canManage && t.Status !== "Closed" && /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" } },
+                        TICKET_STATUSES.filter(s => s !== t.Status).map(s =>
+                          /*#__PURE__*/React.createElement("button", {
+                            key: s, disabled: updatingID === t.TicketID, onClick: () => updateStatus(t.TicketID, s),
+                            style: { ...ghost, fontSize: 11, padding: "5px 10px", opacity: updatingID === t.TicketID ? 0.5 : 1 }
+                          }, "→ " + s)
+                        )
+                      )
+                    );
+                  })
+                )
+          )
+        : /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 12 } },
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Customer Name"),
+              /*#__PURE__*/React.createElement("input", { value: customerName, onChange: e => setCustomerName(e.target.value), style: inp, placeholder: "Customer name" })),
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Contact Info (phone/email)"),
+              /*#__PURE__*/React.createElement("input", { value: contactInfo, onChange: e => setContactInfo(e.target.value), style: inp, placeholder: "Optional" })),
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Channel"),
+              /*#__PURE__*/React.createElement("select", { value: channel, onChange: e => setChannel(e.target.value), style: inp },
+                ["Website", "Amazon", "Flipkart", "Phone", "Email", "Instagram", "WhatsApp", "Other"].map(c => /*#__PURE__*/React.createElement("option", { key: c, value: c }, c)))),
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Product (optional)"),
+              /*#__PURE__*/React.createElement("select", { value: pid, onChange: e => setPid(e.target.value), style: inp },
+                /*#__PURE__*/React.createElement("option", { value: "" }, "— None —"),
+                products.map(p => /*#__PURE__*/React.createElement("option", { key: p.ProductID, value: p.ProductID }, p.ProductName, " (", p.VariantName, ")")))),
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Reason"),
+              /*#__PURE__*/React.createElement("select", { value: reasonCode, onChange: e => setReasonCode(e.target.value), style: inp },
+                SUPPORT_REASONS.map(r => /*#__PURE__*/React.createElement("option", { key: r, value: r }, r)))),
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Description"),
+              /*#__PURE__*/React.createElement("textarea", { value: description, onChange: e => setDescription(e.target.value), style: { ...inp, minHeight: 70 }, placeholder: "What happened?" })),
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Linked Movement ID (optional)"),
+              /*#__PURE__*/React.createElement("input", { value: linkedMovementID, onChange: e => setLinkedMovementID(e.target.value), style: inp, placeholder: "e.g. MOV-123" })),
+            /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10 } },
+              /*#__PURE__*/React.createElement("button", { onClick: () => setView("list"), style: { ...ghost, flex: 1 } }, "Cancel"),
+              /*#__PURE__*/React.createElement("button", {
+                onClick: submit, disabled: busy || !customerName.trim() || !description.trim(),
+                style: { ...btnS(), flex: 2, opacity: busy || !customerName.trim() || !description.trim() ? 0.6 : 1 }
+              }, busy ? "Saving…" : "Submit Ticket")
+            )
+          )
+    )
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 //  AMAZON IMPORT TAB v2
 //  Handles: FBA Inventory Event Detail Report (CSV)
 //  One upload → Stock Count + FBA Shipments + Damage
@@ -4366,15 +4490,17 @@ function BottomNav(props) {
     { k: "product", label: "Inventory", icon: "📦" },
     { k: "amazon", label: "Amazon", amazon: true },
     { k: "movements", label: "Movements", icon: "🔄" },
+    { k: "support", label: "Support", icon: "🎫" },
     { k: "analytics", label: "Analytics", icon: "📊" }
   ];
   // Permission: Warehouse role has no Amazon import access — hide that tab.
   if (user.role === "Warehouse") items = items.filter(function(it){ return it.k !== "amazon"; });
-  var active = showList ? "movements" : ((tab === "product" || tab === "location" || tab === "counts") ? "product" : tab);
+  var active = showList ? "movements" : (props.showSupportModal ? "support" : ((tab === "product" || tab === "location" || tab === "counts") ? "product" : tab));
   return /*#__PURE__*/React.createElement("div", { style: { position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 120, background: "rgba(253,249,241,0.94)", backdropFilter: "blur(10px)", borderTop: "1px solid #e7d9c4", display: "flex", padding: "8px 4px 18px" } },
     items.map(function(it){
       var on = active === it.k;
-      return /*#__PURE__*/React.createElement("button", { key: it.k, onClick: it.k === "movements" ? props.onMovements : function(){ setTab(it.k); },
+      var handler = it.k === "movements" ? props.onMovements : it.k === "support" ? props.onSupport : function(){ setTab(it.k); };
+      return /*#__PURE__*/React.createElement("button", { key: it.k, onClick: handler,
         style: { flex: 1, background: "transparent", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: on ? "#bd5d38" : "#a89680", fontWeight: 700, fontSize: 9.5, fontFamily: "inherit" } },
         it.amazon
           ? /*#__PURE__*/React.createElement(AmazonIcon, { size: 20, color: on ? "#bd5d38" : "#2c211a" })
@@ -4410,6 +4536,8 @@ function App() {
   const [showLowStockAlert, setShowLowStockAlert] = React.useState(false);
   const [lowStockItems, setLowStockItems] = React.useState([]);
   const [analyticsMovs, setAnalyticsMovs] = React.useState(null); // approved movs for analytics dispatch panel
+  const [supportTickets, setSupportTickets] = React.useState([]);
+  const [showSupportModal, setShowSupportModal] = React.useState(false);
   const notify = msg => {
     setToast(msg);
     setTimeout(() => setToast(""), 5000);
@@ -4559,6 +4687,7 @@ function App() {
     if (!user) return;
     load();
     loadCounts();
+    loadTickets();
   }, [user]);
   // Fetch approved movements for analytics dispatch panel (lazy — only when tab is opened)
   React.useEffect(() => {
@@ -4578,6 +4707,14 @@ function App() {
       console.error("Counts:", e.message);
     }
     setCountsLoading(false);
+  }
+  async function loadTickets() {
+    try {
+      const data = await api("getSupportTickets", {});
+      setSupportTickets(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Tickets:", e.message);
+    }
   }
   async function approveOne(movID) {
     try {
@@ -6348,9 +6485,16 @@ function App() {
       load();
       setEditingMov(null);
     }
+  }), showSupportModal && /*#__PURE__*/React.createElement(SupportModal, {
+    tickets: supportTickets,
+    products: products,
+    user: user,
+    onClose: () => setShowSupportModal(false),
+    onDone: msg => notify(msg),
+    reload: loadTickets
   }), /*#__PURE__*/React.createElement("div", { style: { height: 88 } }), /*#__PURE__*/React.createElement(BottomNav, {
-    tab: tab, setTab: setTab, showList: showList,
-    onMovements: function () { setShowList(true); }, user: user
+    tab: tab, setTab: setTab, showList: showList, showSupportModal: showSupportModal,
+    onMovements: function () { setShowList(true); }, onSupport: function () { setShowSupportModal(true); }, user: user
   }));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(
