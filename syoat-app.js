@@ -156,6 +156,9 @@ const PIN_ACTION_LABELS = {
   approvePurchaseOrder: "approve this purchase order",
   rejectPurchaseOrder: "reject this purchase order",
   closePurchaseOrder: "close this purchase order",
+  createFbaShipment: "create this FBA shipment",
+  updateFbaShipmentStatus: "update this shipment's status",
+  linkMovementToShipment: "link this movement to a shipment",
 };
 
 // Retry with exponential backoff — 3 attempts, 1.2s / 2.4s gaps
@@ -3239,6 +3242,13 @@ var FC_REGIONS = { DEL4: "Delhi NCR", DEL5: "Delhi NCR", DED4: "Delhi NCR", BOM5
 var REGION_ORDER = ["Delhi NCR", "Maharashtra", "Hyderabad", "Karnataka", "Tamil Nadu", "Other"];
 function regionOf(fc) { return FC_REGIONS[fc] || "Other"; }
 
+// FBA Shipment tracking (Module C, 2026-07-19): sit-alongside tracking layer
+// over FBA Dispatch/FBA Receipt movements. Same roles as who already sees
+// this Amazon tab today — no new role decisions needed.
+const FBA_SHIPMENT_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Admin", "Manager", "Warehouse Manager"];
+const FBA_SHIPMENT_STATUSES_FE = ["Working", "Shipped", "In Transit", "Received"];
+const FBA_SHIPMENT_STATUS_COLOR = { "Working": "#a97b52", "Shipped": "#6d5ae6", "In Transit": "#4a7c9e", "Received": "#4a7c59" };
+
 function FbaReconcileTab(props) {
   var products = props.products, stock = props.stock, user = props.user, notify = props.notify;
   var TRANSIT_DAYS = 12, TARGET_DAYS = 30;
@@ -3253,6 +3263,79 @@ function FbaReconcileTab(props) {
   var _lg = React.useState(function () { try { return JSON.parse(localStorage.getItem("syoat_fba_ledger") || "null"); } catch (e) { return null; } }), ledger = _lg[0], setLedger = _lg[1];
   var fileRef = React.useRef(null);
   var payloadRef = React.useRef(null);
+
+  // --- FBA Shipments state (Module C) ---
+  var _shp = React.useState(null), shipments = _shp[0], setShipments = _shp[1]; // null = not loaded yet
+  var _shpErr = React.useState(""), shpErr = _shpErr[0], setShpErr = _shpErr[1];
+  var _shpBusy = React.useState(false), shpBusy = _shpBusy[0], setShpBusy = _shpBusy[1];
+  var _shpForm = React.useState(false), shpFormOpen = _shpForm[0], setShpFormOpen = _shpForm[1];
+  var _shpFC = React.useState(""), shpFC = _shpFC[0], setShpFC = _shpFC[1];
+  var _shpEDD = React.useState(""), shpEDD = _shpEDD[0], setShpEDD = _shpEDD[1];
+  var _shpLines = React.useState([{ productID: "", expectedQty: "" }]), shpLines = _shpLines[0], setShpLines = _shpLines[1];
+  var _linkFor = React.useState(null), linkForShipment = _linkFor[0], setLinkForShipment = _linkFor[1]; // ShipmentID currently picking a movement for
+  var _unlinkedMovs = React.useState(null), unlinkedMovs = _unlinkedMovs[0], setUnlinkedMovs = _unlinkedMovs[1];
+  var canManageShipments = FBA_SHIPMENT_ROLES_FE.includes(user.role);
+
+  async function loadShipments() {
+    setShpErr("");
+    try {
+      var data = await api("getFbaShipments", { includeLines: "true" });
+      setShipments(Array.isArray(data) ? data : []);
+    } catch (e) { setShpErr(e.message); }
+  }
+
+  async function submitShipment() {
+    setShpBusy(true);
+    try {
+      var lines = shpLines.filter(function (l) { return l.productID && l.expectedQty; }).map(function (l) { return { productID: l.productID, expectedQty: l.expectedQty }; });
+      if (!shpFC) throw new Error("Destination FC is required.");
+      if (!lines.length) throw new Error("Add at least one product line with an expected quantity.");
+      await apiWrite("createFbaShipment", user.email, { destinationFC: shpFC, expectedDeliveryDate: shpEDD, lines: lines });
+      notify("✅ Shipment created");
+      setShpFormOpen(false); setShpFC(""); setShpEDD(""); setShpLines([{ productID: "", expectedQty: "" }]);
+      loadShipments();
+    } catch (e) { notify("❌ " + e.message); }
+    setShpBusy(false);
+  }
+
+  async function advanceShipment(shipmentID, nextStatus) {
+    setShpBusy(true);
+    try {
+      await apiWrite("updateFbaShipmentStatus", user.email, { shipmentID: shipmentID, status: nextStatus });
+      notify("✅ " + shipmentID + " → " + nextStatus);
+      loadShipments();
+    } catch (e) { notify("❌ " + e.message); }
+    setShpBusy(false);
+  }
+
+  async function openLinkPicker(shipmentID) {
+    setLinkForShipment(shipmentID);
+    setUnlinkedMovs(null);
+    try {
+      var all = await api("getMovements", {});
+      var candidates = (Array.isArray(all) ? all : []).filter(function (m) {
+        return (m.MovementType === "FBA Dispatch" || m.MovementType === "FBA Receipt") && m.Status === "Approved" && !m.AmazonShipmentID;
+      });
+      setUnlinkedMovs(candidates);
+    } catch (e) { setUnlinkedMovs([]); notify("❌ " + e.message); }
+  }
+
+  async function linkMovement(movementID) {
+    setShpBusy(true);
+    try {
+      await apiWrite("linkMovementToShipment", user.email, { movementID: movementID, shipmentID: linkForShipment });
+      notify("✅ Linked " + movementID + " to " + linkForShipment);
+      setLinkForShipment(null); setUnlinkedMovs(null);
+      loadShipments();
+    } catch (e) { notify("❌ " + e.message); }
+    setShpBusy(false);
+  }
+
+  function nameOfProduct(pid) { var p = (products || []).find(function (x) { return x.ProductID === pid; }); return p ? p.ProductName : pid; }
+
+  React.useEffect(function () {
+    if (sub === "shipments" && shipments === null) loadShipments();
+  }, [sub]);
 
   function splitCSV(line) { var out = [], cur = "", q = false; for (var i = 0; i < line.length; i++) { var c = line[i]; if (c === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; } else if (c === "," && !q) { out.push(cur); cur = ""; } else cur += c; } out.push(cur); return out; }
   function fbaStockOf(pid) { var t = 0; (stock || []).forEach(function (s) { if (s.ProductID === pid && s.LocationID === "AMAZON_FBA") t += Number(s.Quantity) || 0; }); return t; }
@@ -3331,7 +3414,7 @@ function FbaReconcileTab(props) {
 
   var hero = /*#__PURE__*/React.createElement("div", { style: { background: "linear-gradient(140deg,#241b14,#463017)", borderRadius: 18, padding: "18px", marginBottom: 14, color: "#f2e7d5" } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } }, /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 46, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 32, color: "#241b14" })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 600 } }, "Amazon FBA"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Weekly ledger · fulfilment-centre stock · shipment plan"))));
 
-  var SUBS = [{ k: "upload", l: "⬆️ Upload" }, { k: "fc", l: "🏬 Locations – FC" }, { k: "reco", l: "📦 Recommendations" }];
+  var SUBS = [{ k: "upload", l: "⬆️ Upload" }, { k: "fc", l: "🏬 Locations – FC" }, { k: "reco", l: "📦 Recommendations" }, { k: "shipments", l: "🚢 Shipments" }];
   var subnav = /*#__PURE__*/React.createElement("div", { style: { display: "flex", background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 13, padding: 4, gap: 3, marginBottom: 14 } }, SUBS.map(function (x) { var on = sub === x.k; return /*#__PURE__*/React.createElement("button", { key: x.k, onClick: function () { setSub(x.k); }, style: { flex: 1, border: "none", background: on ? "#2a201a" : "transparent", color: on ? "#f4ead8" : "#6f6152", padding: "9px 4px", borderRadius: 9, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", boxShadow: on ? "0 1px 4px rgba(0,0,0,0.15)" : "none" } }, x.l); }));
 
   var guide = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 14 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 16, fontWeight: 600, marginBottom: 6 } }, "📋 How to pull this report"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: "#6f6152", lineHeight: 1.7 } }, "Seller Central → Reports → Fulfilment → ", /*#__PURE__*/React.createElement("b", null, "Inventory Ledger"), " → View: ", /*#__PURE__*/React.createElement("b", null, "Summary"), " → latest date → Download (CSV or TXT)."), /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, fontSize: 11.5, color: "#5f7a4f", fontWeight: 600 } }, "✅ Right file: Inventory Ledger — Summary"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#b23a2e", fontWeight: 600 } }, "❌ Not the Detailed view · Not All Orders · Not Manage Inventory"));
@@ -3427,7 +3510,74 @@ function FbaReconcileTab(props) {
       /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", margin: "4px 2px", lineHeight: 1.5 } }, "Note: totals are whole cartons; the split shows the low centres driving the refill. Amazon may reassign centres at Send-to-Amazon."));
   }
 
-  return /*#__PURE__*/React.createElement("div", null, hero, subnav, sub === "upload" ? uploadTab() : sub === "fc" ? fcTab() : recoTab());
+  function shipmentsTab() {
+    return /*#__PURE__*/React.createElement("div", null,
+      shpErr && /*#__PURE__*/React.createElement("div", { style: { background: "#fbeae7", color: "#b23a2e", padding: "8px 12px", borderRadius: 8, fontSize: 12, marginBottom: 12 } }, shpErr),
+      canManageShipments && !shpFormOpen && /*#__PURE__*/React.createElement("button", { onClick: function () { setShpFormOpen(true); }, style: { ...btnS(), width: "100%", marginBottom: 14 } }, "+ New Shipment"),
+      shpFormOpen && /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 14 } },
+        /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 10 } }, "New FBA Shipment"),
+        /*#__PURE__*/React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: "#5a6b5b", display: "block", marginBottom: 3 } }, "Destination FC"),
+        /*#__PURE__*/React.createElement("input", { value: shpFC, onChange: function (e) { setShpFC(e.target.value); }, placeholder: "e.g. HYD3", style: { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccd3c4", fontSize: 13, marginBottom: 10, boxSizing: "border-box" } }),
+        /*#__PURE__*/React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: "#5a6b5b", display: "block", marginBottom: 3 } }, "Expected delivery date (optional)"),
+        /*#__PURE__*/React.createElement("input", { type: "date", value: shpEDD, onChange: function (e) { setShpEDD(e.target.value); }, style: { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccd3c4", fontSize: 13, marginBottom: 10, boxSizing: "border-box" } }),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, fontWeight: 700, color: "#5a6b5b", marginBottom: 4 } }, "Product lines"),
+        shpLines.map(function (line, idx) {
+          return /*#__PURE__*/React.createElement("div", { key: idx, style: { display: "flex", gap: 6, marginBottom: 6 } },
+            /*#__PURE__*/React.createElement("select", { value: line.productID, onChange: function (e) { var copy = shpLines.slice(); copy[idx] = { ...copy[idx], productID: e.target.value }; setShpLines(copy); }, style: { flex: 2, padding: "7px 8px", borderRadius: 8, border: "1px solid #ccd3c4", fontSize: 12.5 } },
+              /*#__PURE__*/React.createElement("option", { value: "" }, "Select product…"),
+              (products || []).map(function (p) { return /*#__PURE__*/React.createElement("option", { key: p.ProductID, value: p.ProductID }, p.ProductName); })),
+            /*#__PURE__*/React.createElement("input", { type: "number", min: "1", value: line.expectedQty, onChange: function (e) { var copy = shpLines.slice(); copy[idx] = { ...copy[idx], expectedQty: e.target.value }; setShpLines(copy); }, placeholder: "Qty", style: { width: 70, padding: "7px 8px", borderRadius: 8, border: "1px solid #ccd3c4", fontSize: 12.5 } }),
+            shpLines.length > 1 && /*#__PURE__*/React.createElement("button", { onClick: function () { setShpLines(shpLines.filter(function (_, i) { return i !== idx; })); }, style: { border: "none", background: "none", color: "#b23a2e", fontSize: 16, cursor: "pointer" } }, "×"));
+        }),
+        /*#__PURE__*/React.createElement("button", { onClick: function () { setShpLines(shpLines.concat([{ productID: "", expectedQty: "" }])); }, style: { ...ghost, fontSize: 11.5, padding: "5px 10px", marginBottom: 12 } }, "+ Add line"),
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 8 } },
+          /*#__PURE__*/React.createElement("button", { onClick: function () { setShpFormOpen(false); }, style: { ...ghost, flex: 1 } }, "Cancel"),
+          /*#__PURE__*/React.createElement("button", { disabled: shpBusy, onClick: submitShipment, style: { ...btnS(), flex: 2, opacity: shpBusy ? 0.6 : 1 } }, shpBusy ? "Saving…" : "Create Shipment"))),
+      linkForShipment && /*#__PURE__*/React.createElement("div", { style: { position: "fixed", inset: 0, background: "rgba(60,40,20,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 210, padding: 16 } },
+        /*#__PURE__*/React.createElement("div", { style: { background: "#fefcf9", borderRadius: 16, padding: 20, width: 400, maxWidth: "100%", maxHeight: "80vh", overflowY: "auto" } },
+          /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 } },
+            /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 13 } }, "Link a movement to " + linkForShipment),
+            /*#__PURE__*/React.createElement("button", { onClick: function () { setLinkForShipment(null); setUnlinkedMovs(null); }, style: { background: "none", border: "none", color: "#a89680", fontSize: 20, cursor: "pointer" } }, "×")),
+          unlinkedMovs === null
+            ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Loading approved movements…")
+            : unlinkedMovs.length === 0
+              ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No unlinked, Approved FBA Dispatch/Receipt movements found.")
+              : /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 6 } },
+                  unlinkedMovs.map(function (m) {
+                    return /*#__PURE__*/React.createElement("button", { key: m.MovementID, disabled: shpBusy, onClick: function () { linkMovement(m.MovementID); }, style: { textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "1px solid #e7d9c4", background: "#f8f4ef", cursor: "pointer", fontSize: 12 } },
+                      /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700 } }, m.MovementID + " · " + m.MovementType),
+                      /*#__PURE__*/React.createElement("div", { style: { color: "#a89680", fontSize: 11 } }, m.MovementDateTime));
+                  })))),
+      shipments === null
+        ? /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", color: "#a89680", fontSize: 13, padding: "20px 0" } }, "Loading shipments…")
+        : shipments.length === 0
+          ? /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", color: "#a89680", fontSize: 13, padding: "20px 0" } }, "No FBA shipments tracked yet.")
+          : /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 10 } },
+              shipments.map(function (s) {
+                var curIdx = FBA_SHIPMENT_STATUSES_FE.indexOf(s.Status);
+                var nextStatus = FBA_SHIPMENT_STATUSES_FE[curIdx + 1];
+                return /*#__PURE__*/React.createElement("div", { key: s.ShipmentID, style: { border: "1px solid #e7d9c4", borderRadius: 12, padding: 12, background: "#f8f4ef" } },
+                  /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
+                    /*#__PURE__*/React.createElement("div", null,
+                      /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 13, color: "#2c211a" } }, s.ShipmentID + " · " + s.DestinationFC),
+                      /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#a89680", marginTop: 2 } }, (s.ExpectedDeliveryDate ? "expected " + s.ExpectedDeliveryDate : "") + (s.CarrierTrackingNumber ? " · " + s.CarrierTrackingNumber : ""))),
+                    /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#fff", background: FBA_SHIPMENT_STATUS_COLOR[s.Status] || "#a89680", padding: "3px 8px", borderRadius: 20 } }, s.Status)),
+                  (s.lines || []).length > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, display: "grid", gap: 3 } },
+                    s.lines.map(function (l) {
+                      var recvOrShip = s.Status === "Received" ? l.ReceivedQty : l.ShippedQty;
+                      var ord = parseFloat(l.ExpectedQty) || 0;
+                      var ok = recvOrShip >= ord;
+                      return /*#__PURE__*/React.createElement("div", { key: l.ShipmentLineID, style: { fontSize: 11, color: "#5a4a3a", display: "flex", justifyContent: "space-between" } },
+                        /*#__PURE__*/React.createElement("span", null, nameOfProduct(l.ProductID)),
+                        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: ok ? "#4a7c59" : (recvOrShip > 0 ? "#a97b52" : "#a89680") } }, recvOrShip + " / " + ord));
+                    })),
+                  canManageShipments && /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" } },
+                    nextStatus && /*#__PURE__*/React.createElement("button", { disabled: shpBusy, onClick: function () { advanceShipment(s.ShipmentID, nextStatus); }, style: { ...btnS("#4a7c59"), fontSize: 11, padding: "5px 10px" } }, "Mark " + nextStatus),
+                    /*#__PURE__*/React.createElement("button", { onClick: function () { openLinkPicker(s.ShipmentID); }, style: { ...ghost, fontSize: 11, padding: "5px 10px" } }, "🔗 Link Movement")));
+              })));
+  }
+
+  return /*#__PURE__*/React.createElement("div", null, hero, subnav, sub === "upload" ? uploadTab() : sub === "fc" ? fcTab() : sub === "shipments" ? shipmentsTab() : recoTab());
 }
 
 function AmazonImportTab({
