@@ -87,9 +87,13 @@ const CAN_CREATE_TYPES = {
   Owner: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Admin: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Manager: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  // Warehouse Manager / Operations Manager (added 2026-07-19): treated as Manager-tier —
+  // same movement-type access as Manager. Update here if their scope should differ.
+  "Warehouse Manager": ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  "Operations Manager": ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   // Warehouse ships from WH only — cannot touch FBA stock
   Warehouse: ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  Auditor: []
+  Accounts: []
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -273,8 +277,10 @@ const ROLE_COLOR = {
   Owner: "#bd5d38",
   Admin: "#2c211a",
   Manager: "#a97b52",
+  "Warehouse Manager": "#a97b52",
+  "Operations Manager": "#a97b52",
   Warehouse: "#bd5d38",
-  Auditor: "#a89680"
+  Accounts: "#a89680"
 };
 function statusOf(qty, at) {
   if (qty <= 0) return "oos";
@@ -394,8 +400,10 @@ function LoginScreen({
     Owner: "👑",
     Admin: "🛡️",
     Manager: "📋",
+    "Warehouse Manager": "🏭",
+    "Operations Manager": "🧭",
     Warehouse: "📦",
-    Auditor: "🔍"
+    Accounts: "🧾"
   };
   function selectStaff(s) {
     setSelected(s);
@@ -626,8 +634,10 @@ function LoginScreen({
     Owner: "👑",
     Admin: "🛡️",
     Manager: "📋",
+    "Warehouse Manager": "🏭",
+    "Operations Manager": "🧭",
     Warehouse: "📦",
-    Auditor: "🔍"
+    Accounts: "🧾"
   }[selected.role]), /*#__PURE__*/React.createElement("div", {
     style: {
       fontWeight: 800,
@@ -4484,13 +4494,27 @@ function App() {
             canReverse: false,
             canViewAll: true
           },
+          // Added 2026-07-19: Pushpanjali (Warehouse Manager) and Sravanthi (Operations
+          // Manager) — treated as Manager-tier permissions. Update if their access should differ.
+          "Warehouse Manager": {
+            canCreate: true,
+            canApprove: true,
+            canReverse: false,
+            canViewAll: true
+          },
+          "Operations Manager": {
+            canCreate: true,
+            canApprove: true,
+            canReverse: false,
+            canViewAll: true
+          },
           Warehouse: {
             canCreate: true,
             canApprove: false,
             canReverse: false,
             canViewAll: false
           },
-          Auditor: {
+          Accounts: {
             canCreate: false,
             canApprove: false,
             canReverse: false,
@@ -5111,7 +5135,7 @@ function App() {
       padding: "6px 14px",
       fontSize: 12
     }
-  }, "⟳ Refresh"), (user.role === "Founder" || user.role === "Co-Founder" || user.role === "Owner" || user.role === "Admin" || user.role === "Manager" || user.role === "Auditor") && /*#__PURE__*/React.createElement("button", {
+  }, "⟳ Refresh"), (user.role === "Founder" || user.role === "Co-Founder" || user.role === "Owner" || user.role === "Admin" || user.role === "Manager" || user.role === "Warehouse Manager" || user.role === "Operations Manager" || user.role === "Accounts") && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowCountModal(true),
     style: {
       ...btnS(),
@@ -5310,7 +5334,7 @@ function App() {
         fontSize: 12,
         whiteSpace: "nowrap"
       }
-    }, "✅ Approve"), (user.canApprove || user.role === "Auditor") && /*#__PURE__*/React.createElement("button", {
+    }, "✅ Approve"), (user.canApprove || user.role === "Accounts") && /*#__PURE__*/React.createElement("button", {
       onClick: () => setEditingCount({
         ...c,
         diff
