@@ -87,10 +87,12 @@ const CAN_CREATE_TYPES = {
   Owner: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Admin: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Manager: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  // Warehouse Manager / Operations Manager (added 2026-07-19): treated as Manager-tier —
-  // same movement-type access as Manager. Update here if their scope should differ.
+  // Warehouse Manager (added 2026-07-19): treated as Manager-tier — same movement-type
+  // access as Manager. Update here if scope should differ.
   "Warehouse Manager": ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  "Operations Manager": ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  // v3.4 (2026-07-19): Operations Manager (Sravanthi) does no warehouse/Amazon work —
+  // scoped to Support Tickets only. No movement types creatable.
+  "Operations Manager": [],
   // Warehouse ships from WH only — cannot touch FBA stock
   Warehouse: ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Accounts: []
@@ -2544,8 +2546,8 @@ function StockCountModal({
 
 // ─────────────────────────────────────────────────────────────
 //  MODULE A: SUPPORT / RETURNS TICKETS MODAL
-//  Same role gate as Return movement creation (Warehouse, Admin,
-//  Manager, Warehouse Manager, Operations Manager, Founder/Co-Founder/Owner).
+//  v3.4: create/resolve is Sravanthi (Operations Manager) or Founder/Co-Founder/
+//  Owner only — Warehouse and Warehouse Manager have no role in this workflow.
 //  Simple lifecycle, no stock impact: Open → In Progress → Resolved → Closed.
 // ─────────────────────────────────────────────────────────────
 const SUPPORT_REASONS = ["Product Damaged on Arrival", "Wrong Item Received", "Missing Item", "Quality Issue", "Size / Fit Issue", "Delayed Delivery", "Refund Request", "Exchange Request", "General Inquiry", "Other"];
@@ -4496,8 +4498,9 @@ function BottomNav(props) {
     { k: "support", label: "Support", icon: "🎫" },
     { k: "analytics", label: "Analytics", icon: "📊" }
   ];
-  // Permission: Warehouse role has no Amazon import access — hide that tab.
-  if (user.role === "Warehouse") items = items.filter(function(it){ return it.k !== "amazon"; });
+  // Permission: Warehouse has no Amazon import access; Operations Manager (Sravanthi)
+  // does no Amazon work either — hide that tab for both.
+  if (user.role === "Warehouse" || user.role === "Operations Manager") items = items.filter(function(it){ return it.k !== "amazon"; });
   // Permission: Support tickets are Sravanthi (Operations Manager) / Founder / Co-Founder / Owner
   // only — Zubedha (Warehouse) and Pushpanjali (Warehouse Manager) have no role in this workflow,
   // so hide the tab entirely for them rather than showing an empty/disabled view.
@@ -4633,17 +4636,20 @@ function App() {
             canReverse: false,
             canViewAll: true
           },
-          // Added 2026-07-19: Pushpanjali (Warehouse Manager) and Sravanthi (Operations
-          // Manager) — treated as Manager-tier permissions. Update if their access should differ.
+          // Added 2026-07-19: Pushpanjali (Warehouse Manager) — Manager-tier permissions.
           "Warehouse Manager": {
             canCreate: true,
             canApprove: true,
             canReverse: false,
             canViewAll: true
           },
+          // v3.4 (2026-07-19): Sravanthi (Operations Manager) is scoped to Support Tickets
+          // only — she does no Amazon or warehouse operations, so movement create/approve
+          // are both locked off here. (Ticket create/resolve is gated separately via
+          // SUPPORT_TICKET_ROLES_FE, not through this object.)
           "Operations Manager": {
-            canCreate: true,
-            canApprove: true,
+            canCreate: false,
+            canApprove: false,
             canReverse: false,
             canViewAll: true
           },
@@ -5283,7 +5289,7 @@ function App() {
       padding: "6px 14px",
       fontSize: 12
     }
-  }, "⟳ Refresh"), (user.role === "Founder" || user.role === "Co-Founder" || user.role === "Owner" || user.role === "Admin" || user.role === "Manager" || user.role === "Warehouse Manager" || user.role === "Operations Manager" || user.role === "Accounts") && /*#__PURE__*/React.createElement("button", {
+  }, "⟳ Refresh"), (user.role === "Founder" || user.role === "Co-Founder" || user.role === "Owner" || user.role === "Admin" || user.role === "Manager" || user.role === "Warehouse Manager" || user.role === "Accounts") && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowCountModal(true),
     style: {
       ...btnS(),
