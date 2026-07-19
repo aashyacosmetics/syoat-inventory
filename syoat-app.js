@@ -2552,7 +2552,10 @@ const SUPPORT_REASONS = ["Product Damaged on Arrival", "Wrong Item Received", "M
 const TICKET_STATUSES = ["Open", "In Progress", "Resolved", "Closed"];
 const TICKET_STATUS_COLOR = { "Open": "#b23a2e", "In Progress": "#a97b52", "Resolved": "#4a7c59", "Closed": "#a89680" };
 
-const SUPPORT_TICKET_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Admin", "Manager", "Warehouse Manager", "Operations Manager", "Warehouse"];
+// v3.4: narrowed per Lalith — only Sravanthi (Operations Manager) or Founder/Co-Founder/Owner
+// can create or resolve tickets. Zubedha (Warehouse) and Pushpanjali (Warehouse Manager) are
+// not part of this workflow at all.
+const SUPPORT_TICKET_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Operations Manager"];
 
 function SupportModal({ tickets, products, user, onClose, onDone, reload }) {
   const canManage = SUPPORT_TICKET_ROLES_FE.includes(user.role);
