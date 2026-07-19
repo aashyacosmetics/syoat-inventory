@@ -2614,6 +2614,10 @@ function SupportModal({ tickets, products, returnMovements, user, onClose, onDon
         await apiWrite("updateSupportTicket", user.email, { ticketID: t.TicketID, linkedMovementID: movementID });
         onDone(movementID ? `✅ ${t.TicketID} linked to ${movementID}` : `✅ ${t.TicketID} link cleared`);
       }
+      // Clear local drafts so the dropdown/button reflect the freshly-saved server
+      // state on reload, instead of still showing "Other" as a pending/unsaved choice.
+      setLinkDrafts(function(d){ var n = Object.assign({}, d); delete n[t.TicketID]; return n; });
+      setLinkOtherDrafts(function(d){ var n = Object.assign({}, d); delete n[t.TicketID]; return n; });
       reload();
     } catch (e) { setErr(e.message); }
     setUpdatingID(null);
