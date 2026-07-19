@@ -152,6 +152,10 @@ const PIN_ACTION_LABELS = {
   createFbaReconciliation: "sync Amazon FBA stock",
   createSupportTicket: "create this ticket",
   updateSupportTicket: "update this ticket",
+  createPurchaseOrder: "create this purchase order",
+  approvePurchaseOrder: "approve this purchase order",
+  rejectPurchaseOrder: "reject this purchase order",
+  closePurchaseOrder: "close this purchase order",
 };
 
 // Retry with exponential backoff — 3 attempts, 1.2s / 2.4s gaps
@@ -1222,6 +1226,7 @@ function MovModal({
   products,
   stock,
   user,
+  purchaseOrders,
   onClose,
   onDone
 }) {
@@ -1250,6 +1255,10 @@ function MovModal({
     "Return Received":    ["Wrong item ordered", "Customer changed mind", "Size/fit issue", "Duplicate order", "Damaged/defective", "Other"],
   };
   const [reasonCode, setReasonCode] = React.useState("");
+  // Optional link to an Approved Purchase Order — only shown/sent for Stock In,
+  // so received-vs-ordered quantities can be tracked back to the PO (Module B).
+  const [purchaseOrderID, setPurchaseOrderID] = React.useState("");
+  const openPOs = (purchaseOrders || []).filter(po => po.Status === "Approved");
   const [lines, setLines] = React.useState([{
     pid: products[0]?.ProductID || "",
     qty: "",
@@ -1379,6 +1388,7 @@ function MovModal({
         referenceNumber: refNo,
         carrierTrackingNumber: carrier,
         notes: finalNotes,
+        purchaseOrderID: type === "Stock In" ? purchaseOrderID : "",
         attachmentImages: uploads,
         lines: lines.map(l => ({
           productID: l.pid,
@@ -1749,6 +1759,14 @@ function MovModal({
     style: inp
   }, [/*#__PURE__*/React.createElement("option", { key: "", value: "" }, "Select a reason...")].concat(
     REASON_TYPES[type].map(r => /*#__PURE__*/React.createElement("option", { key: r, value: r }, r))
+  ))), type === "Stock In" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, "Link to Purchase Order (optional)"), /*#__PURE__*/React.createElement("select", {
+    value: purchaseOrderID,
+    onChange: e => setPurchaseOrderID(e.target.value),
+    style: inp
+  }, [/*#__PURE__*/React.createElement("option", { key: "", value: "" }, "— No linked PO —")].concat(
+    openPOs.map(po => /*#__PURE__*/React.createElement("option", { key: po.POID, value: po.POID }, po.POID + " · ₹" + (Math.round(parseFloat(po.GrandTotal) || 0)).toLocaleString("en-IN")))
   ))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
   }, "Notes"), /*#__PURE__*/React.createElement("input", {
@@ -2811,6 +2829,332 @@ function SupportModal({ tickets, products, returnMovements, user, onClose, onDon
                 onClick: submit, disabled: busy || !customerName.trim() || !description.trim(),
                 style: { ...btnS(), flex: 2, opacity: busy || !customerName.trim() || !description.trim() ? 0.6 : 1 }
               }, busy ? "Saving…" : "Submit Ticket")
+            )
+          )
+    )
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  MODULE B: PURCHASING / SUPPLIER PO MODAL (2026-07-19)
+//  Create/Approve/Reject/Close restricted to Founder/Co-Founder/Owner/Admin/
+//  Manager — deliberately NOT Warehouse Manager, since a PO commits real
+//  money (Lalith's call, kept separate from who can approve movements).
+//  Everyone else (Warehouse, Warehouse Manager, Accounts) still sees the
+//  list read-only, since Zubedha/Pushpanjali need to see what's expected
+//  when linking a Stock In movement to a PO.
+// ─────────────────────────────────────────────────────────────
+const PURCHASE_ORDER_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Admin", "Manager"];
+const PO_STATUS_COLOR = { "Draft": "#a97b52", "Approved": "#4a7c59", "Rejected": "#b23a2e", "Closed": "#a89680" };
+// Fixed company header + boilerplate terms — matches the existing Aashya
+// Cosmetics PO template exactly (Lalith's choice: fixed, not editable per PO).
+const PO_COMPANY = {
+  name: "AASHYA COSMETICS",
+  address: "5th Floor, Plot No 1181, Vahini Nilayam, Venkatramana Colony, Opp: Parajay Megapolise\nKukatpally, Medchel Malkajgiri DistricT, 500 072.",
+  phone: "7207902277",
+  gstin: "36ACDFA1128L1ZK",
+  deliveryContactName: "Zubedha",
+  deliveryContactPhone: "9154836650 / 7207902277",
+};
+const PO_TERMS = [
+  "Payment Terms: Advance payment of 50% will be made along with PO and balance amount in 30 days or after delivery of goods at our warehouse.",
+  "All the remaining terms are as per agreement.",
+  "Please note that GSTR1 should be filed regularly on time.",
+  "GST Compliance Policy : In case of non-payment of GST or non-filing of GST returns, the company will withhold the tax component of the invoice amount payable to Vendor. Further, the company also reserves the right to recover the amount along with Interest & Penalty (if any) from the Vendor for which the input credit on the GST could not be availed by the company.",
+  "COA's for all the Ingredients & Products has to provided along with the Invoice at the time of Delivery.",
+  "Without COA stocks will not be accepted & Balance Payment can't be processed for the same.",
+  "Delivery : Within 30 days from the date of PO.",
+  "Product should be delivered on highest quality standards in all aspects.",
+  "Material will be rejected if it is not complying to the quality standards.",
+  "Stocks have to be Billed and Delivered at our premises as per details provided in PO.",
+];
+
+function PurchasingModal({ purchaseOrders, suppliers, products, user, onClose, onDone, reload }) {
+  const canManage = PURCHASE_ORDER_ROLES_FE.includes(user.role);
+  const [view, setView] = React.useState("list");
+  const [printingPO, setPrintingPO] = React.useState(null);
+  const [supplierID, setSupplierID] = React.useState("");
+  const [expectedDeliveryDate, setExpectedDeliveryDate] = React.useState("");
+  const [notes, setNotes] = React.useState("");
+  const emptyLine = () => ({ productID: "", hsnCode: "", boxSize: "", packSize: "", packType: "", qty: "", uom: "NUM", rate: "", mrp: "", gstPercent: "", cgst: "", sgst: "", igst: "" });
+  const [lines, setLines] = React.useState([emptyLine()]);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  const [updatingID, setUpdatingID] = React.useState(null);
+
+  function supplierName(id) { const s = suppliers.find(x => x.SupplierID === id); return s ? s.SupplierName : id; }
+  function fmt(n) { return (Math.round((parseFloat(n) || 0) * 100) / 100).toLocaleString("en-IN"); }
+
+  function updateLine(idx, field, val) {
+    setLines(function (ls) {
+      var copy = ls.slice();
+      var line = Object.assign({}, copy[idx]);
+      line[field] = val;
+      if (field === "productID") {
+        var p = products.find(function (x) { return x.ProductID === val; });
+        if (p) {
+          line.hsnCode = p.HSNCode || "";
+          line.boxSize = p.DefaultBoxSize || "";
+          line.packSize = p.DefaultPackSize || "";
+          line.uom = p.DefaultUOM || "NUM";
+          line.mrp = p.MRP || "";
+          if (!line.rate) line.rate = p.UnitCost || "";
+        }
+      }
+      copy[idx] = line;
+      return copy;
+    });
+  }
+  function addLine() { setLines(function (ls) { return ls.concat([emptyLine()]); }); }
+  function removeLine(idx) { setLines(function (ls) { return ls.filter(function (_, i) { return i !== idx; }); }); }
+
+  function lineCalc(l) {
+    var qty = parseFloat(l.qty) || 0, rate = parseFloat(l.rate) || 0;
+    var assessable = qty * rate;
+    var cgst = parseFloat(l.cgst) || 0, sgst = parseFloat(l.sgst) || 0, igst = parseFloat(l.igst) || 0;
+    return { assessable: assessable, gst: cgst + sgst + igst, amount: assessable + cgst + sgst + igst };
+  }
+  var totals = lines.reduce(function (a, l) { var c = lineCalc(l); return { amount: a.amount + c.assessable, gst: a.gst + c.gst, grand: a.grand + c.amount }; }, { amount: 0, gst: 0, grand: 0 });
+
+  async function submit() {
+    if (!supplierID) { setErr("Pick a supplier."); return; }
+    var validLines = lines.filter(function (l) { return l.productID && parseFloat(l.qty) > 0 && parseFloat(l.rate) > 0; });
+    if (!validLines.length) { setErr("Add at least one line with a product, quantity, and rate."); return; }
+    setBusy(true); setErr("");
+    try {
+      var res = await apiWrite("createPurchaseOrder", user.email, {
+        supplierID: supplierID,
+        expectedDeliveryDate: expectedDeliveryDate,
+        notes: notes,
+        lines: validLines.map(function (l) {
+          return {
+            productID: l.productID, hsnCode: l.hsnCode, boxSize: l.boxSize, packSize: l.packSize, packType: l.packType,
+            qty: parseFloat(l.qty) || 0, uom: l.uom || "NUM", rate: parseFloat(l.rate) || 0, mrp: l.mrp,
+            gstPercent: parseFloat(l.gstPercent) || 0, cgst: parseFloat(l.cgst) || 0, sgst: parseFloat(l.sgst) || 0, igst: parseFloat(l.igst) || 0,
+          };
+        }),
+      });
+      onDone("✅ " + res.poID + " created as Draft — needs approval");
+      reload();
+      setView("list");
+      setSupplierID(""); setExpectedDeliveryDate(""); setNotes(""); setLines([emptyLine()]);
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
+
+  async function approve(poID) {
+    setUpdatingID(poID); setErr("");
+    try { await apiWrite("approvePurchaseOrder", user.email, { poID: poID }); onDone("✅ " + poID + " approved"); reload(); }
+    catch (e) { setErr(e.message); }
+    setUpdatingID(null);
+  }
+  async function reject(poID) {
+    var reason = window.prompt("Reason for rejecting this PO (optional):") || "";
+    setUpdatingID(poID); setErr("");
+    try { await apiWrite("rejectPurchaseOrder", user.email, { poID: poID, reason: reason.trim() }); onDone("🚫 " + poID + " rejected"); reload(); }
+    catch (e) { setErr(e.message); }
+    setUpdatingID(null);
+  }
+  async function closePO(poID) {
+    var reason = window.prompt("Note for closing this PO (optional):") || "";
+    setUpdatingID(poID); setErr("");
+    try { await apiWrite("closePurchaseOrder", user.email, { poID: poID, reason: reason.trim() }); onDone("✅ " + poID + " closed"); reload(); }
+    catch (e) { setErr(e.message); }
+    setUpdatingID(null);
+  }
+
+  const MODAL_STYLE = { position: "fixed", inset: 0, background: "rgba(60,40,20,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16 };
+  const BOX_STYLE = { background: "#fefcf9", borderRadius: 16, padding: 22, width: 640, maxWidth: "100%", border: "1px solid #e0d2bd", maxHeight: "90vh", overflowY: "auto" };
+
+  if (view === "print" && printingPO) {
+    var po = printingPO;
+    var td = { border: "1px solid #ccc", padding: "4px 5px" };
+    var byRate = {};
+    (po.lines || []).forEach(function (l) {
+      var r = parseFloat(l.GSTPercent) || 0;
+      byRate[r] = byRate[r] || { taxable: 0, cgst: 0, sgst: 0, igst: 0 };
+      byRate[r].taxable += parseFloat(l.TaxableValue) || 0;
+      byRate[r].cgst += parseFloat(l.CGST) || 0;
+      byRate[r].sgst += parseFloat(l.SGST) || 0;
+      byRate[r].igst += parseFloat(l.IGST) || 0;
+    });
+    var sup = suppliers.find(function (s) { return s.SupplierID === po.SupplierID; }) || {};
+    return /*#__PURE__*/React.createElement("div", { style: { position: "fixed", inset: 0, background: "#fff", zIndex: 600, overflowY: "auto", padding: 24 } },
+      /*#__PURE__*/React.createElement("style", null, "@media print { .po-no-print { display: none !important; } }"),
+      /*#__PURE__*/React.createElement("div", { className: "po-no-print", style: { display: "flex", gap: 10, marginBottom: 16 } },
+        /*#__PURE__*/React.createElement("button", { onClick: function () { setView("list"); setPrintingPO(null); }, style: { ...ghost, padding: "8px 16px" } }, "← Back"),
+        /*#__PURE__*/React.createElement("button", { onClick: function () { window.print(); }, style: { ...btnS(), padding: "8px 16px" } }, "🖨 Print / Save PDF")
+      ),
+      /*#__PURE__*/React.createElement("div", { style: { maxWidth: 800, margin: "0 auto", fontSize: 12, color: "#111", fontFamily: "Arial, sans-serif" } },
+        /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", fontWeight: 700, fontSize: 15, marginBottom: 2 } }, PO_COMPANY.name),
+        /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", whiteSpace: "pre-line", fontSize: 11 } }, PO_COMPANY.address),
+        /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", fontSize: 11 } }, "Ph.No: " + PO_COMPANY.phone + "  ·  GSTIN No: " + PO_COMPANY.gstin),
+        /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", fontWeight: 700, background: "#eee", padding: "4px 0", margin: "10px 0" } }, "Purchase Order"),
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 10 } },
+          /*#__PURE__*/React.createElement("div", null, "Purchase Order No: " + po.POID),
+          /*#__PURE__*/React.createElement("div", null, "Order Date: " + String(po.PODateTime || "").slice(0, 10))
+        ),
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 20, marginBottom: 12, borderTop: "1px solid #999", borderBottom: "1px solid #999", padding: "8px 0" } },
+          /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+            /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, marginBottom: 3 } }, "Partner Details"),
+            /*#__PURE__*/React.createElement("div", null, "Name: " + (sup.SupplierName || po.SupplierID)),
+            sup.GSTIN && /*#__PURE__*/React.createElement("div", null, "GSTIN No: " + sup.GSTIN),
+            sup.Address && /*#__PURE__*/React.createElement("div", null, "Address: " + sup.Address),
+            sup.ContactName && /*#__PURE__*/React.createElement("div", null, "Contact Name: " + sup.ContactName),
+            sup.ContactPhone && /*#__PURE__*/React.createElement("div", null, "Contact Phone: " + sup.ContactPhone)
+          ),
+          /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+            /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, marginBottom: 3 } }, "Delivery Address"),
+            /*#__PURE__*/React.createElement("div", null, "Name: " + PO_COMPANY.name),
+            /*#__PURE__*/React.createElement("div", { style: { whiteSpace: "pre-line" } }, "Location Address: " + PO_COMPANY.address),
+            /*#__PURE__*/React.createElement("div", null, "Contact Name: " + PO_COMPANY.deliveryContactName),
+            /*#__PURE__*/React.createElement("div", null, "Contact Phone: " + PO_COMPANY.deliveryContactPhone)
+          )
+        ),
+        /*#__PURE__*/React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 10.5, marginBottom: 10 } },
+          /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", { style: { background: "#eee" } },
+            ["S.No", "Product", "HSN", "Box Size", "Pack Size", "Qty", "UOM", "Rate", "MRP", "Taxable Value", "GST%", "CGST", "SGST", "IGST", "Amount"].map(function (h) {
+              return /*#__PURE__*/React.createElement("th", { key: h, style: Object.assign({}, td, { textAlign: "left" }) }, h);
+            })
+          )),
+          /*#__PURE__*/React.createElement("tbody", null, (po.lines || []).map(function (l, i) {
+            var p = products.find(function (x) { return x.ProductID === l.ProductID; });
+            return /*#__PURE__*/React.createElement("tr", { key: l.POLineID || i },
+              /*#__PURE__*/React.createElement("td", { style: td }, i + 1),
+              /*#__PURE__*/React.createElement("td", { style: td }, (p ? p.ProductName : l.ProductID)),
+              /*#__PURE__*/React.createElement("td", { style: td }, l.HSNCode),
+              /*#__PURE__*/React.createElement("td", { style: td }, l.BoxSize),
+              /*#__PURE__*/React.createElement("td", { style: td }, l.PackSize),
+              /*#__PURE__*/React.createElement("td", { style: td }, l.Qty),
+              /*#__PURE__*/React.createElement("td", { style: td }, l.UOM),
+              /*#__PURE__*/React.createElement("td", { style: td }, fmt(l.Rate)),
+              /*#__PURE__*/React.createElement("td", { style: td }, l.MRP || "-"),
+              /*#__PURE__*/React.createElement("td", { style: td }, fmt(l.TaxableValue)),
+              /*#__PURE__*/React.createElement("td", { style: td }, l.GSTPercent + "%"),
+              /*#__PURE__*/React.createElement("td", { style: td }, fmt(l.CGST)),
+              /*#__PURE__*/React.createElement("td", { style: td }, fmt(l.SGST)),
+              /*#__PURE__*/React.createElement("td", { style: td }, fmt(l.IGST)),
+              /*#__PURE__*/React.createElement("td", { style: td }, fmt(l.Amount))
+            );
+          }))
+        ),
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 30, marginBottom: 14, fontSize: 12 } },
+          /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", null, "Total Amount: ₹" + fmt(po.TotalAmount)), /*#__PURE__*/React.createElement("div", null, "Total GST: ₹" + fmt(po.TotalGST)), /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700 } }, "Grand Total: ₹" + fmt(po.GrandTotal)))
+        ),
+        /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, marginBottom: 4 } }, "GST Breakup"),
+        /*#__PURE__*/React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 10.5, marginBottom: 14 } },
+          /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", { style: { background: "#eee" } },
+            ["Rate", "Taxable Value", "CGST", "SGST", "IGST", "Total"].map(function (h) { return /*#__PURE__*/React.createElement("th", { key: h, style: Object.assign({}, td, { textAlign: "left" }) }, h); })
+          )),
+          /*#__PURE__*/React.createElement("tbody", null, Object.keys(byRate).map(function (r) {
+            var b = byRate[r];
+            return /*#__PURE__*/React.createElement("tr", { key: r },
+              /*#__PURE__*/React.createElement("td", { style: td }, r + "%"),
+              /*#__PURE__*/React.createElement("td", { style: td }, fmt(b.taxable)),
+              /*#__PURE__*/React.createElement("td", { style: td }, fmt(b.cgst)),
+              /*#__PURE__*/React.createElement("td", { style: td }, fmt(b.sgst)),
+              /*#__PURE__*/React.createElement("td", { style: td }, fmt(b.igst)),
+              /*#__PURE__*/React.createElement("td", { style: td }, fmt(b.cgst + b.sgst + b.igst))
+            );
+          }))
+        ),
+        /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, marginBottom: 4 } }, "Terms & Conditions"),
+        PO_TERMS.map(function (t, i) { return /*#__PURE__*/React.createElement("div", { key: i, style: { marginBottom: 3 } }, (i + 1) + ". " + t); })
+      )
+    );
+  }
+
+  return /*#__PURE__*/React.createElement("div", { style: MODAL_STYLE },
+    /*#__PURE__*/React.createElement("div", { style: BOX_STYLE },
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
+        /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 15, color: "#2c211a" } }, "🧾 Purchase Orders"),
+        /*#__PURE__*/React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: "#a89680", fontSize: 22, cursor: "pointer" } }, "×")
+      ),
+      err && /*#__PURE__*/React.createElement("div", { style: { background: "#fbeae7", color: "#b23a2e", padding: "8px 12px", borderRadius: 8, fontSize: 12, marginBottom: 12 } }, err),
+      view === "list"
+        ? /*#__PURE__*/React.createElement("div", null,
+            canManage && /*#__PURE__*/React.createElement("button", { onClick: () => setView("new"), style: { ...btnS(), width: "100%", marginBottom: 14 } }, "+ New Purchase Order"),
+            purchaseOrders.length === 0
+              ? /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", color: "#a89680", fontSize: 13, padding: "20px 0" } }, "No purchase orders yet.")
+              : /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 10 } },
+                  purchaseOrders.map(po => {
+                    var isSelfLocked = po.Status === "Draft" && po.CreatedByEmail === user.email && ["Admin","Manager"].includes(user.role);
+                    return /*#__PURE__*/React.createElement("div", { key: po.POID, style: { border: "1px solid #e7d9c4", borderRadius: 12, padding: 12, background: "#f8f4ef" } },
+                      /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
+                        /*#__PURE__*/React.createElement("div", null,
+                          /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 13, color: "#2c211a" } }, po.POID + " · " + supplierName(po.SupplierID)),
+                          /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#a89680", marginTop: 2 } }, "₹" + fmt(po.GrandTotal) + (po.ExpectedDeliveryDate ? " · expected " + po.ExpectedDeliveryDate : ""))
+                        ),
+                        /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#fff", background: PO_STATUS_COLOR[po.Status] || "#a89680", padding: "3px 8px", borderRadius: 20 } }, po.Status)
+                      ),
+                      (po.lines || []).length > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, display: "grid", gap: 3 } },
+                        po.lines.map(l => {
+                          var p = products.find(x => x.ProductID === l.ProductID);
+                          var recv = parseFloat(l.ReceivedQty) || 0, ord = parseFloat(l.Qty) || 0;
+                          var ok = recv >= ord;
+                          return /*#__PURE__*/React.createElement("div", { key: l.POLineID, style: { fontSize: 11, color: "#5a4a3a", display: "flex", justifyContent: "space-between" } },
+                            /*#__PURE__*/React.createElement("span", null, (p ? p.ProductName : l.ProductID)),
+                            /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: ok ? "#4a7c59" : (recv > 0 ? "#a97b52" : "#a89680") } }, recv + " / " + ord)
+                          );
+                        })
+                      ),
+                      isSelfLocked && /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a97b52", marginTop: 6 } }, "Created by you — needs another approver."),
+                      /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" } },
+                        /*#__PURE__*/React.createElement("button", { onClick: () => { setPrintingPO(po); setView("print"); }, style: { ...ghost, fontSize: 11, padding: "5px 10px" } }, "🖨 Print"),
+                        canManage && po.Status === "Draft" && !isSelfLocked && /*#__PURE__*/React.createElement("button", { disabled: updatingID === po.POID, onClick: () => approve(po.POID), style: { ...btnS("#4a7c59"), fontSize: 11, padding: "5px 10px" } }, "✅ Approve"),
+                        canManage && po.Status === "Draft" && /*#__PURE__*/React.createElement("button", { disabled: updatingID === po.POID, onClick: () => reject(po.POID), style: { ...ghost, fontSize: 11, padding: "5px 10px", color: "#b23a2e" } }, "🚫 Reject"),
+                        canManage && po.Status === "Approved" && /*#__PURE__*/React.createElement("button", { disabled: updatingID === po.POID, onClick: () => closePO(po.POID), style: { ...ghost, fontSize: 11, padding: "5px 10px" } }, "Close PO")
+                      )
+                    );
+                  })
+                )
+          )
+        : /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 12 } },
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Supplier"),
+              /*#__PURE__*/React.createElement("select", { value: supplierID, onChange: e => setSupplierID(e.target.value), style: inp },
+                /*#__PURE__*/React.createElement("option", { value: "" }, "— Select supplier —"),
+                suppliers.map(s => /*#__PURE__*/React.createElement("option", { key: s.SupplierID, value: s.SupplierID }, s.SupplierName)))),
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Expected Delivery Date"),
+              /*#__PURE__*/React.createElement("input", { type: "date", value: expectedDeliveryDate, onChange: e => setExpectedDeliveryDate(e.target.value), style: inp })),
+            /*#__PURE__*/React.createElement("div", null,
+              /*#__PURE__*/React.createElement("label", { style: lbl }, "Line Items"),
+              lines.map((l, idx) => /*#__PURE__*/React.createElement("div", { key: idx, style: { border: "1px solid #e7d9c4", borderRadius: 10, padding: 10, marginBottom: 8, background: "#f8f4ef" } },
+                /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr auto", gap: 6, marginBottom: 6 } },
+                  /*#__PURE__*/React.createElement("select", { value: l.productID, onChange: e => updateLine(idx, "productID", e.target.value), style: { ...inp, marginBottom: 0 } },
+                    /*#__PURE__*/React.createElement("option", { value: "" }, "— Select product —"),
+                    products.map(p => /*#__PURE__*/React.createElement("option", { key: p.ProductID, value: p.ProductID }, p.ProductName, " (", p.VariantName, ")"))),
+                  lines.length > 1 && /*#__PURE__*/React.createElement("button", { onClick: () => removeLine(idx), style: { ...ghost, padding: "6px 10px", fontSize: 11 } }, "✕")
+                ),
+                /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 } },
+                  /*#__PURE__*/React.createElement("input", { placeholder: "HSN", value: l.hsnCode, onChange: e => updateLine(idx, "hsnCode", e.target.value), style: { ...inp, marginBottom: 0, fontSize: 12 } }),
+                  /*#__PURE__*/React.createElement("input", { placeholder: "Box Size", value: l.boxSize, onChange: e => updateLine(idx, "boxSize", e.target.value), style: { ...inp, marginBottom: 0, fontSize: 12 } }),
+                  /*#__PURE__*/React.createElement("input", { placeholder: "Pack Size", value: l.packSize, onChange: e => updateLine(idx, "packSize", e.target.value), style: { ...inp, marginBottom: 0, fontSize: 12 } })
+                ),
+                /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 } },
+                  /*#__PURE__*/React.createElement("input", { type: "number", placeholder: "Qty", value: l.qty, onChange: e => updateLine(idx, "qty", e.target.value), style: { ...inp, marginBottom: 0, fontSize: 12 } }),
+                  /*#__PURE__*/React.createElement("input", { placeholder: "UOM", value: l.uom, onChange: e => updateLine(idx, "uom", e.target.value), style: { ...inp, marginBottom: 0, fontSize: 12 } }),
+                  /*#__PURE__*/React.createElement("input", { type: "number", placeholder: "Rate", value: l.rate, onChange: e => updateLine(idx, "rate", e.target.value), style: { ...inp, marginBottom: 0, fontSize: 12 } })
+                ),
+                /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6 } },
+                  /*#__PURE__*/React.createElement("input", { type: "number", placeholder: "GST %", value: l.gstPercent, onChange: e => updateLine(idx, "gstPercent", e.target.value), style: { ...inp, marginBottom: 0, fontSize: 12 } }),
+                  /*#__PURE__*/React.createElement("input", { type: "number", placeholder: "CGST ₹", value: l.cgst, onChange: e => updateLine(idx, "cgst", e.target.value), style: { ...inp, marginBottom: 0, fontSize: 12 } }),
+                  /*#__PURE__*/React.createElement("input", { type: "number", placeholder: "SGST ₹", value: l.sgst, onChange: e => updateLine(idx, "sgst", e.target.value), style: { ...inp, marginBottom: 0, fontSize: 12 } }),
+                  /*#__PURE__*/React.createElement("input", { type: "number", placeholder: "IGST ₹", value: l.igst, onChange: e => updateLine(idx, "igst", e.target.value), style: { ...inp, marginBottom: 0, fontSize: 12 } })
+                ),
+                /*#__PURE__*/React.createElement("div", { style: { textAlign: "right", fontSize: 11, color: "#a89680", marginTop: 4 } }, "Amount: ₹" + fmt(lineCalc(l).amount))
+              )),
+              /*#__PURE__*/React.createElement("button", { onClick: addLine, style: { ...ghost, width: "100%", fontSize: 12, padding: "8px" } }, "+ Add Line")
+            ),
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Notes (optional)"),
+              /*#__PURE__*/React.createElement("textarea", { value: notes, onChange: e => setNotes(e.target.value), style: { ...inp, minHeight: 50 } })),
+            /*#__PURE__*/React.createElement("div", { style: { background: "#f5ecdc", borderRadius: 10, padding: 10, fontSize: 12.5 } },
+              /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } }, /*#__PURE__*/React.createElement("span", null, "Total Amount"), /*#__PURE__*/React.createElement("span", null, "₹" + fmt(totals.amount))),
+              /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } }, /*#__PURE__*/React.createElement("span", null, "Total GST"), /*#__PURE__*/React.createElement("span", null, "₹" + fmt(totals.gst))),
+              /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontWeight: 700, marginTop: 4 } }, /*#__PURE__*/React.createElement("span", null, "Grand Total"), /*#__PURE__*/React.createElement("span", null, "₹" + fmt(totals.grand)))
+            ),
+            /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10 } },
+              /*#__PURE__*/React.createElement("button", { onClick: () => setView("list"), style: { ...ghost, flex: 1 } }, "Cancel"),
+              /*#__PURE__*/React.createElement("button", { onClick: submit, disabled: busy, style: { ...btnS(), flex: 2, opacity: busy ? 0.6 : 1 } }, busy ? "Saving…" : "Submit PO")
             )
           )
     )
@@ -4641,6 +4985,7 @@ function BottomNav(props) {
     { k: "product", label: "Inventory", icon: "📦" },
     { k: "amazon", label: "Amazon", amazon: true },
     { k: "movements", label: "Movements", icon: "🔄" },
+    { k: "purchasing", label: "Purchasing", icon: "🧾" },
     { k: "support", label: "Support", icon: "🎫" },
     { k: "analytics", label: "Analytics", icon: "📊" }
   ];
@@ -4655,11 +5000,15 @@ function BottomNav(props) {
   // Operator", so both strings are blocked here in case that field is ever wired in later.
   var NO_SUPPORT_ROLES = ["Warehouse", "Warehouse Operator", "Warehouse Manager"];
   if (NO_SUPPORT_ROLES.includes(user.role)) items = items.filter(function(it){ return it.k !== "support"; });
-  var active = showList ? "movements" : (props.showSupportModal ? "support" : ((tab === "product" || tab === "location" || tab === "counts") ? "product" : tab));
+  // Permission: Purchasing is view-only for everyone except Operations Manager (Sravanthi),
+  // who is scoped to Support Tickets only and has no role in warehouse/purchasing at all —
+  // hide the tab entirely for her rather than showing an empty/disabled view.
+  if (user.role === "Operations Manager") items = items.filter(function(it){ return it.k !== "purchasing"; });
+  var active = showList ? "movements" : (props.showSupportModal ? "support" : (props.showPurchasingModal ? "purchasing" : ((tab === "product" || tab === "location" || tab === "counts") ? "product" : tab)));
   return /*#__PURE__*/React.createElement("div", { style: { position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 120, background: "rgba(253,249,241,0.94)", backdropFilter: "blur(10px)", borderTop: "1px solid #e7d9c4", display: "flex", padding: "8px 4px 18px" } },
     items.map(function(it){
       var on = active === it.k;
-      var handler = it.k === "movements" ? props.onMovements : it.k === "support" ? props.onSupport : function(){ setTab(it.k); };
+      var handler = it.k === "movements" ? props.onMovements : it.k === "support" ? props.onSupport : it.k === "purchasing" ? props.onPurchasing : function(){ setTab(it.k); };
       return /*#__PURE__*/React.createElement("button", { key: it.k, onClick: handler,
         style: { flex: 1, background: "transparent", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: on ? "#bd5d38" : "#a89680", fontWeight: 700, fontSize: 9.5, fontFamily: "inherit" } },
         it.amazon
@@ -4767,6 +5116,9 @@ function App() {
   const [supportTickets, setSupportTickets] = React.useState([]);
   const [showSupportModal, setShowSupportModal] = React.useState(false);
   const [returnMovements, setReturnMovements] = React.useState([]);
+  const [purchaseOrders, setPurchaseOrders] = React.useState([]);
+  const [suppliers, setSuppliers] = React.useState([]);
+  const [showPurchasingModal, setShowPurchasingModal] = React.useState(false);
   const notify = msg => {
     setToast(msg);
     setTimeout(() => setToast(""), 5000);
@@ -4928,6 +5280,8 @@ function App() {
     loadCounts();
     loadTickets();
     loadReturnMovements();
+    loadPurchaseOrders();
+    loadSuppliers();
   }, [user]);
   // Fetch approved movements for analytics dispatch panel (lazy — only when tab is opened)
   React.useEffect(() => {
@@ -4965,6 +5319,22 @@ function App() {
       setReturnMovements(Array.isArray(data) ? data.filter(m => TICKET_LINKABLE_MOVEMENT_TYPES_FE.includes(m.MovementType)) : []);
     } catch (e) {
       console.error("Return movements:", e.message);
+    }
+  }
+  async function loadPurchaseOrders() {
+    try {
+      const data = await api("getPurchaseOrders", { includeLines: "true" });
+      setPurchaseOrders(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Purchase orders:", e.message);
+    }
+  }
+  async function loadSuppliers() {
+    try {
+      const data = await api("getSuppliers", {});
+      setSuppliers(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Suppliers:", e.message);
     }
   }
   async function approveOne(movID) {
@@ -6690,6 +7060,7 @@ function App() {
     products: products,
     stock: stock,
     user: user,
+    purchaseOrders: purchaseOrders,
     alertThresholds: alertThresholds,
     onClose: () => setShowMov(false),
     onDone: msg => {
@@ -6751,9 +7122,17 @@ function App() {
     onClose: () => setShowSupportModal(false),
     onDone: msg => notify(msg),
     reload: () => { loadTickets(); loadReturnMovements(); }
+  }), showPurchasingModal && /*#__PURE__*/React.createElement(PurchasingModal, {
+    purchaseOrders: purchaseOrders,
+    suppliers: suppliers,
+    products: products,
+    user: user,
+    onClose: () => setShowPurchasingModal(false),
+    onDone: msg => notify(msg),
+    reload: () => { loadPurchaseOrders(); }
   }), /*#__PURE__*/React.createElement("div", { style: { height: 88 } }), /*#__PURE__*/React.createElement(BottomNav, {
-    tab: tab, setTab: setTab, showList: showList, showSupportModal: showSupportModal,
-    onMovements: function () { setShowList(true); }, onSupport: function () { setShowSupportModal(true); }, user: user
+    tab: tab, setTab: setTab, showList: showList, showSupportModal: showSupportModal, showPurchasingModal: showPurchasingModal,
+    onMovements: function () { setShowList(true); }, onSupport: function () { setShowSupportModal(true); }, onPurchasing: function () { setShowPurchasingModal(true); }, user: user
   }), /*#__PURE__*/React.createElement(PinConfirmModal, { user: user }));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(
