@@ -2845,7 +2845,7 @@ function SupportModal({ tickets, products, returnMovements, user, onClose, onDon
 //    - Create:  Founder, Co-Founder, Warehouse Manager (Pushpanjali creates POs)
 //    - Approve/Reject/Close: Founder, Co-Founder only — a PO commits real
 //      money, so Warehouse Manager creates but can't sign off on her own.
-//  Tab visibility is its own, narrower list (see BottomNav / PURCHASE_ORDER_VIEW_ROLES_FE):
+//  Tab visibility is its own, narrower list (see SideNav / PURCHASE_ORDER_VIEW_ROLES_FE):
 //  only Founder, Co-Founder, Warehouse Manager, and Warehouse Operator (Zubedha,
 //  view-only — she needs to see what's expected when linking a Stock In to a PO)
 //  see the Purchasing tab at all. Admin, Manager, Accounts, Operations Manager
@@ -5135,8 +5135,7 @@ function HomeView(props) {
   );
 }
 
-function BottomNav(props) {
-  var tab = props.tab, setTab = props.setTab, user = props.user, showList = props.showList;
+function NavItems(user, showList, showSupportModal, showPurchasingModal, tab) {
   var items = [
     { k: "home", label: "Home", icon: "🏠" },
     { k: "product", label: "Inventory", icon: "📦" },
@@ -5162,8 +5161,16 @@ function BottomNav(props) {
   // she needs to see what's expected when linking a Stock In to a PO). Admin, Manager,
   // Accounts, and Operations Manager no longer see this tab at all.
   if (!PURCHASE_ORDER_VIEW_ROLES_FE.includes(user.role)) items = items.filter(function(it){ return it.k !== "purchasing"; });
-  var active = showList ? "movements" : (props.showSupportModal ? "support" : (props.showPurchasingModal ? "purchasing" : ((tab === "product" || tab === "location" || tab === "counts") ? "product" : tab)));
-  return /*#__PURE__*/React.createElement("div", { style: { position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 120, background: "rgba(253,249,241,0.94)", backdropFilter: "blur(10px)", borderTop: "1px solid #e7d9c4", display: "flex", padding: "8px 4px 18px" } },
+  var active = showList ? "movements" : (showSupportModal ? "support" : (showPurchasingModal ? "purchasing" : ((tab === "product" || tab === "location" || tab === "counts") ? "product" : tab)));
+  return { items: items, active: active };
+}
+
+// Bottom tab bar — MOBILE ONLY (hidden ≥900px via .syoat-bottom-nav CSS in index.html).
+function BottomNav(props) {
+  var tab = props.tab, setTab = props.setTab, user = props.user, showList = props.showList;
+  var r = NavItems(user, showList, props.showSupportModal, props.showPurchasingModal, tab);
+  var items = r.items, active = r.active;
+  return /*#__PURE__*/React.createElement("div", { className: "syoat-bottom-nav", style: { position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 120, background: "rgba(253,249,241,0.94)", backdropFilter: "blur(10px)", borderTop: "1px solid #e7d9c4", padding: "8px 4px 18px" } },
     items.map(function(it){
       var on = active === it.k;
       var handler = it.k === "movements" ? props.onMovements : it.k === "support" ? props.onSupport : it.k === "purchasing" ? props.onPurchasing : function(){ setTab(it.k); };
@@ -5175,6 +5182,40 @@ function BottomNav(props) {
         /*#__PURE__*/React.createElement("span", null, it.label)
       );
     })
+  );
+}
+
+// Left sidebar — DESKTOP ONLY (hidden <900px, pinned open ≥900px via .syoat-sidebar CSS in index.html).
+function SideNav(props) {
+  var tab = props.tab, setTab = props.setTab, user = props.user, showList = props.showList;
+  var r = NavItems(user, showList, props.showSupportModal, props.showPurchasingModal, tab);
+  var items = r.items, active = r.active;
+  return /*#__PURE__*/React.createElement("div", { className: "syoat-sidebar" },
+    /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "16px 16px 14px", borderBottom: "1px solid #e7d9c4" } },
+      /*#__PURE__*/React.createElement("div", {
+        style: { width: 38, height: 38, borderRadius: 11, background: "#fff", border: "1px solid #e7d9c4", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }
+      }, /*#__PURE__*/React.createElement("img", { src: SYOAT_LOGO, alt: "Syoat", style: { width: "100%", height: "100%", objectFit: "contain", padding: 3 } })),
+      /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0, fontFamily: "Fraunces,serif", fontSize: 16, fontWeight: 600, color: "#2c211a" } }, "Inventory ERP")
+    ),
+    /*#__PURE__*/React.createElement("div", { style: { padding: "10px 10px", overflowY: "auto", flex: 1 } },
+      items.map(function(it){
+        var on = active === it.k;
+        var handler = it.k === "movements" ? props.onMovements : it.k === "support" ? props.onSupport : it.k === "purchasing" ? props.onPurchasing : function(){ setTab(it.k); };
+        return /*#__PURE__*/React.createElement("button", {
+          key: it.k,
+          onClick: handler,
+          style: { width: "100%", display: "flex", alignItems: "center", gap: 12, background: on ? "#2a201a" : "transparent", border: "none", borderRadius: 11, padding: "11px 12px", marginBottom: 3, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }
+        },
+          it.amazon
+            ? /*#__PURE__*/React.createElement(AmazonIcon, { size: 19, color: on ? "#f4ead8" : "#2c211a" })
+            : /*#__PURE__*/React.createElement("span", { style: { fontSize: 17, lineHeight: 1, filter: on ? "none" : "grayscale(1) opacity(0.6)" } }, it.icon),
+          /*#__PURE__*/React.createElement("span", { style: { fontSize: 13.5, fontWeight: 700, color: on ? "#f4ead8" : "#4a3f34" } }, it.label)
+        );
+      })
+    ),
+    /*#__PURE__*/React.createElement("div", { style: { padding: "12px 16px 16px", borderTop: "1px solid #e7d9c4", fontSize: 11, color: "#a89680" } },
+      user.name || "", " · ", user.role || ""
+    )
   );
 }
 
@@ -5666,6 +5707,7 @@ function App() {
     }
   });
   return /*#__PURE__*/React.createElement("div", {
+    className: "syoat-shell",
     style: {
       minHeight: "100vh",
       background: "#efe4d2",
@@ -7288,7 +7330,10 @@ function App() {
     onClose: () => setShowPurchasingModal(false),
     onDone: msg => notify(msg),
     reload: () => { loadPurchaseOrders(); }
-  }), /*#__PURE__*/React.createElement("div", { style: { height: 88 } }), /*#__PURE__*/React.createElement(BottomNav, {
+  }), /*#__PURE__*/React.createElement("div", { className: "syoat-bottom-spacer", style: { height: 88 } }), /*#__PURE__*/React.createElement(BottomNav, {
+    tab: tab, setTab: setTab, showList: showList, showSupportModal: showSupportModal, showPurchasingModal: showPurchasingModal,
+    onMovements: function () { setShowList(true); }, onSupport: function () { setShowSupportModal(true); }, onPurchasing: function () { setShowPurchasingModal(true); }, user: user
+  }), /*#__PURE__*/React.createElement(SideNav, {
     tab: tab, setTab: setTab, showList: showList, showSupportModal: showSupportModal, showPurchasingModal: showPurchasingModal,
     onMovements: function () { setShowList(true); }, onSupport: function () { setShowSupportModal(true); }, onPurchasing: function () { setShowPurchasingModal(true); }, user: user
   }), /*#__PURE__*/React.createElement(PinConfirmModal, { user: user }));
