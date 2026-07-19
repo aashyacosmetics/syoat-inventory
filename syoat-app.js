@@ -109,6 +109,51 @@ function genRequestId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
+// Step 0 (2026-07-19): holds the currently logged-in staff member's PIN in memory
+// only (never localStorage) so every write can carry it for server-side validation
+// in Apps Script's requireStaff(). Set on login, cleared on logout. Previously the
+// PIN was only ever checked in the browser (LoginScreen.checkPin) — this closes
+// that gap without changing anything else about how writes are called.
+var CURRENT_PIN = "";
+
+// Per-action PIN re-confirmation (requested 2026-07-19): Lalith wants an explicit
+// "enter your PIN" popup before every submit/approve/reject/reverse — not just
+// the silent server-side check added in Step 0. Rather than editing every one of
+// the ~20 places that call apiWrite/apiWritePost, the prompt is wired in once,
+// inside those two functions themselves, via a small Promise-based bridge to a
+// single <PinConfirmModal> mounted once at the app root.
+var _pinConfirmResolve = null;
+var _pinConfirmSetState = null;
+function _registerPinConfirmUI(setState) { _pinConfirmSetState = setState; }
+function requestPinConfirm(label) {
+  // Fail-safe: if the modal hasn't mounted yet for some reason, don't block every
+  // write in the app — just let it through. The server still checks the real PIN
+  // regardless (Step 0), so this popup is an added confirmation step, not the only
+  // line of defence.
+  if (!_pinConfirmSetState) return Promise.resolve(true);
+  return new Promise(function (resolve) {
+    _pinConfirmResolve = resolve;
+    _pinConfirmSetState({ show: true, label: label });
+  });
+}
+const PIN_ACTION_LABELS = {
+  createMovement: "record this movement",
+  approveMovement: "approve this movement",
+  rejectMovement: "reject this movement",
+  reverseMovement: "reverse this movement",
+  editMovement: "save these changes",
+  createSalesOrder: "create this order",
+  dispatchSalesOrder: "dispatch this order",
+  createStockCount: "submit this stock count",
+  approveStockCount: "approve this stock count",
+  rejectStockCount: "reject this stock count",
+  editStockCount: "save this stock count",
+  assembleCombo: "assemble this combo",
+  createFbaReconciliation: "sync Amazon FBA stock",
+  createSupportTicket: "create this ticket",
+  updateSupportTicket: "update this ticket",
+};
+
 // Retry with exponential backoff — 3 attempts, 1.2s / 2.4s gaps
 async function fetchWithRetry(url, options, retries) {
   retries = retries || 3;
@@ -140,7 +185,9 @@ async function api(action, params) {
 // WRITE — GET with payload + requestId
 // requestId lets Apps Script detect and skip duplicate submissions
 async function apiWrite(action, email, payload) {
-  var enriched = Object.assign({}, payload, { requestId: genRequestId() });
+  var confirmed = await requestPinConfirm(PIN_ACTION_LABELS[action] || "this action");
+  if (!confirmed) throw new Error("Cancelled — PIN not confirmed.");
+  var enriched = Object.assign({}, payload, { requestId: genRequestId(), pin: CURRENT_PIN });
   var serialised = JSON.stringify(enriched);
   var qs = new URLSearchParams({
     action: action,
@@ -160,7 +207,9 @@ async function apiWrite(action, email, payload) {
 // WRITE via POST — no URL-length ceiling. Used when the payload carries photo
 // attachments (base64 thumbnails can easily exceed the ~7000-char GET budget).
 async function apiWritePost(action, email, payload) {
-  var enriched = Object.assign({}, payload, { action: action, email: email, requestId: genRequestId() });
+  var confirmed = await requestPinConfirm(PIN_ACTION_LABELS[action] || "this action");
+  if (!confirmed) throw new Error("Cancelled — PIN not confirmed.");
+  var enriched = Object.assign({}, payload, { action: action, email: email, requestId: genRequestId(), pin: CURRENT_PIN });
   return fetchWithRetry(API, {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
@@ -4622,6 +4671,74 @@ function BottomNav(props) {
   );
 }
 
+// Re-entry PIN prompt shown before every write action (2026-07-19). Purely a
+// confirmation step for the person already logged in — checks the typed PIN
+// against the known-correct `user.pin` from login, same comparison LoginScreen
+// itself uses. The real security check happens server-side (Step 0); this just
+// makes sure the person tapping Submit/Approve/Reverse means to, every time.
+function PinConfirmModal({ user }) {
+  var _st = React.useState({ show: false, label: "" }), st = _st[0], setSt = _st[1];
+  var _p = React.useState(""), pin = _p[0], setPin = _p[1];
+  var _sh = React.useState(false), shake = _sh[0], setShake = _sh[1];
+  React.useEffect(function () {
+    _registerPinConfirmUI(setSt);
+    return function () { _registerPinConfirmUI(null); };
+  }, []);
+  function finish(result) {
+    setSt({ show: false, label: "" });
+    setPin("");
+    var r = _pinConfirmResolve;
+    _pinConfirmResolve = null;
+    if (r) r(result);
+  }
+  function digit(d) {
+    if (pin.length >= 4) return;
+    var np = pin + d;
+    setPin(np);
+    if (np.length === 4) {
+      setTimeout(function () {
+        if (String(np) === String(user && user.pin)) finish(true);
+        else { setShake(true); setPin(""); setTimeout(function () { setShake(false); }, 500); }
+      }, 120);
+    }
+  }
+  if (!st.show) return null;
+  var dots = [0, 1, 2, 3];
+  return /*#__PURE__*/React.createElement("div", {
+    style: { position: "fixed", inset: 0, background: "rgba(60,40,20,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500, padding: 16 }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { ...card, width: "100%", maxWidth: 320, padding: 26, textAlign: "center" }
+  },
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 28, marginBottom: 6 } }, "🔒"),
+    /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 16, color: "#2c211a", marginBottom: 4 } }, "Confirm with PIN"),
+    /*#__PURE__*/React.createElement("div", { style: { color: "#a89680", fontSize: 12.5, marginBottom: 18 } }, "to " + st.label),
+    /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 14, justifyContent: "center", marginBottom: 18, animation: shake ? "shake 0.4s ease" : "none" } },
+      dots.map(function (i) {
+        return /*#__PURE__*/React.createElement("div", {
+          key: i,
+          style: { width: 14, height: 14, borderRadius: "50%", background: i < pin.length ? "#6366f1" : "#e0d2bd", border: "2px solid " + (i < pin.length ? "#6366f1" : "#c8b9a3") }
+        });
+      })
+    ),
+    /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(3,64px)", gap: 10, justifyContent: "center", margin: "0 auto" } },
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, "", 0, "⌫"].map(function (d, i) {
+        if (d === "") return /*#__PURE__*/React.createElement("div", { key: i });
+        var isDel = d === "⌫";
+        return /*#__PURE__*/React.createElement("button", {
+          key: i,
+          onClick: function () { isDel ? setPin("") : digit(String(d)); },
+          style: { width: 64, height: 64, borderRadius: 12, fontSize: isDel ? 20 : 18, fontWeight: 700, background: isDel ? "#e8e0d4" : "#efe4d2", border: "1px solid #e0d2bd", color: isDel ? "#a89680" : "#2c211a", cursor: "pointer" }
+        }, d);
+      })
+    ),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: function () { finish(false); },
+      style: { ...ghost, width: "100%", marginTop: 16, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700, color: "#6f6152" }
+    }, "Cancel"),
+    /*#__PURE__*/React.createElement("style", null, "@keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-8px)} 40%{transform:translateX(8px)} 60%{transform:translateX(-5px)} 80%{transform:translateX(5px)} }")
+  ));
+}
+
 function App() {
   const [user, setUser] = React.useState(null);
   const [products, setProducts] = React.useState([]);
@@ -4982,6 +5099,7 @@ function App() {
       staffSource: staffLoadError ? "offline" : "sheet",
     onLogin: async u => {
       setUser(u);
+      CURRENT_PIN = u.pin || ""; // Step 0: kept in memory only, sent with every write for server-side validation
       // Check stock immediately after login — alert if anything is critical
       try {
         const [prods, stk] = await Promise.all([api("getProducts"), api("getStock")]);
@@ -5090,7 +5208,7 @@ function App() {
     onClick: load, title: "Sync now",
     style: { width: 38, height: 38, borderRadius: "50%", border: "1px solid #e7d9c4", background: "#fdf9f1", color: syncing ? "#bd5d38" : "#6f6152", fontSize: 16, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }
   }, "⟳"), /*#__PURE__*/React.createElement("button", {
-    onClick: function(){ if (window.confirm("Log out of Syoat ERP?")) setUser(null); }, title: user.name + " · tap to log out",
+    onClick: function(){ if (window.confirm("Log out of Syoat ERP?")) { setUser(null); CURRENT_PIN = ""; } }, title: user.name + " · tap to log out",
     style: { width: 40, height: 40, borderRadius: "50%", background: "#2a201a", color: "#f2e7d5", border: "none", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0, cursor: "pointer", position: "relative" }
   }, (user.name || "?").split(" ").map(function(w){ return w[0] || ""; }).slice(0, 2).join("").toUpperCase(), /*#__PURE__*/React.createElement("span", { style: { position: "absolute", bottom: 1, right: 1, width: 9, height: 9, borderRadius: "50%", background: "#5f9e6a", border: "2px solid #efe4d2" } }))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6636,7 +6754,7 @@ function App() {
   }), /*#__PURE__*/React.createElement("div", { style: { height: 88 } }), /*#__PURE__*/React.createElement(BottomNav, {
     tab: tab, setTab: setTab, showList: showList, showSupportModal: showSupportModal,
     onMovements: function () { setShowList(true); }, onSupport: function () { setShowSupportModal(true); }, user: user
-  }));
+  }), /*#__PURE__*/React.createElement(PinConfirmModal, { user: user }));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(
   React.createElement(ErrorBoundary, null,
