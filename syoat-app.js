@@ -95,6 +95,8 @@ const CAN_CREATE_TYPES = {
   "Operations Manager": [],
   // Warehouse ships from WH only — cannot touch FBA stock
   Warehouse: ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  // Alias (2026-07-19): Zubedha's App_Logins.Role now reads "Warehouse Operator" — same access as Warehouse.
+  "Warehouse Operator": ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Accounts: []
 };
 
@@ -288,6 +290,7 @@ const ROLE_COLOR = {
   "Warehouse Manager": "#a97b52",
   "Operations Manager": "#a97b52",
   Warehouse: "#bd5d38",
+  "Warehouse Operator": "#bd5d38",
   Accounts: "#a89680"
 };
 function statusOf(qty, at) {
@@ -411,6 +414,7 @@ function LoginScreen({
     "Warehouse Manager": "🏭",
     "Operations Manager": "🧭",
     Warehouse: "📦",
+    "Warehouse Operator": "📦",
     Accounts: "🧾"
   };
   function selectStaff(s) {
@@ -645,6 +649,7 @@ function LoginScreen({
     "Warehouse Manager": "🏭",
     "Operations Manager": "🧭",
     Warehouse: "📦",
+    "Warehouse Operator": "📦",
     Accounts: "🧾"
   }[selected.role]), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4592,7 +4597,7 @@ function BottomNav(props) {
   ];
   // Permission: Warehouse has no Amazon import access; Operations Manager (Sravanthi)
   // does no Amazon work either — hide that tab for both.
-  if (user.role === "Warehouse" || user.role === "Operations Manager") items = items.filter(function(it){ return it.k !== "amazon"; });
+  if (user.role === "Warehouse" || user.role === "Warehouse Operator" || user.role === "Operations Manager") items = items.filter(function(it){ return it.k !== "amazon"; });
   // Permission: Support tickets are Sravanthi (Operations Manager) / Founder / Co-Founder / Owner
   // only — Zubedha (Warehouse) and Pushpanjali (Warehouse Manager) have no role in this workflow,
   // so hide the tab entirely for them rather than showing an empty/disabled view.
@@ -4747,6 +4752,13 @@ function App() {
             canViewAll: true
           },
           Warehouse: {
+            canCreate: true,
+            canApprove: false,
+            canReverse: false,
+            canViewAll: false
+          },
+          // Alias (2026-07-19): Zubedha's App_Logins.Role now reads "Warehouse Operator".
+          "Warehouse Operator": {
             canCreate: true,
             canApprove: false,
             canReverse: false,
@@ -5631,7 +5643,7 @@ function App() {
         background: "#b23a2e08"
       }
     }, "🚫 Reject")))));
-  }))), tab === "amazon" && (user.role === "Warehouse" ? /*#__PURE__*/React.createElement("div", {
+  }))), tab === "amazon" && ((user.role === "Warehouse" || user.role === "Warehouse Operator") ? /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#fdf9f1",
       border: "1px solid #e7d9c4",
