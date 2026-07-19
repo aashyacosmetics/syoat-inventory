@@ -419,6 +419,7 @@ function LoginScreen({
     }
   }
   function checkPin(enteredPin) {
+    const ua = (typeof navigator !== "undefined" && navigator.userAgent) ? navigator.userAgent : "";
     if (!selected.pin) {
       setShake(true);
       setError("Logins didn't load (offline). Reload the page, then try again.");
@@ -427,8 +428,10 @@ function LoginScreen({
       return;
     }
     if (String(enteredPin) === String(selected.pin)) {
+      api("logLoginAttempt", { email: selected.email, success: "true", reason: "", userAgent: ua }).catch(() => {});
       onLogin(selected);
     } else {
+      api("logLoginAttempt", { email: selected.email, success: "false", reason: "Wrong PIN", userAgent: ua }).catch(() => {});
       setShake(true);
       setError("Wrong PIN. Try again.");
       setPin("");
@@ -1165,6 +1168,16 @@ function MovModal({
   const [refNo, setRefNo] = React.useState("");
   const [carrier, setCarrier] = React.useState("");
   const [notes, setNotes] = React.useState("");
+  // Controlled reason-codes (v3.3): replaces free-text-only "why" for the movement
+  // types where it matters most for accountability, so it's analyzable later, not
+  // just readable one record at a time. Free-text Notes stays as additional detail.
+  const REASON_TYPES = {
+    "Damage":            ["Expired", "Broken in transit", "Warehouse mishandling", "Manufacturing defect", "Other"],
+    "Returns – Damaged":  ["Customer damaged", "Damaged in transit back", "Quality issue", "Other"],
+    "Returns – to WH":    ["Wrong item ordered", "Customer changed mind", "Size/fit issue", "Duplicate order", "Other"],
+    "Return Received":    ["Wrong item ordered", "Customer changed mind", "Size/fit issue", "Duplicate order", "Damaged/defective", "Other"],
+  };
+  const [reasonCode, setReasonCode] = React.useState("");
   const [lines, setLines] = React.useState([{
     pid: products[0]?.ProductID || "",
     qty: "",
@@ -1256,6 +1269,10 @@ function MovModal({
       setErr("All lines need a quantity.");
       return;
     }
+    if (REASON_TYPES[type] && !reasonCode) {
+      setErr("Select a reason.");
+      return;
+    }
     setBusy(true);
     setErr("");
     try {
@@ -1281,7 +1298,8 @@ function MovModal({
       }
       const uploads = (await Promise.all(imgFiles.map(f => makeUpload(f.dataUrl)))).filter(Boolean);
       const hasImgs = uploads.length > 0;
-      const finalNotes = (notes ? notes + " " : "") + (images.length > 0 ? `[${images.length} attachment(s): ${images.map(i => i.name).join(", ")}]` : "");
+      const reasonPrefix = reasonCode ? `Reason: ${reasonCode} | ` : "";
+      const finalNotes = reasonPrefix + (notes ? notes + " " : "") + (images.length > 0 ? `[${images.length} attachment(s): ${images.map(i => i.name).join(", ")}]` : "");
       const movPayload = {
         movementType: type,
         sourceLocationID: sd.src,
@@ -1651,7 +1669,15 @@ function MovModal({
         fontWeight: 600
       }
     }, "🚫 No stock available at this location"));
-  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+  })), REASON_TYPES[type] && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, "Reason *"), /*#__PURE__*/React.createElement("select", {
+    value: reasonCode,
+    onChange: e => setReasonCode(e.target.value),
+    style: inp
+  }, [/*#__PURE__*/React.createElement("option", { key: "", value: "" }, "Select a reason...")].concat(
+    REASON_TYPES[type].map(r => /*#__PURE__*/React.createElement("option", { key: r, value: r }, r))
+  ))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
   }, "Notes"), /*#__PURE__*/React.createElement("input", {
     value: notes,
