@@ -5781,6 +5781,7 @@ function App() {
     onClick: function(){ if (window.confirm("Log out of Syoat ERP?")) { setUser(null); CURRENT_PIN = ""; } }, title: user.name + " · tap to log out",
     style: { width: 40, height: 40, borderRadius: "50%", background: "#2a201a", color: "#f2e7d5", border: "none", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0, cursor: "pointer", position: "relative" }
   }, (user.name || "?").split(" ").map(function(w){ return w[0] || ""; }).slice(0, 2).join("").toUpperCase(), /*#__PURE__*/React.createElement("span", { style: { position: "absolute", bottom: 1, right: 1, width: 9, height: 9, borderRadius: "50%", background: "#5f9e6a", border: "2px solid #efe4d2" } }))), /*#__PURE__*/React.createElement("div", {
+    className: "syoat-content",
     style: {
       maxWidth: 940,
       margin: "0 auto",
@@ -5897,6 +5898,7 @@ function App() {
     var on = tab === x.k;
     return /*#__PURE__*/React.createElement("button", { key: x.k, onClick: function(){ setTab(x.k); }, style: { flex: 1, border: "none", background: on ? "#2a201a" : "transparent", color: on ? "#f4ead8" : "#6f6152", padding: "9px 4px", borderRadius: 9, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", boxShadow: on ? "0 1px 4px rgba(0,0,0,0.15)" : "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 } }, x.l);
   })), tab === "product" && /*#__PURE__*/React.createElement("div", {
+    className: "syoat-product-grid",
     style: {
       display: "grid",
       gap: 10
@@ -6049,7 +6051,7 @@ function App() {
         marginTop: 3
       }
     }, "Alert at ", at, " · MRP ₹", p.MRP || "—", " · Cost ₹", p.UnitCost || "—"))));
-  })), tab === "location" && /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 12, gridTemplateColumns: "minmax(0,1fr)" } }, [{ id: "MAIN_WH", ic: "🏠", bg: "#efe4d2", sub: "Physical in-house stock" }, { id: "AMAZON_FBA", ic: "AMZ", bg: "#f2ddd0", sub: "Held by Amazon" }, { id: "FBA_TRANSIT", ic: "🚚", bg: "#f4e7c8", sub: "Shipped, not yet received" }, { id: "RETURNS", ic: "↩️", bg: "#f3dcd5", sub: "Awaiting inspection" }].map(function(loc){
+  })), tab === "location" && /*#__PURE__*/React.createElement("div", { className: "syoat-location-grid", style: { display: "grid", gap: 12, gridTemplateColumns: "minmax(0,1fr)" } }, [{ id: "MAIN_WH", ic: "🏠", bg: "#efe4d2", sub: "Physical in-house stock" }, { id: "AMAZON_FBA", ic: "AMZ", bg: "#f2ddd0", sub: "Held by Amazon" }, { id: "FBA_TRANSIT", ic: "🚚", bg: "#f4e7c8", sub: "Shipped, not yet received" }, { id: "RETURNS", ic: "↩️", bg: "#f3dcd5", sub: "Awaiting inspection" }].map(function(loc){
     var rows = (stock || []).filter(function(s){ return s.LocationID === loc.id; }).map(function(s){ var p = (products || []).find(function(x){ return x.ProductID === s.ProductID; }); return { name: (p && p.ProductName) || s.ProductID, pid: s.ProductID, qty: Number(s.Quantity) || 0, freebie: p && p.ItemType === "Freebie" }; }).filter(function(r){ return r.qty !== 0; }).sort(function(a,b){ return b.qty - a.qty; });
     var total = rows.reduce(function(a,r){ return a + r.qty; }, 0);
     var maxq = rows.length ? rows[0].qty : 1;
@@ -6398,7 +6400,7 @@ function App() {
     catArr.forEach(function(x, idx){ var start = acc / totalCat * 100; acc += x.v; var end = acc / totalCat * 100; segs.push(palette[idx % palette.length] + " " + start.toFixed(2) + "% " + end.toFixed(2) + "%"); });
     var conic = "conic-gradient(" + segs.join(",") + ")";
     return /*#__PURE__*/React.createElement(React.Fragment, null,
-      /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } }, kpis.map(function(k){
+      /*#__PURE__*/React.createElement("div", { className: "syoat-kpi-grid", style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } }, kpis.map(function(k){
         return /*#__PURE__*/React.createElement("div", { key: k.t, style: { background: k.dark ? "linear-gradient(135deg,#2a201a,#4a3626)" : "#fdf9f1", border: k.dark ? "none" : "1px solid #e7d9c4", borderRadius: 16, padding: 14 } },
           /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 600, color: k.crit ? "#b23a2e" : (k.dark ? "#f2e7d5" : "#2c211a"), lineHeight: 1 } }, k.v),
           /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: k.dark ? "#c9b49a" : "#6f6152", marginTop: 6, fontWeight: 500 } }, k.t)

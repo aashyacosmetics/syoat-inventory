@@ -43,6 +43,15 @@
       .syoat-bottom-nav { display: none; }
       .syoat-bottom-spacer { display: none; }
     }
+
+    /* Desktop page-fit (≥900px only): mobile keeps every original layout value
+       untouched (inline styles), these rules only widen/re-grid on wide screens. */
+    @media (min-width: 900px) {
+      .syoat-content { max-width: 1400px !important; padding: 0 28px !important; }
+      .syoat-product-grid { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)) !important; }
+      .syoat-location-grid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)) !important; }
+      .syoat-kpi-grid { grid-template-columns: repeat(4, 1fr) !important; }
+    }
   </style>
 </head>
 <body>
@@ -57,7 +66,7 @@
 <div id="root"></div>
 
 <!-- App — all logic lives here; update only this file for new features -->
-<script src="syoat-app.js?v=20260719t"></script>
+<script src="syoat-app.js?v=20260719u"></script>
 
 </body>
 </html>
