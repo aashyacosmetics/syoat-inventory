@@ -1938,7 +1938,8 @@ function MovListModal({
   onClose,
   onApproveSuccess,
   staffDB,
-  products
+  products,
+  supportTickets
 }) {
   const [movs, setMovs] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -2174,6 +2175,12 @@ function MovListModal({
       color: "#6f6152"
     }
   }, (products || []).find(p => p.ProductID === l.ProductID)?.ProductName || l.ProductID, " × ", l.Quantity)))),
+  (function(){
+    var linkedTicket = (supportTickets || []).find(function(t){ return t.LinkedMovementID === m.MovementID; });
+    return linkedTicket && /*#__PURE__*/React.createElement("div", {
+      style: { marginTop: 4, fontSize: 11, fontWeight: 700, color: TICKET_STATUS_COLOR[linkedTicket.Status] || "#a89680" }
+    }, "🎫 " + linkedTicket.TicketID + " · " + linkedTicket.CustomerName + " (" + linkedTicket.Status + ")");
+  })(),
   parseAttachments(m.DocumentFile).map((img, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     onClick: () => setViewImg(img),
@@ -2558,8 +2565,10 @@ const TICKET_STATUS_COLOR = { "Open": "#b23a2e", "In Progress": "#a97b52", "Reso
 // can create or resolve tickets. Zubedha (Warehouse) and Pushpanjali (Warehouse Manager) are
 // not part of this workflow at all.
 const SUPPORT_TICKET_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Operations Manager"];
+// v3.5: movement types a ticket may link to — keep in sync with RETURN_MOVEMENT_TYPES in AppScript.
+const RETURN_MOVEMENT_TYPES_FE = ["Return Received", "Returns – to WH", "Returns – Damaged", "Damage"];
 
-function SupportModal({ tickets, products, user, onClose, onDone, reload }) {
+function SupportModal({ tickets, products, returnMovements, user, onClose, onDone, reload }) {
   const canManage = SUPPORT_TICKET_ROLES_FE.includes(user.role);
   const [view, setView] = React.useState("list");
   const [customerName, setCustomerName] = React.useState("");
@@ -2572,6 +2581,21 @@ function SupportModal({ tickets, products, user, onClose, onDone, reload }) {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState("");
   const [updatingID, setUpdatingID] = React.useState(null);
+  const [resolutionDrafts, setResolutionDrafts] = React.useState({});
+  const draftFor = t => resolutionDrafts[t.TicketID] !== undefined ? resolutionDrafts[t.TicketID] : (t.Resolution || "");
+  const [linkDrafts, setLinkDrafts] = React.useState({});
+  const linkDraftFor = t => linkDrafts[t.TicketID] !== undefined ? linkDrafts[t.TicketID] : (t.LinkedMovementID || "");
+  const movLabel = mv => mv.MovementID + " — " + (TYPE_LABEL[mv.MovementType] || mv.MovementType) + (mv.ReferenceNumber ? " (" + mv.ReferenceNumber + ")" : "");
+
+  async function saveLink(ticketID, movementID) {
+    setUpdatingID(ticketID); setErr("");
+    try {
+      await apiWrite("updateSupportTicket", user.email, { ticketID, linkedMovementID: movementID });
+      onDone(movementID ? `✅ ${ticketID} linked to ${movementID}` : `✅ ${ticketID} link cleared`);
+      reload();
+    } catch (e) { setErr(e.message); }
+    setUpdatingID(null);
+  }
 
   async function submit() {
     if (!customerName.trim() || !description.trim()) { setErr("Customer name and description are required."); return; }
@@ -2589,10 +2613,10 @@ function SupportModal({ tickets, products, user, onClose, onDone, reload }) {
     setBusy(false);
   }
 
-  async function updateStatus(ticketID, status) {
+  async function updateStatus(ticketID, status, resolution) {
     setUpdatingID(ticketID); setErr("");
     try {
-      await apiWrite("updateSupportTicket", user.email, { ticketID, status });
+      await apiWrite("updateSupportTicket", user.email, { ticketID, status, resolution: (resolution || "").trim() });
       onDone(`✅ ${ticketID} → ${status}`);
       reload();
     } catch (e) { setErr(e.message); }
@@ -2626,12 +2650,33 @@ function SupportModal({ tickets, products, user, onClose, onDone, reload }) {
                         /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#fff", background: TICKET_STATUS_COLOR[t.Status] || "#a89680", padding: "3px 8px", borderRadius: 20 } }, t.Status)
                       ),
                       /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#5a4a3a", marginTop: 8 } }, t.Description),
-                      t.LinkedMovementID && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#a89680", marginTop: 4 } }, "Linked movement: " + t.LinkedMovementID),
+                      !canManage && t.LinkedMovementID && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#a89680", marginTop: 4 } }, "Linked movement: " + t.LinkedMovementID),
                       t.Resolution && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#4a7c59", marginTop: 4 } }, "Resolution: " + t.Resolution),
-                      canManage && t.Status !== "Closed" && /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" } },
+                      canManage && /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 8, alignItems: "center" } },
+                        /*#__PURE__*/React.createElement("select", {
+                          value: linkDraftFor(t),
+                          onChange: e => setLinkDrafts(function(d){ var n = Object.assign({}, d); n[t.TicketID] = e.target.value; return n; }),
+                          style: { ...inp, marginBottom: 0, flex: 1, fontSize: 11, padding: "6px 8px" }
+                        },
+                          /*#__PURE__*/React.createElement("option", { value: "" }, "— No linked movement —"),
+                          returnMovements.map(mv => /*#__PURE__*/React.createElement("option", { key: mv.MovementID, value: mv.MovementID }, movLabel(mv)))
+                        ),
+                        /*#__PURE__*/React.createElement("button", {
+                          disabled: updatingID === t.TicketID || linkDraftFor(t) === (t.LinkedMovementID || ""),
+                          onClick: () => saveLink(t.TicketID, linkDraftFor(t)),
+                          style: { ...ghost, fontSize: 11, padding: "6px 10px", whiteSpace: "nowrap", opacity: (updatingID === t.TicketID || linkDraftFor(t) === (t.LinkedMovementID || "")) ? 0.5 : 1 }
+                        }, "🔗 Save Link")
+                      ),
+                      canManage && t.Status !== "Closed" && /*#__PURE__*/React.createElement("textarea", {
+                        value: draftFor(t),
+                        onChange: e => setResolutionDrafts(function(d){ var n = Object.assign({}, d); n[t.TicketID] = e.target.value; return n; }),
+                        placeholder: "Resolution notes (what did you do for the customer?)",
+                        style: { ...inp, minHeight: 44, fontSize: 12, marginTop: 8 }
+                      }),
+                      canManage && t.Status !== "Closed" && /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" } },
                         TICKET_STATUSES.filter(s => s !== t.Status).map(s =>
                           /*#__PURE__*/React.createElement("button", {
-                            key: s, disabled: updatingID === t.TicketID, onClick: () => updateStatus(t.TicketID, s),
+                            key: s, disabled: updatingID === t.TicketID, onClick: () => updateStatus(t.TicketID, s, draftFor(t)),
                             style: { ...ghost, fontSize: 11, padding: "5px 10px", opacity: updatingID === t.TicketID ? 0.5 : 1 }
                           }, "→ " + s)
                         )
@@ -2657,8 +2702,10 @@ function SupportModal({ tickets, products, user, onClose, onDone, reload }) {
                 SUPPORT_REASONS.map(r => /*#__PURE__*/React.createElement("option", { key: r, value: r }, r)))),
             /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Description"),
               /*#__PURE__*/React.createElement("textarea", { value: description, onChange: e => setDescription(e.target.value), style: { ...inp, minHeight: 70 }, placeholder: "What happened?" })),
-            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Linked Movement ID (optional)"),
-              /*#__PURE__*/React.createElement("input", { value: linkedMovementID, onChange: e => setLinkedMovementID(e.target.value), style: inp, placeholder: "e.g. MOV-123" })),
+            /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", { style: lbl }, "Linked Movement (optional — Return/Damage movements only)"),
+              /*#__PURE__*/React.createElement("select", { value: linkedMovementID, onChange: e => setLinkedMovementID(e.target.value), style: inp },
+                /*#__PURE__*/React.createElement("option", { value: "" }, "— None yet (link it later once recorded) —"),
+                returnMovements.map(mv => /*#__PURE__*/React.createElement("option", { key: mv.MovementID, value: mv.MovementID }, movLabel(mv))))),
             /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10 } },
               /*#__PURE__*/React.createElement("button", { onClick: () => setView("list"), style: { ...ghost, flex: 1 } }, "Cancel"),
               /*#__PURE__*/React.createElement("button", {
@@ -4552,6 +4599,7 @@ function App() {
   const [analyticsMovs, setAnalyticsMovs] = React.useState(null); // approved movs for analytics dispatch panel
   const [supportTickets, setSupportTickets] = React.useState([]);
   const [showSupportModal, setShowSupportModal] = React.useState(false);
+  const [returnMovements, setReturnMovements] = React.useState([]);
   const notify = msg => {
     setToast(msg);
     setTimeout(() => setToast(""), 5000);
@@ -4705,6 +4753,7 @@ function App() {
     load();
     loadCounts();
     loadTickets();
+    loadReturnMovements();
   }, [user]);
   // Fetch approved movements for analytics dispatch panel (lazy — only when tab is opened)
   React.useEffect(() => {
@@ -4731,6 +4780,17 @@ function App() {
       setSupportTickets(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error("Tickets:", e.message);
+    }
+  }
+  // v3.5: Return/Damage-type movements, fetched so Support Tickets can link to a real
+  // movement via dropdown instead of free-typed text. No movementType server filter for
+  // "any of these 4 types", so fetch a broad recent window and filter client-side.
+  async function loadReturnMovements() {
+    try {
+      const data = await api("getMovements", { includeLines: "false", limit: "300" });
+      setReturnMovements(Array.isArray(data) ? data.filter(m => RETURN_MOVEMENT_TYPES_FE.includes(m.MovementType)) : []);
+    } catch (e) {
+      console.error("Return movements:", e.message);
     }
   }
   async function approveOne(movID) {
@@ -6460,6 +6520,7 @@ function App() {
     user: user,
     staffDB: staffDB,
     products: products,
+    supportTickets: supportTickets,
     onClose: () => setShowList(false)
   }), showCountModal && /*#__PURE__*/React.createElement(StockCountModal, {
     products: products,
@@ -6505,10 +6566,11 @@ function App() {
   }), showSupportModal && /*#__PURE__*/React.createElement(SupportModal, {
     tickets: supportTickets,
     products: products,
+    returnMovements: returnMovements,
     user: user,
     onClose: () => setShowSupportModal(false),
     onDone: msg => notify(msg),
-    reload: loadTickets
+    reload: () => { loadTickets(); loadReturnMovements(); }
   }), /*#__PURE__*/React.createElement("div", { style: { height: 88 } }), /*#__PURE__*/React.createElement(BottomNav, {
     tab: tab, setTab: setTab, showList: showList, showSupportModal: showSupportModal,
     onMovements: function () { setShowList(true); }, onSupport: function () { setShowSupportModal(true); }, user: user
