@@ -518,6 +518,22 @@ function LoginScreen({
     setPin("");
     setError("");
   }
+  // Desktop: let the PIN also be typed on a physical keyboard or numeric keypad
+  // (NumLock on sends the same "0".."9" e.key values as the top-row digits), not
+  // just clicked on the on-screen pad. Placed above the early return so hook order
+  // stays identical whether or not a staff member has been picked yet.
+  React.useEffect(() => {
+    if (!selected) return;
+    function onKey(e) {
+      if (e.key >= "0" && e.key <= "9") {
+        handlePinKey(e.key);
+      } else if (e.key === "Backspace" || e.key === "Delete") {
+        clearPin();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected, pin]);
   if (!selected) {
     return /*#__PURE__*/React.createElement("div", {
       style: {
@@ -5332,12 +5348,13 @@ function HomeView(props) {
   );
 }
 
-function NavItems(user, showList, showSupportModal, showPurchasingModal, tab) {
+function NavItems(user, showList, showSupportModal, showPurchasingModal, tab, pendingCount) {
   var items = [
     { k: "home", label: "Home", icon: "🏠" },
     { k: "product", label: "Inventory", icon: "📦" },
     { k: "amazon", label: "Amazon", amazon: true },
     { k: "movements", label: "Movements", icon: "🔄" },
+    { k: "approvals", label: "Approvals", icon: "✅", count: pendingCount || 0 },
     { k: "purchasing", label: "Purchasing", icon: "🧾" },
     { k: "support", label: "Support", icon: "🎫" },
     { k: "analytics", label: "Analytics", icon: "📊" }
@@ -5362,56 +5379,58 @@ function NavItems(user, showList, showSupportModal, showPurchasingModal, tab) {
   return { items: items, active: active };
 }
 
-// Bottom tab bar — MOBILE ONLY (hidden ≥900px via .syoat-bottom-nav CSS in index.html).
-function BottomNav(props) {
-  var tab = props.tab, setTab = props.setTab, user = props.user, showList = props.showList;
-  var r = NavItems(user, showList, props.showSupportModal, props.showPurchasingModal, tab);
-  var items = r.items, active = r.active;
-  return /*#__PURE__*/React.createElement("div", { className: "syoat-bottom-nav", style: { position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 120, background: "rgba(253,249,241,0.94)", backdropFilter: "blur(10px)", borderTop: "1px solid #e7d9c4", padding: "8px 4px 18px" } },
-    items.map(function(it){
-      var on = active === it.k;
-      var handler = it.k === "movements" ? props.onMovements : it.k === "support" ? props.onSupport : it.k === "purchasing" ? props.onPurchasing : function(){ setTab(it.k); };
-      return /*#__PURE__*/React.createElement("button", { key: it.k, onClick: handler,
-        style: { flex: 1, background: "transparent", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: on ? "#bd5d38" : "#a89680", fontWeight: 700, fontSize: 9.5, fontFamily: "inherit" } },
-        it.amazon
-          ? /*#__PURE__*/React.createElement(AmazonIcon, { size: 20, color: on ? "#bd5d38" : "#2c211a" })
-          : /*#__PURE__*/React.createElement("span", { style: { fontSize: 18, lineHeight: 1, filter: on ? "none" : "grayscale(1) opacity(0.55)" } }, it.icon),
-        /*#__PURE__*/React.createElement("span", null, it.label)
-      );
-    })
-  );
-}
-
-// Left sidebar — DESKTOP ONLY (hidden <900px, pinned open ≥900px via .syoat-sidebar CSS in index.html).
+// Left nav — DESKTOP: pinned open sidebar (≥900px, via .syoat-sidebar CSS in index.html).
+// MOBILE (2026-07-20): same component becomes a hamburger-triggered slide-in drawer with an
+// overlay, replacing the old fixed bottom tab bar entirely — `open`/`onClose` only matter
+// below 900px; desktop CSS forces the drawer permanently visible regardless of `open`.
 function SideNav(props) {
-  var tab = props.tab, setTab = props.setTab, user = props.user, showList = props.showList;
-  var r = NavItems(user, showList, props.showSupportModal, props.showPurchasingModal, tab);
+  var tab = props.tab, setTab = props.setTab, user = props.user, showList = props.showList, open = props.open, onClose = props.onClose;
+  var r = NavItems(user, showList, props.showSupportModal, props.showPurchasingModal, tab, props.pendingCount);
   var items = r.items, active = r.active;
-  return /*#__PURE__*/React.createElement("div", { className: "syoat-sidebar" },
-    /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "16px 16px 14px", borderBottom: "1px solid #e7d9c4" } },
-      /*#__PURE__*/React.createElement("div", {
-        style: { width: 38, height: 38, borderRadius: 11, background: "#fff", border: "1px solid #e7d9c4", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }
-      }, /*#__PURE__*/React.createElement("img", { src: SYOAT_LOGO, alt: "Syoat", style: { width: "100%", height: "100%", objectFit: "contain", padding: 3 } })),
-      /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0, fontFamily: "Fraunces,serif", fontSize: 16, fontWeight: 600, color: "#2c211a" } }, "Inventory ERP")
-    ),
-    /*#__PURE__*/React.createElement("div", { style: { padding: "10px 10px", overflowY: "auto", flex: 1 } },
-      items.map(function(it){
-        var on = active === it.k;
-        var handler = it.k === "movements" ? props.onMovements : it.k === "support" ? props.onSupport : it.k === "purchasing" ? props.onPurchasing : function(){ setTab(it.k); };
-        return /*#__PURE__*/React.createElement("button", {
-          key: it.k,
-          onClick: handler,
-          style: { width: "100%", display: "flex", alignItems: "center", gap: 12, background: on ? "#2a201a" : "transparent", border: "none", borderRadius: 11, padding: "11px 12px", marginBottom: 3, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }
-        },
-          it.amazon
-            ? /*#__PURE__*/React.createElement(AmazonIcon, { size: 19, color: on ? "#f4ead8" : "#2c211a" })
-            : /*#__PURE__*/React.createElement("span", { style: { fontSize: 17, lineHeight: 1, filter: on ? "none" : "grayscale(1) opacity(0.6)" } }, it.icon),
-          /*#__PURE__*/React.createElement("span", { style: { fontSize: 13.5, fontWeight: 700, color: on ? "#f4ead8" : "#4a3f34" } }, it.label)
-        );
-      })
-    ),
-    /*#__PURE__*/React.createElement("div", { style: { padding: "12px 16px 16px", borderTop: "1px solid #e7d9c4", fontSize: 11, color: "#a89680" } },
-      user.name || "", " · ", user.role || ""
+  function go(it) {
+    var handler = it.k === "movements" ? props.onMovements : it.k === "support" ? props.onSupport : it.k === "purchasing" ? props.onPurchasing : function(){ setTab(it.k); };
+    handler();
+    if (onClose) onClose();
+  }
+  return /*#__PURE__*/React.createElement(React.Fragment, null,
+    /*#__PURE__*/React.createElement("div", {
+      className: "syoat-sidebar-overlay" + (open ? " open" : ""),
+      onClick: onClose
+    }),
+    /*#__PURE__*/React.createElement("div", { className: "syoat-sidebar" + (open ? " open" : "") },
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "16px 16px 14px", borderBottom: "1px solid #e7d9c4" } },
+        /*#__PURE__*/React.createElement("div", {
+          style: { width: 38, height: 38, borderRadius: 11, background: "#fff", border: "1px solid #e7d9c4", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }
+        }, /*#__PURE__*/React.createElement("img", { src: SYOAT_LOGO, alt: "Syoat", style: { width: "100%", height: "100%", objectFit: "contain", padding: 3 } })),
+        /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0, fontFamily: "Fraunces,serif", fontSize: 16, fontWeight: 600, color: "#2c211a" } }, "Inventory ERP"),
+        /*#__PURE__*/React.createElement("button", {
+          className: "syoat-sidebar-close", onClick: onClose,
+          style: { background: "none", border: "none", color: "#a89680", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: 4 }
+        }, "×")
+      ),
+      /*#__PURE__*/React.createElement("div", { style: { padding: "10px 10px", overflowY: "auto", flex: 1 } },
+        items.map(function(it){
+          var on = active === it.k;
+          return /*#__PURE__*/React.createElement("button", {
+            key: it.k,
+            onClick: function(){ go(it); },
+            style: { width: "100%", display: "flex", alignItems: "center", gap: 12, background: on ? "#2a201a" : "transparent", border: "none", borderRadius: 11, padding: "11px 12px", marginBottom: 3, cursor: "pointer", fontFamily: "inherit", textAlign: "left", position: "relative" }
+          },
+            /*#__PURE__*/React.createElement("span", { style: { position: "relative", display: "inline-flex" } },
+              it.amazon
+                ? /*#__PURE__*/React.createElement(AmazonIcon, { size: 19, color: on ? "#f4ead8" : "#2c211a" })
+                : /*#__PURE__*/React.createElement("span", { style: { fontSize: 17, lineHeight: 1, filter: on ? "none" : "grayscale(1) opacity(0.6)" } }, it.icon),
+              it.count > 0 && /*#__PURE__*/React.createElement("span", {
+                style: { position: "absolute", top: -5, right: -8, background: "#bd5d38", color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 8, padding: "0 4px", lineHeight: "13px", minWidth: 13, textAlign: "center" }
+              }, it.count)
+            ),
+            /*#__PURE__*/React.createElement("span", { style: { fontSize: 13.5, fontWeight: 700, color: on ? "#f4ead8" : "#4a3f34" } }, it.label)
+          );
+        })
+      ),
+      /*#__PURE__*/React.createElement("div", { style: { padding: "12px 16px 16px", borderTop: "1px solid #e7d9c4", fontSize: 11, color: "#a89680" } },
+        user.name || "", " · ", user.role || ""
+      )
     )
   );
 }
@@ -5447,6 +5466,22 @@ function PinConfirmModal({ user }) {
       }, 120);
     }
   }
+  // Desktop: same physical-keyboard/NumLock-numpad support as LoginScreen, plus
+  // Escape to cancel the confirmation (mirrors clicking the Cancel button below).
+  React.useEffect(function () {
+    if (!st.show) return;
+    function onKey(e) {
+      if (e.key >= "0" && e.key <= "9") {
+        digit(e.key);
+      } else if (e.key === "Backspace" || e.key === "Delete") {
+        setPin("");
+      } else if (e.key === "Escape") {
+        finish(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return function () { window.removeEventListener("keydown", onKey); };
+  }, [st.show, pin]);
   if (!st.show) return null;
   var dots = [0, 1, 2, 3];
   return /*#__PURE__*/React.createElement("div", {
@@ -5492,6 +5527,7 @@ function App() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
   const [tab, setTab] = React.useState("home");
+  const [showSidebar, setShowSidebar] = React.useState(false); // mobile hamburger drawer (2026-07-20)
   const [showMov, setShowMov] = React.useState(false);
   const [showList, setShowList] = React.useState(false);
   const [editingMov, setEditingMov] = React.useState(null); // draft movement being edited, or null
@@ -5910,7 +5946,7 @@ function App() {
       background: "#efe4d2",
       color: "#2c211a",
       fontFamily: "'Plus Jakarta Sans',system-ui,sans-serif",
-      paddingBottom: 50
+      paddingBottom: 24
     }
   }, toast && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5967,7 +6003,10 @@ function App() {
   )),
   /*#__PURE__*/React.createElement("div", {
     style: { position: "sticky", top: 0, zIndex: 60, background: "rgba(239,228,210,0.92)", backdropFilter: "blur(10px)", borderBottom: "1px solid #e7d9c4", padding: "10px 16px", display: "flex", alignItems: "center", gap: 11 }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "syoat-hamburger", onClick: function(){ setShowSidebar(true); }, title: "Menu",
+    style: { width: 38, height: 38, borderRadius: 11, border: "1px solid #e7d9c4", background: "#fdf9f1", color: "#2c211a", fontSize: 18, cursor: "pointer", flexShrink: 0, alignItems: "center", justifyContent: "center" }
+  }, "☰"), /*#__PURE__*/React.createElement("div", {
     style: { width: 44, height: 44, borderRadius: 13, background: "#fff", border: "1px solid #e7d9c4", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 2px 6px -3px rgba(0,0,0,0.2)" }
   }, /*#__PURE__*/React.createElement("img", { src: SYOAT_LOGO, alt: "Syoat", style: { width: "100%", height: "100%", objectFit: "contain", padding: 4 } })), /*#__PURE__*/React.createElement("div", {
     style: { flex: 1, minWidth: 0 }
@@ -5977,7 +6016,14 @@ function App() {
   }, "⟳"), /*#__PURE__*/React.createElement("button", {
     onClick: function(){ if (window.confirm("Log out of Syoat ERP?")) { setUser(null); CURRENT_PIN = ""; } }, title: user.name + " · tap to log out",
     style: { width: 40, height: 40, borderRadius: "50%", background: "#2a201a", color: "#f2e7d5", border: "none", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0, cursor: "pointer", position: "relative" }
-  }, (user.name || "?").split(" ").map(function(w){ return w[0] || ""; }).slice(0, 2).join("").toUpperCase(), /*#__PURE__*/React.createElement("span", { style: { position: "absolute", bottom: 1, right: 1, width: 9, height: 9, borderRadius: "50%", background: "#5f9e6a", border: "2px solid #efe4d2" } }))), /*#__PURE__*/React.createElement("div", {
+  }, (user.name || "?").split(" ").map(function(w){ return w[0] || ""; }).slice(0, 2).join("").toUpperCase(), /*#__PURE__*/React.createElement("span", { style: { position: "absolute", bottom: 1, right: 1, width: 9, height: 9, borderRadius: "50%", background: "#5f9e6a", border: "2px solid #efe4d2" } }))), !loading && drafts.length > 0 && tab !== "approvals" && /*#__PURE__*/React.createElement("div", {
+    onClick: function(){ setTab("approvals"); },
+    style: { cursor: "pointer", background: "#bd5d3814", borderBottom: "1px solid #bd5d3830", padding: "9px 16px", display: "flex", alignItems: "center", gap: 8 }
+  }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 13 } }, "⚠️"), /*#__PURE__*/React.createElement("span", {
+    style: { fontSize: 11.5, fontWeight: 700, color: "#8a3f24", flex: 1 }
+  }, drafts.length, " movement", drafts.length > 1 ? "s" : "", " waiting for your approval"), /*#__PURE__*/React.createElement("span", {
+    style: { fontSize: 14, color: "#bd5d38" }
+  }, "\u203a")), /*#__PURE__*/React.createElement("div", {
     className: "syoat-content",
     style: {
       maxWidth: 940,
@@ -5994,15 +6040,22 @@ function App() {
       color: "#fca5a5",
       fontSize: 13
     }
-  }, "❌ ", error), !loading && /*#__PURE__*/React.createElement(PendingBanner, {
-    drafts: drafts,
-    user: user,
-    products: products,
-    onApprove: approveOne,
-    onApproveAll: approveAll,
-    onEdit: m => setEditingMov(m),
-    onReject: rejectDraft
-  }), tab === "home" && /*#__PURE__*/React.createElement(HomeView, {
+  }, "❌ ", error), tab === "approvals" && (drafts.length > 0
+    ? /*#__PURE__*/React.createElement(PendingBanner, {
+        drafts: drafts,
+        user: user,
+        products: products,
+        onApprove: approveOne,
+        onApproveAll: approveAll,
+        onEdit: m => setEditingMov(m),
+        onReject: rejectDraft
+      })
+    : /*#__PURE__*/React.createElement("div", {
+        style: { textAlign: "center", padding: "48px 20px", color: "#a89680" }
+      }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 34, marginBottom: 10 } }, "✅"),
+         /*#__PURE__*/React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: "#4a3f34" } }, "All caught up"),
+         /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, marginTop: 4 } }, "No movements are waiting for approval right now."))
+  ), tab === "home" && /*#__PURE__*/React.createElement(HomeView, {
     user: user, products: products, stock: stock, alertThresholds: alertThresholds,
     totFBA: totFBA, totWH: totWH, drafts: drafts,
     onRecord: function(){ setShowMov(true); }, onAssemble: function(){ setShowAssemble(true); },
@@ -7529,12 +7582,10 @@ function App() {
     onClose: () => setShowPurchasingModal(false),
     onDone: msg => notify(msg),
     reload: () => { loadPurchaseOrders(); }
-  }), /*#__PURE__*/React.createElement("div", { className: "syoat-bottom-spacer", style: { height: 88 } }), /*#__PURE__*/React.createElement(BottomNav, {
-    tab: tab, setTab: setTab, showList: showList, showSupportModal: showSupportModal, showPurchasingModal: showPurchasingModal,
-    onMovements: function () { setShowList(true); }, onSupport: function () { setShowSupportModal(true); }, onPurchasing: function () { setShowPurchasingModal(true); }, user: user
   }), /*#__PURE__*/React.createElement(SideNav, {
     tab: tab, setTab: setTab, showList: showList, showSupportModal: showSupportModal, showPurchasingModal: showPurchasingModal,
-    onMovements: function () { setShowList(true); }, onSupport: function () { setShowSupportModal(true); }, onPurchasing: function () { setShowPurchasingModal(true); }, user: user
+    onMovements: function () { setShowList(true); }, onSupport: function () { setShowSupportModal(true); }, onPurchasing: function () { setShowPurchasingModal(true); }, user: user,
+    open: showSidebar, onClose: function () { setShowSidebar(false); }, pendingCount: drafts.length
   }), /*#__PURE__*/React.createElement(PinConfirmModal, { user: user }));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(

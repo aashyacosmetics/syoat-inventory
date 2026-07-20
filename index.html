@@ -28,20 +28,28 @@
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
     #splash p { animation: pulse 1.6s ease-in-out infinite; }
 
-    /* Navigation shell: mobile keeps the original fixed bottom tab bar;
-       desktop (≥900px) switches to a pinned left sidebar instead. */
-    .syoat-sidebar { display: none; }
-    .syoat-bottom-nav { display: flex; }
-    .syoat-bottom-spacer { display: block; }
+    /* Navigation shell (2026-07-20): mobile — hamburger button opens the sidebar as a
+       slide-in drawer with a dimmed overlay; desktop (≥900px) — sidebar is pinned open
+       permanently and the hamburger/overlay disappear. */
+    .syoat-hamburger { display: flex; align-items: center; justify-content: center; }
+    .syoat-sidebar {
+      display: flex; flex-direction: column;
+      position: fixed; top: 0; left: 0; bottom: 0; width: 250px;
+      background: #fdf9f1; border-right: 1px solid #e7d9c4; z-index: 140;
+      transform: translateX(-100%); transition: transform 0.25s ease;
+    }
+    .syoat-sidebar.open { transform: translateX(0); }
+    .syoat-sidebar-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(30,20,10,0.45); z-index: 135;
+    }
+    .syoat-sidebar-overlay.open { display: block; }
+    .syoat-sidebar-close { display: inline-flex; }
     @media (min-width: 900px) {
       .syoat-shell { padding-left: 250px; padding-bottom: 24px; }
-      .syoat-sidebar {
-        display: flex; flex-direction: column;
-        position: fixed; top: 0; left: 0; bottom: 0; width: 250px;
-        background: #fdf9f1; border-right: 1px solid #e7d9c4; z-index: 100;
-      }
-      .syoat-bottom-nav { display: none; }
-      .syoat-bottom-spacer { display: none; }
+      .syoat-hamburger { display: none; }
+      .syoat-sidebar { transform: none; z-index: 100; }
+      .syoat-sidebar-overlay { display: none !important; }
+      .syoat-sidebar-close { display: none; }
     }
 
     /* Desktop page-fit (≥900px only): mobile keeps every original layout value
@@ -66,7 +74,7 @@
 <div id="root"></div>
 
 <!-- App — all logic lives here; update only this file for new features -->
-<script src="syoat-app.js?v=20260720a"></script>
+<script src="syoat-app.js?v=20260720c"></script>
 
 </body>
 </html>
