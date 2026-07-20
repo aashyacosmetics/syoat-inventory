@@ -1225,6 +1225,197 @@ function MovEditModal({
   ));
 }
 
+// ─────────────────────────────────────────────────────────────
+//  GEO-TAGGED CAMERA — live viewfinder, burns GPS + address + time
+//  onto the photo at the moment of capture (2026-07-20)
+// ─────────────────────────────────────────────────────────────
+function GeoCameraModal({ onClose, onCapture, onFallback }) {
+  const videoRef = React.useRef(null);
+  const streamRef = React.useRef(null);
+  const [ready, setReady] = React.useState(false);
+  const [camError, setCamError] = React.useState("");
+  const [coords, setCoords] = React.useState(null); // {lat, lon, accuracy}
+  const [address, setAddress] = React.useState("");
+  const [geoStatus, setGeoStatus] = React.useState("locating"); // locating | ok | denied | unavailable
+  const [now, setNow] = React.useState(new Date());
+  const [capturing, setCapturing] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    navigator.mediaDevices?.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+      .then(stream => {
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play().catch(() => {}); }
+        setReady(true);
+      })
+      .catch(err => setCamError(err && err.message ? err.message : "Camera unavailable"));
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          if (cancelled) return;
+          const lat = pos.coords.latitude, lon = pos.coords.longitude, accuracy = pos.coords.accuracy;
+          setCoords({ lat, lon, accuracy });
+          setGeoStatus("ok");
+          fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=0`)
+            .then(r => r.json())
+            .then(d => { if (!cancelled && d && d.display_name) setAddress(d.display_name); })
+            .catch(() => {});
+        },
+        () => { if (!cancelled) setGeoStatus("denied"); },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+      );
+    } else {
+      setGeoStatus("unavailable");
+    }
+
+    const clock = setInterval(() => setNow(new Date()), 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(clock);
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  function stopStream() {
+    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+  }
+
+  function dtLine(d) {
+    return d.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" }) +
+      " " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  }
+
+  function capture() {
+    const video = videoRef.current;
+    if (!video || !ready) return;
+    setCapturing(true);
+    const MAX_DIM = 2048;
+    let w = video.videoWidth || 1280, h = video.videoHeight || 720;
+    if (w > MAX_DIM || h > MAX_DIM) {
+      const s = Math.min(MAX_DIM / w, MAX_DIM / h);
+      w = Math.round(w * s); h = Math.round(h * s);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, w, h);
+
+    // Overlay bar
+    const barH = Math.round(h * 0.17);
+    ctx.fillStyle = "rgba(18,14,10,0.64)";
+    ctx.fillRect(0, h - barH, w, barH);
+    ctx.fillStyle = "#4ade80";
+    const pinR = Math.max(4, Math.round(w * 0.006));
+    ctx.beginPath();
+    ctx.arc(Math.round(w * 0.035), h - barH + pinR + 8, pinR, 0, Math.PI * 2);
+    ctx.fill();
+
+    const pad = Math.round(w * 0.025);
+    const baseFont = Math.max(13, Math.round(w / 40));
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `700 ${baseFont}px Arial, sans-serif`;
+    const addrText = address ? (address.length > 70 ? address.slice(0, 67) + "…" : address) : "Address unavailable";
+    ctx.fillText(addrText, pad, h - barH + baseFont + 8);
+
+    ctx.font = `400 ${Math.round(baseFont * 0.82)}px Arial, sans-serif`;
+    ctx.fillStyle = "#e7e0d4";
+    const coordText = coords
+      ? `Lat ${coords.lat.toFixed(5)}°  Long ${coords.lon.toFixed(5)}°  (±${Math.round(coords.accuracy)}m)`
+      : "Location unavailable";
+    ctx.fillText(coordText, pad, h - barH + baseFont * 2 + 12);
+
+    const captureTime = new Date();
+    ctx.fillText(dtLine(captureTime), pad, h - barH + baseFont * 3 + 16);
+
+    ctx.font = `700 ${Math.round(baseFont * 0.7)}px Arial, sans-serif`;
+    ctx.fillStyle = "#bd5d38";
+    ctx.textAlign = "right";
+    ctx.fillText("Syoat ERP", w - pad, h - barH + baseFont * 0.9 + 4);
+    ctx.textAlign = "left";
+
+    const MAX_BYTES = 900 * 1024;
+    let q = 0.9;
+    let dataUrl = canvas.toDataURL("image/jpeg", q);
+    while (dataUrl.length * 0.75 > MAX_BYTES && q > 0.45) {
+      q = Math.round((q - 0.05) * 100) / 100;
+      dataUrl = canvas.toDataURL("image/jpeg", q);
+    }
+    onCapture({
+      name: `geo_${Date.now()}.jpg`,
+      dataUrl,
+      type: "image/jpeg",
+      size: (Math.round(dataUrl.length * 0.75) / 1024).toFixed(1) + " KB"
+    });
+    stopStream();
+    setCapturing(false);
+  }
+
+  function close() {
+    stopStream();
+    onClose();
+  }
+
+  return /*#__PURE__*/React.createElement("div", {
+    style: { position: "fixed", inset: 0, background: "#000", zIndex: 500, display: "flex", flexDirection: "column" }
+  },
+    /*#__PURE__*/React.createElement("div", {
+      style: { position: "absolute", top: 0, left: 0, right: 0, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", zIndex: 2, background: "linear-gradient(rgba(0,0,0,0.55),transparent)" }
+    },
+      /*#__PURE__*/React.createElement("div", { style: { color: "#fff", fontSize: 13, fontWeight: 700 } }, "📍 Geo-tagged Photo"),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: close,
+        style: { background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", fontSize: 20, width: 32, height: 32, borderRadius: 16, cursor: "pointer" }
+      }, "×")
+    ),
+    !camError && /*#__PURE__*/React.createElement("video", {
+      ref: videoRef,
+      autoPlay: true,
+      playsInline: true,
+      muted: true,
+      style: { flex: 1, width: "100%", objectFit: "cover", background: "#111" }
+    }),
+    camError && /*#__PURE__*/React.createElement("div", {
+      style: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", padding: 24, textAlign: "center", gap: 14 }
+    },
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 14 } }, "⚠️ Live camera unavailable: ", camError),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#bbb" } }, "You can still use your phone's regular camera — the photo just won't be geo-tagged in the picture itself."),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => { close(); onFallback && onFallback(); },
+        style: { background: "#a97b52", border: "none", color: "#fff", padding: "10px 18px", borderRadius: 8, cursor: "pointer", fontWeight: 700 }
+      }, "Use Regular Camera Instead")
+    ),
+    !camError && ready && /*#__PURE__*/React.createElement("div", {
+      style: { position: "absolute", left: 0, right: 0, bottom: 108, padding: "10px 16px", background: "linear-gradient(transparent, rgba(0,0,0,0.6))", color: "#fff", fontSize: 11, zIndex: 2 }
+    },
+      /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, marginBottom: 3 } },
+        geoStatus === "locating" ? "📍 Getting your location…" :
+        geoStatus === "denied" ? "📍 Location permission denied — photo will still save without a geotag." :
+        geoStatus === "unavailable" ? "📍 Location not supported on this device." :
+        (address || "📍 Location found")
+      ),
+      coords && /*#__PURE__*/React.createElement("div", { style: { color: "#cfc7b8" } },
+        `Lat ${coords.lat.toFixed(5)}°  Long ${coords.lon.toFixed(5)}°`
+      ),
+      /*#__PURE__*/React.createElement("div", { style: { color: "#cfc7b8", marginTop: 2 } }, dtLine(now))
+    ),
+    !camError && /*#__PURE__*/React.createElement("div", {
+      style: { position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", justifyContent: "center", padding: "20px 0 28px", background: "rgba(0,0,0,0.35)", zIndex: 2 }
+    },
+      /*#__PURE__*/React.createElement("button", {
+        onClick: capture,
+        disabled: !ready || capturing,
+        style: {
+          width: 68, height: 68, borderRadius: 34, background: "#fff",
+          border: "4px solid rgba(255,255,255,0.4)", cursor: ready ? "pointer" : "default",
+          opacity: capturing ? 0.6 : 1
+        }
+      })
+    )
+  );
+}
+
 function MovModal({
   products,
   stock,
@@ -1273,6 +1464,7 @@ function MovModal({
   const [compressing, setCompressing] = React.useState(0); // tracks in-flight image compressions
   const fileInputRef = React.useRef(null);
   const cameraInputRef = React.useRef(null);
+  const [showGeoCamera, setShowGeoCamera] = React.useState(false);
   const sd = SRC_DST[type] || {
     src: "",
     dst: ""
@@ -1410,7 +1602,7 @@ function MovModal({
     }
     setBusy(false);
   }
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
       inset: 0,
@@ -1809,7 +2001,8 @@ function MovModal({
     label: "Camera",
     ref: cameraInputRef,
     color: "#bd5d38",
-    sub: "Take photo"
+    sub: "Take photo",
+    action: "geocam"
   }, {
     icon: "🖼️",
     label: "Gallery",
@@ -1824,7 +2017,7 @@ function MovModal({
     sub: "Invoice / PDF"
   }].map(btn => /*#__PURE__*/React.createElement("button", {
     key: btn.label,
-    onClick: () => btn.ref.current && btn.ref.current.click(),
+    onClick: () => btn.action === "geocam" ? setShowGeoCamera(true) : (btn.ref.current && btn.ref.current.click()),
     type: "button",
     style: {
       background: btn.color + "12",
@@ -2008,7 +2201,11 @@ function MovModal({
       flex: 2,
       opacity: busy || compressing > 0 ? 0.7 : 1
     }
-  }, busy ? "Saving…" : compressing > 0 ? "Processing image…" : "Record Movement"))));
+  }, busy ? "Saving…" : compressing > 0 ? "Processing image…" : "Record Movement")))), showGeoCamera && /*#__PURE__*/React.createElement(GeoCameraModal, {
+    onClose: () => setShowGeoCamera(false),
+    onCapture: img => { setImages(prev => [...prev, img]); setShowGeoCamera(false); },
+    onFallback: () => { cameraInputRef.current && cameraInputRef.current.click(); }
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────
