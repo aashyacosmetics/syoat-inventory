@@ -116,6 +116,32 @@ function genRequestId() {
 // that gap without changing anything else about how writes are called.
 var CURRENT_PIN = "";
 
+// Session persistence (2026-07-23): keeps the logged-in identity (name/role/
+// permissions) across a page refresh via sessionStorage, so a refresh doesn't
+// dump the user back to the login screen. The PIN is deliberately stripped
+// before saving here — it is still never persisted — so the first write after
+// a restored session still needs the PIN typed into PinConfirmModal, same as
+// every write already requires. sessionStorage (not localStorage) is used so
+// this clears itself when the tab/browser actually closes, not just on refresh.
+function loadSessionUser() {
+  try {
+    var raw = sessionStorage.getItem("syoat_session_user");
+    if (!raw) return null;
+    var u = JSON.parse(raw);
+    return (u && u.email) ? u : null;
+  } catch (e) { return null; }
+}
+function saveSessionUser(u) {
+  try {
+    var safe = Object.assign({}, u);
+    delete safe.pin;
+    sessionStorage.setItem("syoat_session_user", JSON.stringify(safe));
+  } catch (e) {}
+}
+function clearSessionUser() {
+  try { sessionStorage.removeItem("syoat_session_user"); } catch (e) {}
+}
+
 // Per-action PIN re-confirmation (requested 2026-07-19): Lalith wants an explicit
 // "enter your PIN" popup before every submit/approve/reject/reverse — not just
 // the silent server-side check added in Step 0. Rather than editing every one of
@@ -5353,8 +5379,24 @@ function PinConfirmModal({ user }) {
     setPin(np);
     if (np.length === 4) {
       setTimeout(function () {
-        if (String(np) === String(user && user.pin)) finish(true);
-        else { setShake(true); setPin(""); setTimeout(function () { setShake(false); }, 500); }
+        if (user && user.pin) {
+          // Normal case: PIN already known in memory (fresh login, or a
+          // restored session that's already been backfilled — see the
+          // session-restore effect in App()). Fast local check.
+          if (String(np) === String(user.pin)) finish(true);
+          else { setShake(true); setPin(""); setTimeout(function () { setShake(false); }, 500); }
+        } else {
+          // Edge case (2026-07-23): a session was just restored after a
+          // refresh and the staff list hasn't finished loading yet, so there's
+          // no known-correct PIN in memory to check against locally. Rather
+          // than falsely reject a correct PIN with the shake animation, pass
+          // it straight through — Apps Script's requireStaff() independently
+          // validates every PIN server-side regardless (Step 0), so a wrong
+          // PIN here still fails, just with a server error instead of a shake
+          // instead of the instant local rejection.
+          CURRENT_PIN = np;
+          finish(true);
+        }
       }, 120);
     }
   }
@@ -5413,7 +5455,7 @@ function PinConfirmModal({ user }) {
 }
 
 function App() {
-  const [user, setUser] = React.useState(null);
+  const [user, setUser] = React.useState(loadSessionUser);
   const [products, setProducts] = React.useState([]);
   const [stock, setStock] = React.useState([]);
   const [drafts, setDrafts] = React.useState([]);
@@ -5572,8 +5614,20 @@ function App() {
           const perms = rolePerms[s.role] || rolePerms["Warehouse"];
           return { ...s, ...perms };
         });
-        // Cache enriched list in localStorage — used by timeout/error fallback so PINs stay current.
-        try { localStorage.setItem("syoat_staff_cache", JSON.stringify(enriched)); } catch {}
+        // Cache the staff list in localStorage for the timeout/error fallback —
+        // names/roles only, so the offline picker still works. PINs are
+        // deliberately stripped before writing (2026-07-23): localStorage is
+        // permanent, unlike the in-memory-only PIN handling everywhere else in
+        // the app, so a cached PIN here would defeat that. Practical effect: if
+        // the sheet is unreachable, staff can still be *selected* from the
+        // cached list, but checkPin() already refuses to authenticate against a
+        // missing `.pin` ("Logins didn't load (offline). Reload the page...") —
+        // so login during an outage now correctly requires a live connection
+        // instead of silently trusting a locally stored PIN.
+        try {
+          const cacheSafe = enriched.map(({ pin, ...rest }) => rest);
+          localStorage.setItem("syoat_staff_cache", JSON.stringify(cacheSafe));
+        } catch {}
         setStaffDB(enriched);
         setStaffLoadError(null);
         done = true;
@@ -5608,6 +5662,22 @@ function App() {
     loadPurchaseOrders();
     loadSuppliers();
   }, [user]);
+  // Session-restore backfill (2026-07-23): if `user` came back from
+  // sessionStorage after a refresh, it has no `.pin` (deliberately never
+  // persisted). The staff list load above already fetches everyone's PIN from
+  // App_Logins on every app boot regardless of this feature — this just
+  // copies the matching one into memory so PinConfirmModal's local check and
+  // CURRENT_PIN work the same as a fresh login. The person still has to type
+  // their PIN for the first write after a refresh, same as every write always
+  // requires; this only restores the ability to validate it locally.
+  React.useEffect(() => {
+    if (!user || user.pin || !staffDB) return;
+    const match = staffDB.find(s => s.email === user.email);
+    if (match && match.pin) {
+      CURRENT_PIN = match.pin;
+      setUser(u => (u ? { ...u, pin: match.pin } : u));
+    }
+  }, [user, staffDB]);
   // Fetch approved movements for analytics dispatch panel (lazy — only when tab is opened)
   React.useEffect(() => {
     if (!user || tab !== "analytics" || analyticsMovs !== null) return;
@@ -5795,6 +5865,7 @@ function App() {
     onLogin: async u => {
       setUser(u);
       CURRENT_PIN = u.pin || ""; // Step 0: kept in memory only, sent with every write for server-side validation
+      saveSessionUser(u); // 2026-07-23: identity (not PIN) survives a refresh
       // Check stock immediately after login — alert if anything is critical
       try {
         const [prods, stk] = await Promise.all([api("getProducts"), api("getStock")]);
@@ -5907,7 +5978,7 @@ function App() {
     onClick: load, title: "Sync now",
     style: { width: 38, height: 38, borderRadius: "50%", border: "1px solid #e7d9c4", background: "#fdf9f1", color: syncing ? "#bd5d38" : "#6f6152", fontSize: 16, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }
   }, "⟳"), /*#__PURE__*/React.createElement("button", {
-    onClick: function(){ if (window.confirm("Log out of Syoat ERP?")) { setUser(null); CURRENT_PIN = ""; } }, title: user.name + " · tap to log out",
+    onClick: function(){ if (window.confirm("Log out of Syoat ERP?")) { setUser(null); CURRENT_PIN = ""; clearSessionUser(); } }, title: user.name + " · tap to log out",
     style: { width: 40, height: 40, borderRadius: "50%", background: "#2a201a", color: "#f2e7d5", border: "none", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0, cursor: "pointer", position: "relative" }
   }, (user.name || "?").split(" ").map(function(w){ return w[0] || ""; }).slice(0, 2).join("").toUpperCase(), /*#__PURE__*/React.createElement("span", { style: { position: "absolute", bottom: 1, right: 1, width: 9, height: 9, borderRadius: "50%", background: "#5f9e6a", border: "2px solid #efe4d2" } }))), !loading && drafts.length > 0 && tab !== "approvals" && /*#__PURE__*/React.createElement("div", {
     onClick: function(){ setTab("approvals"); },
