@@ -82,21 +82,21 @@ const STAFF_DB_FALLBACK = [{
 }];
 // What each role can CREATE
 const CAN_CREATE_TYPES = {
-  Founder: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  "Co-Founder": ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  Owner: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  Admin: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  Manager: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  Founder: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  "Co-Founder": ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  Owner: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  Admin: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  Manager: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   // Warehouse Manager (added 2026-07-19): treated as Manager-tier — same movement-type
   // access as Manager. Update here if scope should differ.
-  "Warehouse Manager": ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  "Warehouse Manager": ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   // v3.4 (2026-07-19): Operations Manager (Sravanthi) does no warehouse/Amazon work —
   // scoped to Support Tickets only. No movement types creatable.
   "Operations Manager": [],
   // Warehouse ships from WH only — cannot touch FBA stock
-  Warehouse: ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  Warehouse: ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   // Alias (2026-07-19): Zubedha's App_Logins.Role now reads "Warehouse Operator" — same access as Warehouse.
-  "Warehouse Operator": ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  "Warehouse Operator": ["Stock In", "FBA Dispatch", "Website – WH Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Accounts: []
 };
 
@@ -276,16 +276,12 @@ const SRC_DST = {
     dst: "DAMAGE"
   },
   "Returns – to WH": {
-    src: "RETURNS",
+    src: "CUSTOMER",
     dst: "MAIN_WH"
   },
   "Returns – Damaged": {
-    src: "RETURNS",
-    dst: "DAMAGE"
-  },
-  "Return Received": {
     src: "CUSTOMER",
-    dst: "RETURNS"
+    dst: "DAMAGE"
   }
 };
 
@@ -304,8 +300,7 @@ const TYPE_LABEL = {
   "Samples":               "Samples / Office Use — WH → Samples",
   "Damage":                "Damage in Warehouse — WH → Damage",
   "Returns – to WH":       "Return → back to Warehouse (good stock)",
-  "Returns – Damaged":     "Return → mark Damaged (unsellable)",
-  "Return Received":       "Return Received — Customer → Returns"
+  "Returns – Damaged":     "Return → mark Damaged (unsellable)"
 };
 
 // Category tabs for the Record Movement form. Types are grouped by the task the
@@ -315,7 +310,7 @@ const TYPE_LABEL = {
 const TYPE_GROUPS = [
   { key: "receive", label: "📥 Receive",         types: ["Stock In", "FBA Receipt"] },
   { key: "ship",    label: "📤 Ship Orders",     types: ["FBA Dispatch", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch"] },
-  { key: "returns", label: "↩️ Returns",          types: ["Return Received", "Returns – to WH", "Returns – Damaged"] },
+  { key: "returns", label: "↩️ Returns",          types: ["Returns – to WH", "Returns – Damaged"] },
   { key: "adjust",  label: "🗑️ Damage / Samples", types: ["Damage", "Samples"] },
   { key: "setup",   label: "⚙️ Setup",           types: ["Opening Balance – WH", "Opening Balance – FBA"] }
 ];
@@ -1478,8 +1473,7 @@ function MovModal({
   const REASON_TYPES = {
     "Damage":            ["Expired", "Broken in transit", "Warehouse mishandling", "Manufacturing defect", "Other"],
     "Returns – Damaged":  ["Customer damaged", "Damaged in transit back", "Quality issue", "Other"],
-    "Returns – to WH":    ["Wrong item ordered", "Customer changed mind", "Size/fit issue", "Duplicate order", "Other"],
-    "Return Received":    ["Wrong item ordered", "Customer changed mind", "Size/fit issue", "Duplicate order", "Damaged/defective", "Other"],
+    "Returns – to WH":    ["Wrong item ordered", "Customer changed mind", "Size/fit issue", "Duplicate order", "Damaged/defective", "Other"],
   };
   const [reasonCode, setReasonCode] = React.useState("");
   // Optional link to an Approved Purchase Order — only shown/sent for Stock In,
@@ -2880,7 +2874,7 @@ const SUPPORT_TICKET_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Operations M
 // queries are about a new order, before or after delivery) — plus Return-type movements for
 // tickets opened after a physical return. Website – FBA Ship and FBA Dispatch are deliberately
 // excluded. Keep in sync with TICKET_LINKABLE_MOVEMENT_TYPES in AppScript.
-const TICKET_LINKABLE_MOVEMENT_TYPES_FE = ["Website – WH Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Return Received", "Returns – to WH", "Returns – Damaged", "Damage"];
+const TICKET_LINKABLE_MOVEMENT_TYPES_FE = ["Website – WH Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage"];
 const TICKET_LINK_OTHER = "__OTHER__";
 
 function SupportModal({ tickets, products, returnMovements, user, onClose, onDone, reload }) {
