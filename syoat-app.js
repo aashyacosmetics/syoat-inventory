@@ -1492,6 +1492,7 @@ function MovModal({
   const activeGroup = availGroups.find(g => g.key === category) || availGroups[0] || { types: [] };
   const [refNo, setRefNo] = React.useState("");
   const [carrier, setCarrier] = React.useState("");
+  const [destFC, setDestFC] = React.useState("");
   const [notes, setNotes] = React.useState("");
   // Controlled reason-codes (v3.3): replaces free-text-only "why" for the movement
   // types where it matters most for accountability, so it's analyzable later, not
@@ -1635,6 +1636,7 @@ function MovModal({
         destinationLocationID: sd.dst,
         referenceNumber: refNo,
         carrierTrackingNumber: carrier,
+        amazonDestinationFC: (type === "FBA Dispatch" || type === "FBA Receipt") ? destFC : "",
         notes: finalNotes,
         purchaseOrderID: type === "Stock In" ? purchaseOrderID : "",
         attachmentImages: uploads,
@@ -1797,6 +1799,13 @@ function MovModal({
     value: carrier,
     onChange: e => setCarrier(e.target.value),
     placeholder: "Delhivery / Blue Dart AWB",
+    style: inp
+  })), (type === "FBA Dispatch" || type === "FBA Receipt") && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, "Destination FC"), /*#__PURE__*/React.createElement("input", {
+    value: destFC,
+    onChange: e => setDestFC(e.target.value),
+    placeholder: "e.g. HYD3 — check the shipment plan from Pushpa",
     style: inp
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3498,6 +3507,9 @@ function regionOf(fc) { return FC_REGIONS[fc] || "Other"; }
 const FBA_SHIPMENT_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Admin", "Manager", "Warehouse Manager"];
 const FBA_SHIPMENT_STATUSES_FE = ["Working", "Shipped", "In Transit", "Received"];
 const FBA_SHIPMENT_STATUS_COLOR = { "Working": "#a97b52", "Shipped": "#6d5ae6", "In Transit": "#4a7c9e", "Received": "#4a7c59" };
+// Undoing a link is a correction, not routine — Founder/Co-Founder only, same
+// higher bar as Reversal. Pushpanjali (Warehouse Manager) can link but not unlink.
+const UNLINK_SHIPMENT_ROLES_FE = ["Founder", "Co-Founder"];
 
 function FbaReconcileTab(props) {
   var products = props.products, stock = props.stock, user = props.user, notify = props.notify;
@@ -3525,6 +3537,64 @@ function FbaReconcileTab(props) {
   var _linkFor = React.useState(null), linkForShipment = _linkFor[0], setLinkForShipment = _linkFor[1]; // ShipmentID currently picking a movement for
   var _unlinkedMovs = React.useState(null), unlinkedMovs = _unlinkedMovs[0], setUnlinkedMovs = _unlinkedMovs[1];
   var canManageShipments = FBA_SHIPMENT_ROLES_FE.includes(user.role);
+  var canUnlinkShipment = UNLINK_SHIPMENT_ROLES_FE.includes(user.role);
+
+  // --- Amazon Analytics state (2026-07-24) ---
+  // Scoped to FBA Dispatch/Receipt movements + ledger-reconciliation Stock_Counts
+  // rows, fetched by TYPE rather than reusing the main Analytics tab's capped
+  // 500-movements-of-any-type fetch — same reasoning as the openLinkPicker fix:
+  // a broad, type-agnostic cap can silently drop older FBA-specific records on
+  // a busy day.
+  var _amzMovs = React.useState(null), amzMovs = _amzMovs[0], setAmzMovs = _amzMovs[1];
+  var _amzErr = React.useState(""), amzErr = _amzErr[0], setAmzErr = _amzErr[1];
+  var _reconCounts = React.useState(null), reconCounts = _reconCounts[0], setReconCounts = _reconCounts[1];
+
+  async function loadAmazonAnalytics() {
+    setAmzErr("");
+    try {
+      var dispatch = await api("getMovements", { movementType: "FBA Dispatch", includeLines: "true", limit: "500" });
+      var receipt  = await api("getMovements", { movementType: "FBA Receipt",  includeLines: "true", limit: "500" });
+      var merged = (Array.isArray(dispatch) ? dispatch : []).concat(Array.isArray(receipt) ? receipt : []);
+      setAmzMovs(merged.filter(function (m) { return m.Status === "Approved"; }));
+    } catch (e) { setAmzErr(e.message); setAmzMovs([]); }
+    try {
+      var counts = await api("getStockCounts", { locationId: "AMAZON_FBA" });
+      setReconCounts((Array.isArray(counts) ? counts : []).filter(function (c) { return c.Reason === "FBA Ledger Reconcile"; }));
+    } catch (e) { setReconCounts([]); }
+  }
+
+  // --- Weekly ledger history (2026-07-24) ------------------------------
+  // Uploads happen once a week (Monday mornings) — this is a set of Monday
+  // snapshots, never a daily series. `ledgerHistory` holds every row ever
+  // saved to FBA_Ledger_Snapshots; `prevWeekQty` looks up the Monday BEFORE
+  // the current one for a given product+FC, so Locations–FC/Recommendations/
+  // Analytics can show a real "vs last Monday" delta instead of a bare number.
+  var _ledgerHist = React.useState(null), ledgerHistory = _ledgerHist[0], setLedgerHistory = _ledgerHist[1];
+  async function loadLedgerHistory() {
+    try {
+      var rows = await api("getFbaLedgerSnapshots", {});
+      setLedgerHistory(Array.isArray(rows) ? rows : []);
+    } catch (e) { setLedgerHistory([]); }
+  }
+  function ledgerHistoryDates() {
+    var set = {};
+    (ledgerHistory || []).forEach(function (r) { set[r.ReportDate] = true; });
+    return Object.keys(set).sort();
+  }
+  function prevWeekQty(productID, fc) {
+    var dates = ledgerHistoryDates();
+    if (dates.length < 2) return null;
+    var prevDate = dates[dates.length - 2]; // second-most-recent Monday
+    var row = (ledgerHistory || []).find(function (r) { return r.ProductID === productID && r.FC === fc && r.ReportDate === prevDate; });
+    return row ? { qty: parseFloat(row.Qty) || 0, date: prevDate } : null;
+  }
+  function deltaChip(curQty, prev) {
+    if (!prev) return /*#__PURE__*/React.createElement("span", { style: { fontSize: 9.5, color: "#c8b9a3" } }, "no prior week");
+    var d = curQty - prev.qty;
+    var c = d > 0 ? "#5f7a4f" : d < 0 ? "#b23a2e" : "#a89680";
+    var arrow = d > 0 ? "▲" : d < 0 ? "▼" : "→";
+    return /*#__PURE__*/React.createElement("span", { style: { fontSize: 9.5, fontWeight: 700, color: c } }, arrow + " " + (d > 0 ? "+" : "") + d + " vs " + prev.date);
+  }
 
   async function loadShipments() {
     setShpErr("");
@@ -3562,10 +3632,19 @@ function FbaReconcileTab(props) {
     setLinkForShipment(shipmentID);
     setUnlinkedMovs(null);
     try {
-      var all = await api("getMovements", {});
-      var candidates = (Array.isArray(all) ? all : []).filter(function (m) {
-        return (m.MovementType === "FBA Dispatch" || m.MovementType === "FBA Receipt") && m.Status === "Approved" && !m.AmazonShipmentID;
+      // Fetch each FBA type separately with lines included, rather than one
+      // getMovements({}) call across all types — that call caps at the most
+      // recent 100 movements of ANY type, which could silently drop an older
+      // FBA movement on a busy day. Also pulls product lines + destination FC
+      // so the picker shows enough to actually tell shipments apart, instead
+      // of just a bare MovementID + date.
+      var _dispatch = await api("getMovements", { movementType: "FBA Dispatch", includeLines: "true", limit: "200" });
+      var _receipt  = await api("getMovements", { movementType: "FBA Receipt",  includeLines: "true", limit: "200" });
+      var all = (Array.isArray(_dispatch) ? _dispatch : []).concat(Array.isArray(_receipt) ? _receipt : []);
+      var candidates = all.filter(function (m) {
+        return m.Status === "Approved" && !m.AmazonShipmentID;
       });
+      candidates.sort(function (a, b) { return _idNumFE(b.MovementID) - _idNumFE(a.MovementID); });
       setUnlinkedMovs(candidates);
     } catch (e) { setUnlinkedMovs([]); notify("❌ " + e.message); }
   }
@@ -3581,10 +3660,39 @@ function FbaReconcileTab(props) {
     setShpBusy(false);
   }
 
+  async function unlinkMovement(movementID, shipmentID) {
+    var reason = window.prompt("Reason for unlinking " + movementID + " from " + shipmentID + " (required):");
+    if (!reason || !reason.trim()) { if (reason !== null) notify("❌ A reason is required to unlink."); return; }
+    setShpBusy(true);
+    try {
+      await apiWrite("unlinkMovementFromShipment", user.email, { movementID: movementID, reason: reason.trim() });
+      notify("✅ Unlinked " + movementID + " from " + shipmentID);
+      loadShipments();
+    } catch (e) { notify("❌ " + e.message); }
+    setShpBusy(false);
+  }
+
   function nameOfProduct(pid) { var p = (products || []).find(function (x) { return x.ProductID === pid; }); return p ? p.ProductName : pid; }
+  function _idNumFE(v) { var m = String(v == null ? "" : v).match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : 0; }
+  // Shared header treatment (2026-07-24 visual pass) so all 5 sub-tabs read
+  // as one consistent module instead of each having grown its own header style.
+  function sectionHead(icon, title, subtitle) {
+    return /*#__PURE__*/React.createElement("div", { style: { marginBottom: 10 } },
+      /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 16, fontWeight: 600, color: "#2c211a" } }, icon + " " + title),
+      subtitle && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680", marginTop: 1 } }, subtitle));
+  }
 
   React.useEffect(function () {
     if (sub === "shipments" && shipments === null) loadShipments();
+    // Analytics needs shipment data too (shipment plan accuracy), plus its own
+    // movement/reconciliation data — load whichever piece isn't loaded yet.
+    if (sub === "analytics") {
+      if (shipments === null) loadShipments();
+      if (amzMovs === null) loadAmazonAnalytics();
+    }
+    // Locations–FC, Recommendations, and Analytics all need weekly ledger
+    // history for their "vs last Monday" deltas/trend.
+    if ((sub === "fc" || sub === "reco" || sub === "analytics") && ledgerHistory === null) loadLedgerHistory();
   }, [sub]);
 
   function splitCSV(line) { var out = [], cur = "", q = false; for (var i = 0; i < line.length; i++) { var c = line[i]; if (c === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; } else if (c === "," && !q) { out.push(cur); cur = ""; } else cur += c; } out.push(cur); return out; }
@@ -3651,9 +3759,24 @@ function FbaReconcileTab(props) {
     (async function () {
       try {
         var items = preview.filter(function (x) { return x.delta !== 0; }).map(function (x) { return { productID: x.productID, ledgerQty: x.ledger }; });
-        if (!items.length) { notify("✅ FBA already matches the ledger — nothing to adjust."); resetUp(); if (props.onCountCreated) props.onCountCreated(); return; }
+        // Flatten the FULL per-product-per-FC breakdown (not just the delta
+        // products) so week-over-week history has every FC's real number for
+        // this Monday's upload, not only the ones that happened to need an
+        // adjustment. Source: the same `ledger` state Locations–FC/Recommendations
+        // already read from.
+        var fcSnapshot = [];
+        (ledger && ledger.products || []).forEach(function (p) {
+          (p.perFC || []).forEach(function (fc) {
+            fcSnapshot.push({ productID: p.productID, fc: fc.fc, qty: fc.qty, sold: fc.sold });
+          });
+        });
+        // A "perfectly matched" week (no adjustments needed) must NOT skip
+        // saving this week's history row — only skip the whole call if there's
+        // truly nothing to send at all (no deltas AND no FC breakdown, e.g. an
+        // empty/corrupt parse).
+        if (!items.length && !fcSnapshot.length) { notify("✅ FBA already matches the ledger — nothing to adjust."); resetUp(); if (props.onCountCreated) props.onCountCreated(); return; }
         var fp = payloadRef.current || {};
-        var res = await apiWritePost("createFbaReconciliation", user.email, { items: items, fileText: fp.text, fileName: fp.name, fileMime: fp.mime, reportDate: reportDate });
+        var res = await apiWritePost("createFbaReconciliation", user.email, { items: items, fileText: fp.text, fileName: fp.name, fileMime: fp.mime, reportDate: reportDate, fcSnapshot: fcSnapshot });
         notify("✅ " + (res.appliedCount != null ? res.appliedCount : items.length) + " product(s) synced to Amazon FBA — stock updated." + (res.driveUrl ? " Ledger archived to Drive." : ""));
         resetUp(); if (props.onCountCreated) props.onCountCreated();
       } catch (e) { notify("❌ " + e.message); }
@@ -3662,9 +3785,20 @@ function FbaReconcileTab(props) {
   }
   function resetUp() { setStep("upload"); setPreview([]); setUnmapped([]); setError(""); setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
 
-  var hero = /*#__PURE__*/React.createElement("div", { style: { background: "linear-gradient(140deg,#241b14,#463017)", borderRadius: 18, padding: "18px", marginBottom: 14, color: "#f2e7d5" } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } }, /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 46, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 32, color: "#241b14" })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 600 } }, "Amazon FBA"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Weekly ledger · fulfilment-centre stock · shipment plan"))));
+  // Freshness chip (2026-07-24): uploads only ever happen weekly, Monday
+  // mornings — so "how stale is our data" is a meaningful, always-visible
+  // signal here, not decoration. >8 days means a Monday was likely missed.
+  var daysSinceUpload = null;
+  if (ledger && ledger.reportDate) {
+    var _rd = new Date(ledger.reportDate);
+    if (!isNaN(_rd.getTime())) daysSinceUpload = Math.floor((Date.now() - _rd.getTime()) / 86400000);
+  }
+  var freshChip = daysSinceUpload === null
+    ? /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: "#c9b49a" } }, "No ledger uploaded yet")
+    : /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: daysSinceUpload > 8 ? "#f0a882" : "#c9e6b4", background: daysSinceUpload > 8 ? "#5a3a24" : "#2f4a30", padding: "3px 9px", borderRadius: 20 } }, daysSinceUpload > 8 ? "⚠️ " + daysSinceUpload + "d since last Monday upload" : daysSinceUpload + "d since last Monday upload");
+  var hero = /*#__PURE__*/React.createElement("div", { style: { background: "linear-gradient(140deg,#241b14,#463017)", borderRadius: 18, padding: "18px", marginBottom: 14, color: "#f2e7d5" } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } }, /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 46, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 32, color: "#241b14" })), /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 600 } }, "Amazon FBA"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Weekly Monday ledger · FC stock · shipments · analytics"))), /*#__PURE__*/React.createElement("div", { style: { marginTop: 12, display: "flex", justifyContent: "flex-end" } }, freshChip));
 
-  var SUBS = [{ k: "upload", l: "⬆️ Upload" }, { k: "fc", l: "🏬 Locations – FC" }, { k: "reco", l: "📦 Recommendations" }, { k: "shipments", l: "🚢 Shipments" }];
+  var SUBS = [{ k: "upload", l: "⬆️ Upload" }, { k: "fc", l: "🏬 Locations – FC" }, { k: "reco", l: "📦 Recommendations" }, { k: "shipments", l: "🚢 Shipments" }, { k: "analytics", l: "📊 Analytics" }];
   var subnav = /*#__PURE__*/React.createElement("div", { style: { display: "flex", background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 13, padding: 4, gap: 3, marginBottom: 14 } }, SUBS.map(function (x) { var on = sub === x.k; return /*#__PURE__*/React.createElement("button", { key: x.k, onClick: function () { setSub(x.k); }, style: { flex: 1, border: "none", background: on ? "#2a201a" : "transparent", color: on ? "#f4ead8" : "#6f6152", padding: "9px 4px", borderRadius: 9, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", boxShadow: on ? "0 1px 4px rgba(0,0,0,0.15)" : "none" } }, x.l); }));
 
   var guide = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 14 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 16, fontWeight: 600, marginBottom: 6 } }, "📋 How to pull this report"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: "#6f6152", lineHeight: 1.7 } }, "Seller Central → Reports → Fulfilment → ", /*#__PURE__*/React.createElement("b", null, "Inventory Ledger"), " → View: ", /*#__PURE__*/React.createElement("b", null, "Summary"), " → latest date → Download (CSV or TXT)."), /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, fontSize: 11.5, color: "#5f7a4f", fontWeight: 600 } }, "✅ Right file: Inventory Ledger — Summary"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#b23a2e", fontWeight: 600 } }, "❌ Not the Detailed view · Not All Orders · Not Manage Inventory"));
@@ -3674,14 +3808,14 @@ function FbaReconcileTab(props) {
       var totAdj = preview.filter(function (x) { return x.delta !== 0; }).length;
       return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", margin: "2px 2px 10px" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 600 } }, "Reconcile preview"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680" } }, reportDate ? "Ledger date " + reportDate : "")), /*#__PURE__*/React.createElement("div", { style: { ...card, padding: "6px 14px 10px" } }, /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, padding: "9px 0", borderBottom: "1px solid #e7d9c4", fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "#a89680", fontWeight: 700 } }, /*#__PURE__*/React.createElement("span", null, "Product"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "System"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Ledger"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Δ")), preview.map(function (x) { var dc = x.delta === 0 ? "#a89680" : x.delta > 0 ? "#5f7a4f" : "#b23a2e"; return /*#__PURE__*/React.createElement("div", { key: x.productID, style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #f0ebe2", fontSize: 12.5 } }, /*#__PURE__*/React.createElement("span", { style: { fontWeight: 600, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (x.name || x.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600, color: "#6f6152" } }, x.sys), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600 } }, x.ledger), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 700, color: dc } }, x.delta > 0 ? "+" + x.delta : x.delta)); })), unmapped.length > 0 && /*#__PURE__*/React.createElement("div", { style: { background: "#f4e7c8", border: "1px solid #e8d09a", borderRadius: 12, padding: "10px 13px", marginTop: 10, fontSize: 11.5, color: "#6b5326" } }, /*#__PURE__*/React.createElement("b", null, "⚠️ " + unmapped.length + " unmapped ASIN(s) — not adjusted: "), unmapped.map(function (u) { return u.asin + " (" + u.qty + ")"; }).join(", ")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#6f6152", margin: "12px 2px" } }, totAdj + " product(s) will get an adjustment count at Amazon FBA, pending Manager approval in the Stock Count tab."), /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 } }, /*#__PURE__*/React.createElement("button", { onClick: resetUp, disabled: busy, style: { border: "1px solid #e0d2bd", background: "transparent", color: "#6f6152", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 600, cursor: "pointer" } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: confirmImport, disabled: busy, style: { border: "none", background: busy ? "#c8b9a3" : "#2a201a", color: "#f4ead8", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, cursor: busy ? "wait" : "pointer" } }, busy ? "Saving…" : "Confirm · create " + totAdj + " count(s)")));
     }
-    return /*#__PURE__*/React.createElement("div", null, guide, /*#__PURE__*/React.createElement("div", { onDragOver: function (e) { e.preventDefault(); setDrag(true); }, onDragLeave: function () { setDrag(false); }, onDrop: function (e) { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }, onClick: function () { if (fileRef.current) fileRef.current.click(); }, style: { border: "2px dashed " + (drag ? "#bd5d38" : "#e0d2bd"), borderRadius: 16, padding: "40px 20px", textAlign: "center", cursor: "pointer", background: drag ? "#bd5d3808" : "#f5ecdc" } }, /*#__PURE__*/React.createElement("input", { ref: fileRef, type: "file", accept: ".csv,.txt,.tsv", style: { display: "none" }, onChange: function (e) { handleFile(e.target.files[0]); } }), /*#__PURE__*/React.createElement("div", { style: { fontSize: 34 } }, "⬆️"), /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 15, color: "#2c211a", marginTop: 8 } }, "Choose Ledger file or drop here"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680", marginTop: 4 } }, "CSV or TXT · nothing changes until you confirm the preview")), error && /*#__PURE__*/React.createElement("div", { style: { background: "#f3dcd5", border: "1px solid #e3b7ad", borderRadius: 12, padding: "12px 15px", marginTop: 12, fontSize: 12.5, color: "#b23a2e", fontWeight: 600 } }, "❌ " + error));
+    return /*#__PURE__*/React.createElement("div", null, sectionHead("⬆️", "Upload Weekly Ledger", "Amazon publishes this once a week, Monday mornings — one upload = one Monday snapshot, not a daily feed"), guide, /*#__PURE__*/React.createElement("div", { onDragOver: function (e) { e.preventDefault(); setDrag(true); }, onDragLeave: function () { setDrag(false); }, onDrop: function (e) { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }, onClick: function () { if (fileRef.current) fileRef.current.click(); }, style: { border: "2px dashed " + (drag ? "#bd5d38" : "#e0d2bd"), borderRadius: 16, padding: "40px 20px", textAlign: "center", cursor: "pointer", background: drag ? "#bd5d3808" : "#f5ecdc" } }, /*#__PURE__*/React.createElement("input", { ref: fileRef, type: "file", accept: ".csv,.txt,.tsv", style: { display: "none" }, onChange: function (e) { handleFile(e.target.files[0]); } }), /*#__PURE__*/React.createElement("div", { style: { fontSize: 34 } }, "⬆️"), /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 15, color: "#2c211a", marginTop: 8 } }, "Choose Ledger file or drop here"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680", marginTop: 4 } }, "CSV or TXT · nothing changes until you confirm the preview")), error && /*#__PURE__*/React.createElement("div", { style: { background: "#f3dcd5", border: "1px solid #e3b7ad", borderRadius: 12, padding: "12px 15px", marginTop: 12, fontSize: 12.5, color: "#b23a2e", fontWeight: 600 } }, "❌ " + error));
   }
 
   function emptyLedger(msg) { return /*#__PURE__*/React.createElement("div", { style: { ...card, textAlign: "center", padding: 30, color: "#a89680", fontSize: 13 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 26, marginBottom: 8 } }, "🏬"), msg, /*#__PURE__*/React.createElement("button", { onClick: function () { setSub("upload"); }, style: { display: "block", margin: "14px auto 0", border: "none", background: "#2a201a", color: "#f4ead8", borderRadius: 11, padding: "9px 18px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" } }, "Go to Upload")); }
 
   function fcTab() {
     if (!ledger || !ledger.products || !ledger.products.length) return emptyLedger("Upload a ledger first to see fulfilment-centre stock.");
-    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680", margin: "0 2px 10px" } }, "Per FNSKU · grouped by region · ledger " + (ledger.reportDate || "") + " (" + ledger.reportDays + "-day)"), ledger.products.slice().sort(function (a, b) { return b.total - a.total; }).map(function (p) {
+    return /*#__PURE__*/React.createElement("div", null, sectionHead("🏬", "Fulfilment-Centre Stock", "Per FNSKU, grouped by region · from the " + (ledger.reportDate || "latest") + " Monday upload (" + ledger.reportDays + "-day report)"), ledger.products.slice().sort(function (a, b) { return b.total - a.total; }).map(function (p) {
       var maxfc = p.perFC.length ? p.perFC[0].qty : 1;
       var byReg = {};
       p.perFC.forEach(function (fc) { var r = regionOf(fc.fc); (byReg[r] = byReg[r] || []).push(fc); });
@@ -3694,7 +3828,10 @@ function FbaReconcileTab(props) {
           return /*#__PURE__*/React.createElement("div", { key: r },
             /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 6, borderTop: "1px solid #e7d9c4" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, color: "#bd5d38", textTransform: "uppercase", letterSpacing: "0.05em" } }, r), /*#__PURE__*/React.createElement("span", { style: { fontSize: 10.5, color: "#a89680" } }, rtot + " units" + (rsold > 0 ? " · −" + rsold + " sold" : ""))),
             fcs.map(function (fc) {
-              return /*#__PURE__*/React.createElement("div", { key: fc.fc, style: { display: "flex", alignItems: "center", gap: 9, padding: "5px 0 5px 6px" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 11.5, fontWeight: 600, color: "#2c211a", width: 48, flexShrink: 0 } }, fc.fc), /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 5, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, fc.qty / maxfc * 100) + "%", background: "#a97b52" } })), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 13, fontWeight: 600, width: 38, textAlign: "right" } }, fc.qty), /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: fc.sold > 0 ? "#bd5d38" : "#c8b9a3", width: 46, textAlign: "right" } }, fc.sold > 0 ? "−" + fc.sold : "—"));
+              var prev = prevWeekQty(p.productID, fc.fc);
+              return /*#__PURE__*/React.createElement("div", { key: fc.fc, style: { padding: "5px 0 5px 6px" } },
+                /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 9 } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 11.5, fontWeight: 600, color: "#2c211a", width: 48, flexShrink: 0 } }, fc.fc), /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 5, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, fc.qty / maxfc * 100) + "%", background: "#a97b52" } })), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 13, fontWeight: 600, width: 38, textAlign: "right" } }, fc.qty), /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: fc.sold > 0 ? "#bd5d38" : "#c8b9a3", width: 46, textAlign: "right" } }, fc.sold > 0 ? "−" + fc.sold : "—")),
+                /*#__PURE__*/React.createElement("div", { style: { textAlign: "right", marginTop: 1 } }, deltaChip(fc.qty, prev)));
             }));
         }));
     }));
@@ -3735,6 +3872,7 @@ function FbaReconcileTab(props) {
     }).sort(function (a, b) { return b.shipTotal - a.shipTotal || a.cover - b.cover; });
     var SC = { ship: { c: "#b23a2e", bg: "#f3dcd5", t: "Ship now" }, ok: { c: "#5f7a4f", bg: "#e2e8d3", t: "Healthy" }, idle: { c: "#a89680", bg: "#eee6d9", t: "No sales" } };
     return /*#__PURE__*/React.createElement("div", null,
+      sectionHead("📦", "Restock Recommendations", "Advisory only — nothing here writes anything until you plan a shipment"),
       /*#__PURE__*/React.createElement("div", { style: { background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 12, padding: "10px 13px", marginBottom: 12, fontSize: 11.5, color: "#6f6152", lineHeight: 1.6 } }, "Each centre is checked on its own cover (over " + days + "-day sales). Refill any FC below ", /*#__PURE__*/React.createElement("b", null, TRANSIT_DAYS + " days"), ", up to ", /*#__PURE__*/React.createElement("b", null, TARGET_DAYS + " days"), ". Totals rounded to whole cartons — ", /*#__PURE__*/React.createElement("b", null, "36 singles · 10 combos"), "."),
       rows.map(function (r) {
         var sc = SC[r.status];
@@ -3752,7 +3890,10 @@ function FbaReconcileTab(props) {
                     return /*#__PURE__*/React.createElement("div", { key: rg, style: { marginTop: 7 } },
                       /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 10.5, fontWeight: 700, color: "#bd5d38", textTransform: "uppercase", letterSpacing: "0.05em" } }, /*#__PURE__*/React.createElement("span", null, rg), /*#__PURE__*/React.createElement("span", null, rtot + " u")),
                       list.map(function (a) {
-                        return /*#__PURE__*/React.createElement("div", { key: a.fc, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0 4px 6px", fontSize: 12 } }, /*#__PURE__*/React.createElement("span", { style: { color: "#2c211a", fontWeight: 600 } }, a.fc + "  ·  now " + a.stock), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontWeight: 700, color: "#2c211a" } }, "send " + a.units));
+                        var prev = prevWeekQty(r.p.productID, a.fc);
+                        return /*#__PURE__*/React.createElement("div", { key: a.fc, style: { padding: "4px 0 4px 6px" } },
+                          /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 } }, /*#__PURE__*/React.createElement("span", { style: { color: "#2c211a", fontWeight: 600 } }, a.fc + "  ·  now " + a.stock), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontWeight: 700, color: "#2c211a" } }, "send " + a.units)),
+                          /*#__PURE__*/React.createElement("div", { style: { textAlign: "right", marginTop: 1 } }, deltaChip(a.stock, prev), prev && /*#__PURE__*/React.createElement("span", { style: { fontSize: 9, color: "#c8b9a3", marginLeft: 5 } }, prev.qty >= a.stock ? "— refill not yet reflected" : "— refill likely landed")));
                       }));
                   })))
             : /*#__PURE__*/React.createElement("div", { style: { marginTop: 11, fontSize: 11.5, color: "#5f7a4f", fontWeight: 600, textAlign: "center" } }, r.status === "idle" ? "No recent FBA sales — no shipment needed." : "✅ All centres above their minimum — no shipment needed."));
@@ -3762,6 +3903,7 @@ function FbaReconcileTab(props) {
 
   function shipmentsTab() {
     return /*#__PURE__*/React.createElement("div", null,
+      sectionHead("🚢", "Shipment Tracking", "Plan → link an approved movement → advance status → done. Zubedha's FBA Dispatch/Receipt movements are separate — link them here once approved."),
       shpErr && /*#__PURE__*/React.createElement("div", { style: { background: "#fbeae7", color: "#b23a2e", padding: "8px 12px", borderRadius: 8, fontSize: 12, marginBottom: 12 } }, shpErr),
       canManageShipments && !shpFormOpen && /*#__PURE__*/React.createElement("button", { onClick: function () { setShpFormOpen(true); }, style: { ...btnS(), width: "100%", marginBottom: 14 } }, "+ New Shipment"),
       shpFormOpen && /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 14 } },
@@ -3794,9 +3936,15 @@ function FbaReconcileTab(props) {
               ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No unlinked, Approved FBA Dispatch/Receipt movements found.")
               : /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 6 } },
                   unlinkedMovs.map(function (m) {
-                    return /*#__PURE__*/React.createElement("button", { key: m.MovementID, disabled: shpBusy, onClick: function () { linkMovement(m.MovementID); }, style: { textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "1px solid #e7d9c4", background: "#f8f4ef", cursor: "pointer", fontSize: 12 } },
-                      /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700 } }, m.MovementID + " · " + m.MovementType),
-                      /*#__PURE__*/React.createElement("div", { style: { color: "#a89680", fontSize: 11 } }, m.MovementDateTime));
+                    var fc = m.AmazonDestinationFC || "";
+                    var lineTxt = (m.lines || []).map(function (l) { return nameOfProduct(l.ProductID) + " ×" + l.Quantity; }).join(", ");
+                    return /*#__PURE__*/React.createElement("button", { key: m.MovementID, disabled: shpBusy, onClick: function () { linkMovement(m.MovementID); }, style: { textAlign: "left", padding: "9px 10px", borderRadius: 8, border: "1px solid #e7d9c4", background: "#f8f4ef", cursor: "pointer", fontSize: 12 } },
+                      /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline" } },
+                        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700 } }, m.MovementID + " · " + m.MovementType),
+                        fc && /*#__PURE__*/React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, color: "#bd5d38" } }, "FC " + fc)),
+                      /*#__PURE__*/React.createElement("div", { style: { color: "#5a4a3a", fontSize: 11, marginTop: 2 } }, lineTxt || "(no product lines)"),
+                      /*#__PURE__*/React.createElement("div", { style: { color: "#a89680", fontSize: 10.5, marginTop: 2 } }, m.MovementDateTime + (m.CarrierTrackingNumber ? " · " + m.CarrierTrackingNumber : "")),
+                      m.Notes && /*#__PURE__*/React.createElement("div", { style: { color: "#a89680", fontSize: 10.5, marginTop: 2, fontStyle: "italic" } }, m.Notes));
                   })))),
       shipments === null
         ? /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", color: "#a89680", fontSize: 13, padding: "20px 0" } }, "Loading shipments…")
@@ -3821,13 +3969,152 @@ function FbaReconcileTab(props) {
                         /*#__PURE__*/React.createElement("span", null, nameOfProduct(l.ProductID)),
                         /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: ok ? "#4a7c59" : (recvOrShip > 0 ? "#a97b52" : "#a89680") } }, recvOrShip + " / " + ord));
                     })),
+                  (s.linkedMovements || []).length > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 9, paddingTop: 8, borderTop: "1px solid #e7d9c4" } },
+                    /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 } }, "Linked movements"),
+                    s.linkedMovements.map(function (m) {
+                      return /*#__PURE__*/React.createElement("div", { key: m.MovementID, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#5a4a3a", padding: "3px 0" } },
+                        /*#__PURE__*/React.createElement("span", null, m.MovementID + " · " + m.MovementType + (m.AmazonDestinationFC ? " · FC " + m.AmazonDestinationFC : "") + (m.Status !== "Approved" ? " · " + m.Status : "")),
+                        canUnlinkShipment && /*#__PURE__*/React.createElement("button", { disabled: shpBusy, onClick: function () { unlinkMovement(m.MovementID, s.ShipmentID); }, style: { border: "none", background: "none", color: "#b23a2e", fontSize: 10.5, fontWeight: 700, cursor: "pointer", textDecoration: "underline" } }, "Unlink"));
+                    })),
                   canManageShipments && /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" } },
                     nextStatus && /*#__PURE__*/React.createElement("button", { disabled: shpBusy, onClick: function () { advanceShipment(s.ShipmentID, nextStatus); }, style: { ...btnS("#4a7c59"), fontSize: 11, padding: "5px 10px" } }, "Mark " + nextStatus),
                     /*#__PURE__*/React.createElement("button", { onClick: function () { openLinkPicker(s.ShipmentID); }, style: { ...ghost, fontSize: 11, padding: "5px 10px" } }, "🔗 Link Movement")));
               })));
   }
 
-  return /*#__PURE__*/React.createElement("div", null, hero, subnav, sub === "upload" ? uploadTab() : sub === "fc" ? fcTab() : sub === "shipments" ? shipmentsTab() : recoTab());
+  // Amazon Analytics (2026-07-24) — four panels, scoped narrowly to FBA data
+  // rather than duplicating the main Analytics tab. See
+  // Amazon_Module_Documentation.md Section 4e for the full spec and the known
+  // constraint on panel 3 (no persisted ledger history, snapshot-only).
+  function monthKey(dtStr) {
+    var d = new Date(dtStr);
+    if (isNaN(d.getTime())) return "Unknown";
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  }
+  function analyticsTab() {
+    // --- Panel 1: FBA dispatch volume & trend ---------------------------
+    var dispatchByMonth = {};
+    var dispatchTotalAll = 0;
+    (amzMovs || []).forEach(function (m) {
+      if (m.MovementType !== "FBA Dispatch") return;
+      var mk = monthKey(m.MovementDateTime);
+      var sum = (m.lines || []).reduce(function (a, l) { return a + (parseFloat(l.Quantity) || 0); }, 0);
+      dispatchByMonth[mk] = (dispatchByMonth[mk] || 0) + sum;
+      dispatchTotalAll += sum;
+    });
+    var monthRows = Object.keys(dispatchByMonth).sort().slice(-6);
+    var maxMonth = Math.max.apply(null, monthRows.map(function (k) { return dispatchByMonth[k]; }).concat([1]));
+    var panel1 = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 12 } },
+      sectionHead("🚚", "FBA Dispatch Volume", "Units sent WH → In-Transit, last " + monthRows.length + " month(s) with activity"),
+      amzMovs === null
+        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Loading…")
+        : monthRows.length === 0
+          ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No approved FBA Dispatch movements yet.")
+          : /*#__PURE__*/React.createElement("div", null,
+              monthRows.map(function (mk) {
+                var v = dispatchByMonth[mk];
+                return /*#__PURE__*/React.createElement("div", { key: mk, style: { display: "flex", alignItems: "center", gap: 9, padding: "5px 0" } },
+                  /*#__PURE__*/React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "#2c211a", width: 56, flexShrink: 0 } }, mk),
+                  /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 8, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, v / maxMonth * 100) + "%", background: "#bd5d38" } })),
+                  /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 13, fontWeight: 700, width: 46, textAlign: "right" } }, v));
+              }),
+              /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 8, paddingTop: 6, borderTop: "1px solid #e7d9c4" } }, "Total in window: " + dispatchTotalAll + " units")));
+
+    // --- Panel 2: Shipment plan accuracy --------------------------------
+    var shipRows = (shipments || []).filter(function (s) { return (s.lines || []).length > 0; });
+    var totExp = 0, totAct = 0;
+    var shipCards = shipRows.map(function (s) {
+      var exp = 0, act = 0;
+      (s.lines || []).forEach(function (l) {
+        exp += parseFloat(l.ExpectedQty) || 0;
+        act += Math.max(l.ShippedQty || 0, l.ReceivedQty || 0);
+      });
+      totExp += exp; totAct += act;
+      var pct = exp > 0 ? Math.round(act / exp * 100) : 0;
+      var pc = pct >= 100 ? "#4a7c59" : pct >= 50 ? "#a97b52" : "#b23a2e";
+      return { s: s, exp: exp, act: act, pct: pct, pc: pc };
+    }).sort(function (a, b) { return a.pct - b.pct; }).slice(0, 8);
+    var overallPct = totExp > 0 ? Math.round(totAct / totExp * 100) : 0;
+    var panel2 = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 12 } },
+      sectionHead("🎯", "Shipment Plan Accuracy", "Expected vs. actual (shipped/received) across all tracked shipments"),
+      shipments === null
+        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Loading…")
+        : shipRows.length === 0
+          ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No shipments with product lines yet.")
+          : /*#__PURE__*/React.createElement("div", null,
+              /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#2c211a", marginBottom: 8 } }, "Overall: " + totAct + " / " + totExp + " units (" + overallPct + "%)"),
+              shipCards.map(function (x) {
+                return /*#__PURE__*/React.createElement("div", { key: x.s.ShipmentID, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", fontSize: 11.5 } },
+                  /*#__PURE__*/React.createElement("span", { style: { color: "#2c211a" } }, x.s.ShipmentID + " · " + x.s.DestinationFC + " · " + x.s.Status),
+                  /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: x.pc } }, x.act + "/" + x.exp + " (" + x.pct + "%)"));
+              }),
+              shipRows.length > 8 && /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 6 } }, "Showing 8 lowest-accuracy of " + shipRows.length + " shipments.")));
+
+    // --- Panel 3: FBA stock health per FC — now a real Monday-to-Monday
+    // trend, using FBA_Ledger_Snapshots history (2026-07-24) instead of the
+    // single-snapshot view this shipped with earlier today. Uploads are
+    // weekly, so each point below is one Monday, not a daily series.
+    var healthCounts = { ship: 0, ok: 0, idle: 0 };
+    if (ledger && ledger.products && ledger.products.length) {
+      var days = ledger.reportDays || 1;
+      ledger.products.forEach(function (p) {
+        var V = p.sold / days;
+        var lowFC = p.perFC.some(function (fc) { return (fc.qty || 0) < Math.max(fc.sold / days, V / (p.perFC.length || 1)) * TRANSIT_DAYS; });
+        if (V <= 0) healthCounts.idle++; else if (lowFC) healthCounts.ship++; else healthCounts.ok++;
+      });
+    }
+    var histDates = ledgerHistoryDates().slice(-6);
+    var totalByDate = {};
+    histDates.forEach(function (d) { totalByDate[d] = 0; });
+    (ledgerHistory || []).forEach(function (r) { if (totalByDate.hasOwnProperty(r.ReportDate)) totalByDate[r.ReportDate] += parseFloat(r.Qty) || 0; });
+    var maxHist = Math.max.apply(null, histDates.map(function (d) { return totalByDate[d]; }).concat([1]));
+    var panel3 = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 12 } },
+      sectionHead("🏬", "FBA Stock Health", histDates.length >= 2 ? "Total FBA stock, last " + histDates.length + " Monday upload(s)" : "Snapshot only — need at least 2 weekly uploads for a trend"),
+      !ledger || !ledger.products || !ledger.products.length
+        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Upload a ledger to see stock health.")
+        : /*#__PURE__*/React.createElement("div", null,
+            /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: histDates.length >= 2 ? 12 : 0 } }, [
+              { v: healthCounts.ship, t: "Need refill", c: "#b23a2e" },
+              { v: healthCounts.ok, t: "Healthy", c: "#5f7a4f" },
+              { v: healthCounts.idle, t: "No sales", c: "#a89680" },
+            ].map(function (m) { return /*#__PURE__*/React.createElement("div", { key: m.t, style: { background: "#f5ecdc", borderRadius: 10, padding: "9px 6px", textAlign: "center" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 19, fontWeight: 700, color: m.c } }, m.v), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 2 } }, m.t)); })),
+            histDates.length >= 2 && /*#__PURE__*/React.createElement("div", { style: { paddingTop: 10, borderTop: "1px solid #e7d9c4" } },
+              histDates.map(function (d) {
+                var v = totalByDate[d];
+                return /*#__PURE__*/React.createElement("div", { key: d, style: { display: "flex", alignItems: "center", gap: 9, padding: "4px 0" } },
+                  /*#__PURE__*/React.createElement("span", { style: { fontSize: 10.5, fontWeight: 600, color: "#2c211a", width: 66, flexShrink: 0 } }, d),
+                  /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 7, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, v / maxHist * 100) + "%", background: "#a97b52" } })),
+                  /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 12.5, fontWeight: 700, width: 50, textAlign: "right" } }, v));
+              })),
+            /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 8 } }, "Ledger date " + (ledger.reportDate || "—") + (histDates.length < 2 ? ". Trend line appears once a second Monday's upload is recorded." : "."))));
+
+    // --- Panel 4: Reconciliation accuracy -------------------------------
+    var reconByDate = {};
+    (reconCounts || []).forEach(function (c) {
+      var m = String(c.Notes || "").match(/^FBA Ledger\s+(\S+)/);
+      var d = m ? m[1] : (c.CountDateTime || "Unknown");
+      reconByDate[d] = reconByDate[d] || { count: 0, drift: 0 };
+      reconByDate[d].count++;
+      reconByDate[d].drift += Math.abs(parseFloat(c.Difference) || 0);
+    });
+    var reconDates = Object.keys(reconByDate).sort().slice(-6);
+    var panel4 = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 4 } },
+      sectionHead("🔄", "Reconciliation Accuracy", "Drift the weekly ledger upload had to correct — lower is better"),
+      reconCounts === null
+        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Loading…")
+        : reconDates.length === 0
+          ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No ledger reconciliations recorded yet.")
+          : reconDates.map(function (d) {
+              var r = reconByDate[d];
+              return /*#__PURE__*/React.createElement("div", { key: d, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", fontSize: 11.5 } },
+                /*#__PURE__*/React.createElement("span", { style: { color: "#2c211a" } }, d + " · " + r.count + " product(s) adjusted"),
+                /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: r.drift > 0 ? "#bd5d38" : "#5f7a4f" } }, r.drift + " units drift"));
+            }));
+
+    return /*#__PURE__*/React.createElement("div", null, panel1, panel2, panel3, panel4);
+  }
+
+  return /*#__PURE__*/React.createElement("div", null, hero, subnav, sub === "upload" ? uploadTab() : sub === "fc" ? fcTab() : sub === "shipments" ? shipmentsTab() : sub === "analytics" ? analyticsTab() : recoTab());
 }
 
 function AmazonImportTab({
