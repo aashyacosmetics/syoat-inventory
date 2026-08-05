@@ -3539,6 +3539,22 @@ function FbaReconcileTab(props) {
   var canManageShipments = FBA_SHIPMENT_ROLES_FE.includes(user.role);
   var canUnlinkShipment = UNLINK_SHIPMENT_ROLES_FE.includes(user.role);
 
+  // --- Locations–FC / Analytics visual redesign (2026-07-24, approved via
+  // mockup) --- Mobile: dropdown cards per product, collapsed by default.
+  // Desktop: separate matrix/grid layouts. Both DOM trees mount; index.html's
+  // .syoat-mobile-only/.syoat-desktop-only CSS decides which one shows.
+  var _fcExp = React.useState({}), fcExpanded = _fcExp[0], setFcExpanded = _fcExp[1];
+  function toggleFcExpand(pid) { setFcExpanded(function (m) { var c = { ...m }; c[pid] = !c[pid]; return c; }); }
+  var _anDesk = React.useState(null), analyticsDesktopSel = _anDesk[0], setAnalyticsDesktopSel = _anDesk[1];
+  var _anMob = React.useState({}), analyticsMobExp = _anMob[0], setAnalyticsMobExp = _anMob[1];
+  function toggleAnMob(k) { setAnalyticsMobExp(function (m) { var c = { ...m }; c[k] = !c[k]; return c; }); }
+  function fcCellStatus(qty, demand) {
+    if (demand <= 0) return { key: "healthy", bg: "#c0dd97", fg: "#27500a" };
+    if (qty < demand * TRANSIT_DAYS) return { key: "low", bg: "#f7c1c1", fg: "#791f1f" };
+    if (qty < demand * TARGET_DAYS) return { key: "watch", bg: "#facd90", fg: "#633806" };
+    return { key: "healthy", bg: "#c0dd97", fg: "#27500a" };
+  }
+
   // --- Amazon Analytics state (2026-07-24) ---
   // Scoped to FBA Dispatch/Receipt movements + ledger-reconciliation Stock_Counts
   // rows, fetched by TYPE rather than reusing the main Analytics tab's capped
@@ -3576,16 +3592,30 @@ function FbaReconcileTab(props) {
       setLedgerHistory(Array.isArray(rows) ? rows : []);
     } catch (e) { setLedgerHistory([]); }
   }
+  // Sheets stores FBA_Ledger_Snapshots.ReportDate as a real date, not text, so
+  // the API returns an ISO timestamp taken at IST midnight — 2026-07-26 arrives
+  // as "2026-07-25T18:30:00.000Z". Slicing that string alone would display the
+  // wrong day, so shift back into IST before taking the date part. A plain
+  // "YYYY-MM-DD" value passes straight through, in case the column is ever
+  // reformatted as text. Every read of ReportDate goes through this, so the
+  // keys used for comparison and for display can never drift apart.
+  function ledgerDate(v) {
+    var s = String(v == null ? "" : v);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return new Date(d.getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  }
   function ledgerHistoryDates() {
     var set = {};
-    (ledgerHistory || []).forEach(function (r) { set[r.ReportDate] = true; });
+    (ledgerHistory || []).forEach(function (r) { set[ledgerDate(r.ReportDate)] = true; });
     return Object.keys(set).sort();
   }
   function prevWeekQty(productID, fc) {
     var dates = ledgerHistoryDates();
     if (dates.length < 2) return null;
     var prevDate = dates[dates.length - 2]; // second-most-recent Monday
-    var row = (ledgerHistory || []).find(function (r) { return r.ProductID === productID && r.FC === fc && r.ReportDate === prevDate; });
+    var row = (ledgerHistory || []).find(function (r) { return r.ProductID === productID && r.FC === fc && ledgerDate(r.ReportDate) === prevDate; });
     return row ? { qty: parseFloat(row.Qty) || 0, date: prevDate } : null;
   }
   function deltaChip(curQty, prev) {
@@ -3815,26 +3845,99 @@ function FbaReconcileTab(props) {
 
   function fcTab() {
     if (!ledger || !ledger.products || !ledger.products.length) return emptyLedger("Upload a ledger first to see fulfilment-centre stock.");
-    return /*#__PURE__*/React.createElement("div", null, sectionHead("🏬", "Fulfilment-Centre Stock", "Per FNSKU, grouped by region · from the " + (ledger.reportDate || "latest") + " Monday upload (" + ledger.reportDays + "-day report)"), ledger.products.slice().sort(function (a, b) { return b.total - a.total; }).map(function (p) {
-      var maxfc = p.perFC.length ? p.perFC[0].qty : 1;
+    var days = ledger.reportDays || 1;
+    // Per-product demand/status computed once, shared by both mobile and
+    // desktop renders below — same classification recoTab already uses
+    // (TRANSIT_DAYS/TARGET_DAYS thresholds), so "low" here means the same
+    // thing "Ship now" means on the Recommendations sub-tab.
+    var rows = ledger.products.slice().sort(function (a, b) { return b.total - a.total; }).map(function (p) {
+      var V = p.sold / days;
+      var N = p.perFC.length || 1;
+      var evenShare = V / N;
+      var fcsWithStatus = p.perFC.map(function (fc) {
+        var demand = Math.max(fc.sold / days, evenShare);
+        return { fc: fc.fc, qty: fc.qty, sold: fc.sold, region: regionOf(fc.fc), status: fcCellStatus(fc.qty, demand) };
+      });
+      var lowCount = fcsWithStatus.filter(function (x) { return x.status.key === "low"; }).length;
+      var summary = V <= 0 ? { t: "No recent sales", c: "#a89680" } : lowCount > 0 ? { t: lowCount + " of " + fcsWithStatus.length + " centres low", c: "#b23a2e" } : { t: "All centres healthy", c: "#5f7a4f" };
+      return { p: p, fcsWithStatus: fcsWithStatus, summary: summary };
+    });
+
+    // Union of every FC code across all products, ordered by region then
+    // code — gives the desktop matrix a stable, consistent column set even
+    // if one product's ledger rows skip an FC another product has.
+    var allFC = {};
+    rows.forEach(function (r) { r.fcsWithStatus.forEach(function (x) { allFC[x.fc] = x.region; }); });
+    var fcCols = Object.keys(allFC).sort(function (a, b) {
+      var ra = REGION_ORDER.indexOf(allFC[a]), rb = REGION_ORDER.indexOf(allFC[b]);
+      return ra !== rb ? ra - rb : a.localeCompare(b);
+    });
+    var regionSpans = []; // [{region, count}] in fcCols order, for the two-tier header
+    fcCols.forEach(function (fc) {
+      var r = allFC[fc];
+      var last = regionSpans[regionSpans.length - 1];
+      if (last && last.region === r) last.count++; else regionSpans.push({ region: r, count: 1 });
+    });
+
+    var head = sectionHead("🏬", "Fulfilment-Centre Stock", "From the " + (ledger.reportDate || "latest") + " Monday upload (" + days + "-day report)");
+
+    // ---- Mobile: dropdown cards, collapsed by default ----
+    var mobile = /*#__PURE__*/React.createElement("div", { className: "syoat-mobile-only" }, rows.map(function (r) {
+      var open = !!fcExpanded[r.p.productID];
       var byReg = {};
-      p.perFC.forEach(function (fc) { var r = regionOf(fc.fc); (byReg[r] = byReg[r] || []).push(fc); });
-      return /*#__PURE__*/React.createElement("div", { key: p.productID, style: { ...card, padding: 14, marginBottom: 12, minWidth: 0, overflow: "hidden" } },
-        /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 } }, /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 13.5, fontWeight: 700, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (p.name || p.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "#a89680" } }, "FNSKU " + (p.fnsku || "—") + " · " + p.perFC.length + " FCs")), /*#__PURE__*/React.createElement("div", { style: { textAlign: "right", flexShrink: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 22, fontWeight: 600, lineHeight: 1 } }, p.total), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.08em" } }, "total"))),
-        REGION_ORDER.filter(function (r) { return byReg[r]; }).map(function (r) {
-          var fcs = byReg[r];
-          var rtot = fcs.reduce(function (a, fc) { return a + fc.qty; }, 0);
-          var rsold = fcs.reduce(function (a, fc) { return a + fc.sold; }, 0);
-          return /*#__PURE__*/React.createElement("div", { key: r },
-            /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 6, borderTop: "1px solid #e7d9c4" } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, color: "#bd5d38", textTransform: "uppercase", letterSpacing: "0.05em" } }, r), /*#__PURE__*/React.createElement("span", { style: { fontSize: 10.5, color: "#a89680" } }, rtot + " units" + (rsold > 0 ? " · −" + rsold + " sold" : ""))),
-            fcs.map(function (fc) {
-              var prev = prevWeekQty(p.productID, fc.fc);
-              return /*#__PURE__*/React.createElement("div", { key: fc.fc, style: { padding: "5px 0 5px 6px" } },
-                /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 9 } }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 11.5, fontWeight: 600, color: "#2c211a", width: 48, flexShrink: 0 } }, fc.fc), /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 5, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, fc.qty / maxfc * 100) + "%", background: "#a97b52" } })), /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 13, fontWeight: 600, width: 38, textAlign: "right" } }, fc.qty), /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: fc.sold > 0 ? "#bd5d38" : "#c8b9a3", width: 46, textAlign: "right" } }, fc.sold > 0 ? "−" + fc.sold : "—")),
-                /*#__PURE__*/React.createElement("div", { style: { textAlign: "right", marginTop: 1 } }, deltaChip(fc.qty, prev)));
-            }));
-        }));
+      r.fcsWithStatus.forEach(function (x) { (byReg[x.region] = byReg[x.region] || []).push(x); });
+      return /*#__PURE__*/React.createElement("div", { key: r.p.productID, style: { ...card, marginBottom: 10, overflow: "hidden" } },
+        /*#__PURE__*/React.createElement("div", { onClick: function () { toggleFcExpand(r.p.productID); }, style: { padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" } },
+          /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } },
+            /*#__PURE__*/React.createElement("div", { style: { fontSize: 13.5, fontWeight: 700, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (r.p.name || r.p.productID).replace("Syoat ", "")),
+            /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: r.summary.c, marginTop: 2, fontWeight: 600 } }, r.summary.t)),
+          /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 9, flexShrink: 0 } },
+            /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 17, fontWeight: 600, color: "#2c211a" } }, r.p.total),
+            /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: "#a89680", display: "inline-block", transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" } }, "▾"))),
+        open && /*#__PURE__*/React.createElement("div", { style: { padding: "0 14px 14px" } },
+          REGION_ORDER.filter(function (rg) { return byReg[rg]; }).map(function (rg) {
+            return /*#__PURE__*/React.createElement("div", { key: rg, style: { marginBottom: 6 } },
+              /*#__PURE__*/React.createElement("div", { style: { fontSize: 9.5, fontWeight: 700, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.04em", margin: "4px 0" } }, rg),
+              /*#__PURE__*/React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 5 } }, byReg[rg].map(function (x) {
+                return /*#__PURE__*/React.createElement("span", { key: x.fc, style: { background: x.status.bg, color: x.status.fg, fontSize: 11, fontWeight: 600, padding: "4px 8px", borderRadius: 7 } }, x.fc + " " + x.qty);
+              })));
+          }),
+          /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10, marginTop: 8, paddingTop: 8, borderTop: "1px solid #e7d9c4", fontSize: 9.5, color: "#a89680" } },
+            /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", { style: { display: "inline-block", width: 7, height: 7, borderRadius: 2, background: "#f7c1c1", marginRight: 3 } }), "low"),
+            /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", { style: { display: "inline-block", width: 7, height: 7, borderRadius: 2, background: "#facd90", marginRight: 3 } }), "watch"),
+            /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", { style: { display: "inline-block", width: 7, height: 7, borderRadius: 2, background: "#c0dd97", marginRight: 3 } }), "healthy"))));
     }));
+
+    // ---- Desktop: full matrix, every FC as a column ----
+    var desktop = /*#__PURE__*/React.createElement("div", { className: "syoat-desktop-only" },
+      /*#__PURE__*/React.createElement("div", { style: { overflowX: "auto", ...card, padding: 0 } },
+        /*#__PURE__*/React.createElement("table", { style: { borderCollapse: "collapse", fontSize: 12, width: "100%" } },
+          /*#__PURE__*/React.createElement("thead", null,
+            /*#__PURE__*/React.createElement("tr", null,
+              /*#__PURE__*/React.createElement("td", { style: { padding: "6px 12px", background: "#f5ecdc" } }),
+              regionSpans.map(function (rs, i) { return /*#__PURE__*/React.createElement("td", { key: i, colSpan: rs.count, style: { padding: "5px 8px", background: "#f5ecdc", fontSize: 9.5, fontWeight: 700, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "center" } }, rs.region); }),
+              /*#__PURE__*/React.createElement("td", { style: { padding: "5px 8px", background: "#f5ecdc" } })),
+            /*#__PURE__*/React.createElement("tr", { style: { borderBottom: "1px solid #e7d9c4" } },
+              /*#__PURE__*/React.createElement("td", { style: { padding: "8px 12px", fontWeight: 700, color: "#2c211a" } }, "Product"),
+              fcCols.map(function (fc) { return /*#__PURE__*/React.createElement("td", { key: fc, style: { padding: "8px", textAlign: "center", color: "#a89680", fontWeight: 600 } }, fc); }),
+              /*#__PURE__*/React.createElement("td", { style: { padding: "8px 12px", textAlign: "right", fontWeight: 700, color: "#2c211a" } }, "Total"))),
+          /*#__PURE__*/React.createElement("tbody", null, rows.map(function (r, ri) {
+            var byFC = {};
+            r.fcsWithStatus.forEach(function (x) { byFC[x.fc] = x; });
+            return /*#__PURE__*/React.createElement("tr", { key: r.p.productID, style: { borderBottom: ri < rows.length - 1 ? "1px solid #f0ebe2" : "none" } },
+              /*#__PURE__*/React.createElement("td", { style: { padding: "8px 12px", fontWeight: 600, color: "#2c211a", whiteSpace: "nowrap" } }, (r.p.name || r.p.productID).replace("Syoat ", "")),
+              fcCols.map(function (fc) {
+                var x = byFC[fc];
+                return /*#__PURE__*/React.createElement("td", { key: fc, style: { textAlign: "center", padding: "8px 4px", background: x ? x.status.bg : "transparent", color: x ? x.status.fg : "#c8b9a3", fontWeight: 600 } }, x ? x.qty : "–");
+              }),
+              /*#__PURE__*/React.createElement("td", { style: { padding: "8px 12px", textAlign: "right", fontWeight: 700, color: "#2c211a" } }, r.p.total));
+          })))),
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 12, marginTop: 8, fontSize: 10.5, color: "#a89680" } },
+        /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", { style: { display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "#f7c1c1", marginRight: 4 } }), "low"),
+        /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", { style: { display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "#facd90", marginRight: 4 } }), "watch"),
+        /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("span", { style: { display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "#c0dd97", marginRight: 4 } }), "healthy")));
+
+    return /*#__PURE__*/React.createElement("div", null, head, mobile, desktop);
   }
 
   function recoTab() {
@@ -3851,9 +3954,9 @@ function FbaReconcileTab(props) {
       p.perFC.forEach(function (fc) {
         var demand = Math.max(fc.sold / days, evenShare);
         if (demand <= 0) return;
-        if (fc.stock < demand * TRANSIT_DAYS) {
-          var need = Math.max(0, Math.round(demand * TARGET_DAYS) - fc.stock);
-          if (need > 0) needs.push({ fc: fc.fc, region: regionOf(fc.fc), stock: fc.stock, need: need });
+        if (fc.qty < demand * TRANSIT_DAYS) {
+          var need = Math.max(0, Math.round(demand * TARGET_DAYS) - fc.qty);
+          if (need > 0) needs.push({ fc: fc.fc, region: regionOf(fc.fc), stock: fc.qty, need: need });
         }
       });
       var rawTotal = needs.reduce(function (a, x) { return a + x.need; }, 0);
@@ -4004,21 +4107,21 @@ function FbaReconcileTab(props) {
     });
     var monthRows = Object.keys(dispatchByMonth).sort().slice(-6);
     var maxMonth = Math.max.apply(null, monthRows.map(function (k) { return dispatchByMonth[k]; }).concat([1]));
-    var panel1 = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 12 } },
-      sectionHead("🚚", "FBA Dispatch Volume", "Units sent WH → In-Transit, last " + monthRows.length + " month(s) with activity"),
-      amzMovs === null
-        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Loading…")
-        : monthRows.length === 0
-          ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No approved FBA Dispatch movements yet.")
-          : /*#__PURE__*/React.createElement("div", null,
-              monthRows.map(function (mk) {
-                var v = dispatchByMonth[mk];
-                return /*#__PURE__*/React.createElement("div", { key: mk, style: { display: "flex", alignItems: "center", gap: 9, padding: "5px 0" } },
-                  /*#__PURE__*/React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "#2c211a", width: 56, flexShrink: 0 } }, mk),
-                  /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 8, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, v / maxMonth * 100) + "%", background: "#bd5d38" } })),
-                  /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 13, fontWeight: 700, width: 46, textAlign: "right" } }, v));
-              }),
-              /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 8, paddingTop: 6, borderTop: "1px solid #e7d9c4" } }, "Total in window: " + dispatchTotalAll + " units")));
+    var body1 = amzMovs === null
+      ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Loading…")
+      : monthRows.length === 0
+        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No approved FBA Dispatch movements yet.")
+        : /*#__PURE__*/React.createElement("div", null,
+            monthRows.map(function (mk) {
+              var v = dispatchByMonth[mk];
+              return /*#__PURE__*/React.createElement("div", { key: mk, style: { display: "flex", alignItems: "center", gap: 9, padding: "5px 0" } },
+                /*#__PURE__*/React.createElement("span", { style: { fontSize: 11, fontWeight: 600, color: "#2c211a", width: 56, flexShrink: 0 } }, mk),
+                /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 8, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, v / maxMonth * 100) + "%", background: "#bd5d38" } })),
+                /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 13, fontWeight: 700, width: 46, textAlign: "right" } }, v));
+            }),
+            /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 8, paddingTop: 6, borderTop: "1px solid #e7d9c4" } }, "Total in window: " + dispatchTotalAll + " units"));
+    var thisMonthVal = monthRows.length ? dispatchByMonth[monthRows[monthRows.length - 1]] : 0;
+    var head1 = { icon: "🚚", label: "FBA dispatch volume", value: amzMovs === null ? "…" : thisMonthVal, sub: "units, this month", c: "#bd5d38" };
 
     // --- Panel 2: Shipment plan accuracy --------------------------------
     var shipRows = (shipments || []).filter(function (s) { return (s.lines || []).length > 0; });
@@ -4035,20 +4138,19 @@ function FbaReconcileTab(props) {
       return { s: s, exp: exp, act: act, pct: pct, pc: pc };
     }).sort(function (a, b) { return a.pct - b.pct; }).slice(0, 8);
     var overallPct = totExp > 0 ? Math.round(totAct / totExp * 100) : 0;
-    var panel2 = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 12 } },
-      sectionHead("🎯", "Shipment Plan Accuracy", "Expected vs. actual (shipped/received) across all tracked shipments"),
-      shipments === null
-        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Loading…")
-        : shipRows.length === 0
-          ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No shipments with product lines yet.")
-          : /*#__PURE__*/React.createElement("div", null,
-              /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#2c211a", marginBottom: 8 } }, "Overall: " + totAct + " / " + totExp + " units (" + overallPct + "%)"),
-              shipCards.map(function (x) {
-                return /*#__PURE__*/React.createElement("div", { key: x.s.ShipmentID, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", fontSize: 11.5 } },
-                  /*#__PURE__*/React.createElement("span", { style: { color: "#2c211a" } }, x.s.ShipmentID + " · " + x.s.DestinationFC + " · " + x.s.Status),
-                  /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: x.pc } }, x.act + "/" + x.exp + " (" + x.pct + "%)"));
-              }),
-              shipRows.length > 8 && /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 6 } }, "Showing 8 lowest-accuracy of " + shipRows.length + " shipments.")));
+    var body2 = shipments === null
+      ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Loading…")
+      : shipRows.length === 0
+        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No shipments with product lines yet.")
+        : /*#__PURE__*/React.createElement("div", null,
+            /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: "#2c211a", marginBottom: 8 } }, "Overall: " + totAct + " / " + totExp + " units (" + overallPct + "%)"),
+            shipCards.map(function (x) {
+              return /*#__PURE__*/React.createElement("div", { key: x.s.ShipmentID, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", fontSize: 11.5 } },
+                /*#__PURE__*/React.createElement("span", { style: { color: "#2c211a" } }, x.s.ShipmentID + " · " + x.s.DestinationFC + " · " + x.s.Status),
+                /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: x.pc } }, x.act + "/" + x.exp + " (" + x.pct + "%)"));
+            }),
+            shipRows.length > 8 && /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 6 } }, "Showing 8 lowest-accuracy of " + shipRows.length + " shipments."));
+    var head2 = { icon: "🎯", label: "Shipment plan accuracy", value: shipments === null ? "…" : (shipRows.length === 0 ? "—" : overallPct + "%"), sub: shipRows.length === 0 ? "no shipments yet" : "average across " + shipRows.length + " shipment(s)", c: overallPct >= 90 ? "#5f7a4f" : overallPct >= 50 ? "#a97b52" : "#b23a2e" };
 
     // --- Panel 3: FBA stock health per FC — now a real Monday-to-Monday
     // trend, using FBA_Ledger_Snapshots history (2026-07-24) instead of the
@@ -4066,27 +4168,26 @@ function FbaReconcileTab(props) {
     var histDates = ledgerHistoryDates().slice(-6);
     var totalByDate = {};
     histDates.forEach(function (d) { totalByDate[d] = 0; });
-    (ledgerHistory || []).forEach(function (r) { if (totalByDate.hasOwnProperty(r.ReportDate)) totalByDate[r.ReportDate] += parseFloat(r.Qty) || 0; });
+    (ledgerHistory || []).forEach(function (r) { var _d = ledgerDate(r.ReportDate); if (totalByDate.hasOwnProperty(_d)) totalByDate[_d] += parseFloat(r.Qty) || 0; });
     var maxHist = Math.max.apply(null, histDates.map(function (d) { return totalByDate[d]; }).concat([1]));
-    var panel3 = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 12 } },
-      sectionHead("🏬", "FBA Stock Health", histDates.length >= 2 ? "Total FBA stock, last " + histDates.length + " Monday upload(s)" : "Snapshot only — need at least 2 weekly uploads for a trend"),
-      !ledger || !ledger.products || !ledger.products.length
-        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Upload a ledger to see stock health.")
-        : /*#__PURE__*/React.createElement("div", null,
-            /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: histDates.length >= 2 ? 12 : 0 } }, [
-              { v: healthCounts.ship, t: "Need refill", c: "#b23a2e" },
-              { v: healthCounts.ok, t: "Healthy", c: "#5f7a4f" },
-              { v: healthCounts.idle, t: "No sales", c: "#a89680" },
-            ].map(function (m) { return /*#__PURE__*/React.createElement("div", { key: m.t, style: { background: "#f5ecdc", borderRadius: 10, padding: "9px 6px", textAlign: "center" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 19, fontWeight: 700, color: m.c } }, m.v), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 2 } }, m.t)); })),
-            histDates.length >= 2 && /*#__PURE__*/React.createElement("div", { style: { paddingTop: 10, borderTop: "1px solid #e7d9c4" } },
-              histDates.map(function (d) {
-                var v = totalByDate[d];
-                return /*#__PURE__*/React.createElement("div", { key: d, style: { display: "flex", alignItems: "center", gap: 9, padding: "4px 0" } },
-                  /*#__PURE__*/React.createElement("span", { style: { fontSize: 10.5, fontWeight: 600, color: "#2c211a", width: 66, flexShrink: 0 } }, d),
-                  /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 7, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, v / maxHist * 100) + "%", background: "#a97b52" } })),
-                  /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 12.5, fontWeight: 700, width: 50, textAlign: "right" } }, v));
-              })),
-            /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 8 } }, "Ledger date " + (ledger.reportDate || "—") + (histDates.length < 2 ? ". Trend line appears once a second Monday's upload is recorded." : "."))));
+    var body3 = !ledger || !ledger.products || !ledger.products.length
+      ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Upload a ledger to see stock health.")
+      : /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: histDates.length >= 2 ? 12 : 0 } }, [
+            { v: healthCounts.ship, t: "Need refill", c: "#b23a2e" },
+            { v: healthCounts.ok, t: "Healthy", c: "#5f7a4f" },
+            { v: healthCounts.idle, t: "No sales", c: "#a89680" },
+          ].map(function (m) { return /*#__PURE__*/React.createElement("div", { key: m.t, style: { background: "#f5ecdc", borderRadius: 10, padding: "9px 6px", textAlign: "center" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 19, fontWeight: 700, color: m.c } }, m.v), /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 2 } }, m.t)); })),
+          histDates.length >= 2 && /*#__PURE__*/React.createElement("div", { style: { paddingTop: 10, borderTop: "1px solid #e7d9c4" } },
+            histDates.map(function (d) {
+              var v = totalByDate[d];
+              return /*#__PURE__*/React.createElement("div", { key: d, style: { display: "flex", alignItems: "center", gap: 9, padding: "4px 0" } },
+                /*#__PURE__*/React.createElement("span", { style: { fontSize: 10.5, fontWeight: 600, color: "#2c211a", width: 66, flexShrink: 0 } }, d),
+                /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 7, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, v / maxHist * 100) + "%", background: "#a97b52" } })),
+                /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 12.5, fontWeight: 700, width: 50, textAlign: "right" } }, v));
+            })),
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 8 } }, "Ledger date " + (ledger.reportDate || "—") + (histDates.length < 2 ? ". Trend line appears once a second Monday's upload is recorded." : ".")));
+    var head3 = { icon: "🏬", label: "FBA stock health", value: (!ledger || !ledger.products || !ledger.products.length) ? "—" : healthCounts.ship + " of " + (healthCounts.ship + healthCounts.ok + healthCounts.idle), sub: (!ledger || !ledger.products || !ledger.products.length) ? "upload a ledger" : "FCs need refill", c: healthCounts.ship > 0 ? "#b23a2e" : "#5f7a4f" };
 
     // --- Panel 4: Reconciliation accuracy -------------------------------
     var reconByDate = {};
@@ -4098,20 +4199,50 @@ function FbaReconcileTab(props) {
       reconByDate[d].drift += Math.abs(parseFloat(c.Difference) || 0);
     });
     var reconDates = Object.keys(reconByDate).sort().slice(-6);
-    var panel4 = /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 4 } },
-      sectionHead("🔄", "Reconciliation Accuracy", "Drift the weekly ledger upload had to correct — lower is better"),
-      reconCounts === null
-        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Loading…")
-        : reconDates.length === 0
-          ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No ledger reconciliations recorded yet.")
-          : reconDates.map(function (d) {
-              var r = reconByDate[d];
-              return /*#__PURE__*/React.createElement("div", { key: d, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", fontSize: 11.5 } },
-                /*#__PURE__*/React.createElement("span", { style: { color: "#2c211a" } }, d + " · " + r.count + " product(s) adjusted"),
-                /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: r.drift > 0 ? "#bd5d38" : "#5f7a4f" } }, r.drift + " units drift"));
-            }));
+    var body4 = reconCounts === null
+      ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Loading…")
+      : reconDates.length === 0
+        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No ledger reconciliations recorded yet.")
+        : /*#__PURE__*/React.createElement("div", null, reconDates.map(function (d) {
+            var r = reconByDate[d];
+            return /*#__PURE__*/React.createElement("div", { key: d, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", fontSize: 11.5 } },
+              /*#__PURE__*/React.createElement("span", { style: { color: "#2c211a" } }, d + " · " + r.count + " product(s) adjusted"),
+              /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: r.drift > 0 ? "#bd5d38" : "#5f7a4f" } }, r.drift + " units drift"));
+          }));
+    var latestDrift = reconDates.length ? reconByDate[reconDates[reconDates.length - 1]].drift : null;
+    var head4 = { icon: "🔄", label: "Reconciliation accuracy", value: reconCounts === null ? "…" : (latestDrift === null ? "—" : latestDrift), sub: latestDrift === null ? "no uploads yet" : "units drift, last upload", c: latestDrift > 0 ? "#a97b52" : "#5f7a4f" };
 
-    return /*#__PURE__*/React.createElement("div", null, panel1, panel2, panel3, panel4);
+    // ---- Assemble: mobile = 4 stacked dropdown cards; desktop = 2x2 compact
+    // grid + one shared detail panel below (approved via mockup 2026-07-24) ----
+    var kpis = [{ k: "dispatch", h: head1, b: body1 }, { k: "accuracy", h: head2, b: body2 }, { k: "health", h: head3, b: body3 }, { k: "recon", h: head4, b: body4 }];
+
+    var mobile = /*#__PURE__*/React.createElement("div", { className: "syoat-mobile-only" }, kpis.map(function (kp) {
+      var open = !!analyticsMobExp[kp.k];
+      return /*#__PURE__*/React.createElement("div", { key: kp.k, style: { ...card, marginBottom: 8, overflow: "hidden" } },
+        /*#__PURE__*/React.createElement("div", { onClick: function () { toggleAnMob(kp.k); }, style: { padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" } },
+          /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, minWidth: 0 } },
+            /*#__PURE__*/React.createElement("span", { style: { fontSize: 17 } }, kp.h.icon),
+            /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } },
+              /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, fontWeight: 700, color: "#2c211a" } }, kp.h.label),
+              /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: kp.h.c, fontWeight: 600, marginTop: 1 } }, kp.h.value + " " + kp.h.sub))),
+          /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: "#a89680", display: "inline-block", flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" } }, "▾")),
+        open && /*#__PURE__*/React.createElement("div", { style: { padding: "0 14px 14px", borderTop: "1px solid #e7d9c4", marginTop: 0, paddingTop: 10 } }, kp.b));
+    }));
+
+    var selected = kpis.find(function (kp) { return kp.k === analyticsDesktopSel; });
+    var desktop = /*#__PURE__*/React.createElement("div", { className: "syoat-desktop-only" },
+      /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 10 } }, kpis.map(function (kp) {
+        var on = analyticsDesktopSel === kp.k;
+        return /*#__PURE__*/React.createElement("div", { key: kp.k, onClick: function () { setAnalyticsDesktopSel(kp.k); }, style: { ...card, padding: 14, cursor: "pointer", borderColor: on ? "#bd5d38" : "#e7d9c4", borderWidth: on ? 2 : 1 } },
+          /*#__PURE__*/React.createElement("span", { style: { fontSize: 18 } }, kp.h.icon),
+          /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 600, color: kp.h.c, marginTop: 6 } }, kp.h.value),
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 2 } }, kp.h.label + " — " + kp.h.sub));
+      })),
+      /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, minHeight: 60 } },
+        selected ? body(selected) : /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680" } }, "Click a card above to see its detail here.")));
+    function body(kp) { return kp.b; }
+
+    return /*#__PURE__*/React.createElement("div", null, mobile, desktop);
   }
 
   return /*#__PURE__*/React.createElement("div", null, hero, subnav, sub === "upload" ? uploadTab() : sub === "fc" ? fcTab() : sub === "shipments" ? shipmentsTab() : sub === "analytics" ? analyticsTab() : recoTab());

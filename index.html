@@ -60,6 +60,18 @@
       .syoat-location-grid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)) !important; }
       .syoat-kpi-grid { grid-template-columns: repeat(4, 1fr) !important; }
     }
+
+    /* Amazon Locations–FC / Analytics redesign (2026-07-24, approved via mockup):
+       mobile and desktop render genuinely different structures — dropdown cards
+       vs. a matrix table / shared detail panel — not just a re-grid of the same
+       markup, so both are mounted and CSS decides which one shows. Same
+       mount-both-toggle-with-CSS pattern as the sidebar/bottom-nav above. */
+    .syoat-mobile-only { display: block; }
+    .syoat-desktop-only { display: none; }
+    @media (min-width: 900px) {
+      .syoat-mobile-only { display: none; }
+      .syoat-desktop-only { display: block; }
+    }
   </style>
 </head>
 <body>
@@ -74,7 +86,7 @@
 <div id="root"></div>
 
 <!-- App — all logic lives here; update only this file for new features -->
-<script src="syoat-app.js?v=20260724a"></script>
+<script src="syoat-app.js?v=20260805a"></script>
 
 </body>
 </html>
