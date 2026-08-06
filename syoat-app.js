@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20260806b";
+const BUILD_VERSION = "20260806e";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -292,6 +292,11 @@ async function verifyPinRemote(email, pin, userAgent) {
 // Alert thresholds loaded dynamically from Products sheet (ReorderLevel column)
 // This is the fallback if the sheet value is missing
 const ALERT_FALLBACK = 100;
+// Maximum attachments per movement. Enforced in three places that must agree:
+// handleFiles() (Gallery / Document / fallback camera / drag-drop / "+" tile),
+// GeoCameraModal's `remaining` prop, and submit()'s final slice as a backstop.
+// The Apps Script has its own matching slice in saveAttachmentsToDrive().
+const MAX_ATTACH = 4;
 const SRC_DST = {
   "Opening Balance – WH": {
     src: "MAIN_WH",
@@ -897,7 +902,7 @@ function parseAttachments(docFile) {
   if (s.startsWith("[")) {
     try {
       const arr = JSON.parse(s);
-      if (Array.isArray(arr)) return arr.filter(isImg).slice(0, 4);
+      if (Array.isArray(arr)) return arr.filter(isImg).slice(0, MAX_ATTACH);
     } catch (e) { /* fall through */ }
   }
   return [];
@@ -1153,6 +1158,7 @@ function MovEditModal({
     if (!file.type.startsWith("image/")) {
       const r = new FileReader();
       r.onload = e => callback(e.target.result, file.size, file.type);
+      r.onerror = () => callback(null, 0, file.type);
       r.readAsDataURL(file);
       return;
     }
@@ -1175,19 +1181,48 @@ function MovEditModal({
         }
         callback(dataUrl, Math.round(dataUrl.length * 0.75), "image/jpeg");
       };
+      // A corrupt or unsupported image used to leave `compressing` permanently
+      // above zero, which disables Submit for the rest of the session.
+      img.onerror = () => callback(null, 0, file.type);
       img.src = e.target.result;
     };
+    r.onerror = () => callback(null, 0, file.type);
     r.readAsDataURL(file);
   }
   function handleFiles(files) {
+    // See the note on MovModal.handleFiles — same ceiling, same reason.
+    var room = MAX_ATTACH - images.length - compressing;
+    var skipped = 0;
+    var accepted = [];
     Array.from(files).forEach(file => {
       if (!file.type.startsWith("image/") && file.type !== "application/pdf") return;
-      setCompressing(n => n + 1);
-      compressToTarget(file, (dataUrl, finalBytes, finalType) => {
-        setImages(prev => [...prev, { name: file.name, dataUrl, type: finalType, size: (finalBytes/1024).toFixed(1) + " KB" }]);
-        setCompressing(n => Math.max(0, n - 1));
-      });
+      if (room <= 0) { skipped++; return; }
+      room--;
+      accepted.push(file);
     });
+    // Compression is async and finishes out of order — a 12 MB photo picked first
+    // would otherwise land after a small one picked second. Each result is written
+    // into a fixed slot and the batch is appended in one go, so attachments keep
+    // the order they were selected in. A file that cannot be read resolves to null
+    // and is dropped, rather than leaving `compressing` stuck above zero and the
+    // Submit button disabled forever.
+    if (accepted.length) {
+      var results = new Array(accepted.length);
+      var finished = 0;
+      setCompressing(n => n + accepted.length);
+      accepted.forEach(function (file, i) {
+        compressToTarget(file, function (dataUrl, finalBytes, finalType) {
+          if (dataUrl) results[i] = { name: file.name, dataUrl: dataUrl, type: finalType, size: (finalBytes / 1024).toFixed(1) + " KB" };
+          finished++;
+          setCompressing(n => Math.max(0, n - 1));
+          if (finished === accepted.length) {
+            var usable = results.filter(Boolean);
+            if (usable.length) setImages(prev => prev.concat(usable));
+          }
+        });
+      });
+    }
+    if (skipped > 0) setErr("Maximum " + MAX_ATTACH + " photos — " + skipped + " file(s) were not added.");
   }
   function removeImage(i) {
     setImages(imgs => imgs.filter((_, j) => j !== i));
@@ -1206,7 +1241,6 @@ function MovEditModal({
     try {
       let uploads = [];
       if (images.length > 0) {
-        const MAX_ATTACH = 4;
         const imgFiles = images.filter(i => i.dataUrl && i.dataUrl.startsWith("data:image")).slice(0, MAX_ATTACH);
         function makeUpload(dataUrl) {
           return new Promise(resolve => {
@@ -1338,7 +1372,18 @@ function MovEditModal({
 //  GEO-TAGGED CAMERA — live viewfinder, burns GPS + address + time
 //  onto the photo at the moment of capture (2026-07-20)
 // ─────────────────────────────────────────────────────────────
-function GeoCameraModal({ onClose, onCapture, onFallback }) {
+// Multi-shot (2026-08-06): the modal used to close itself after a single frame,
+// so photographing four sides of a damaged carton meant reopening the camera
+// four times and re-acquiring GPS each time. It now stays open until Done,
+// keeps the stream alive between frames, and enforces the 4-attachment limit
+// visibly instead of silently slicing the array at submit. `remaining` is how
+// many more this movement can still take (4 minus what is already attached).
+function GeoCameraModal({ onClose, onDone, onFallback, remaining }) {
+  var _shots = React.useState([]), shots = _shots[0], setShots = _shots[1];
+  // Shots are held here and handed to the parent only on Done (2026-08-06), so
+  // `remaining` is a fixed budget for the session and subtracting shots.length is
+  // correct. This is what makes the top × a real cancel rather than a second Done.
+  var left = Math.max(0, (remaining == null ? MAX_ATTACH : remaining) - shots.length);
   const videoRef = React.useRef(null);
   const streamRef = React.useRef(null);
   const [ready, setReady] = React.useState(false);
@@ -1351,29 +1396,58 @@ function GeoCameraModal({ onClose, onCapture, onFallback }) {
 
   React.useEffect(() => {
     let cancelled = false;
-    navigator.mediaDevices?.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+    let geoWatchId = null;
+    let lastGeo = { lat: null, lon: null };
+    // `ideal` rather than `exact` — a device that cannot do 1920x1080 degrades to
+    // its best available instead of failing outright. Without any width/height
+    // hint some phones hand back 720p, which is thin for reading an invoice.
+    navigator.mediaDevices?.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    })
       .then(stream => {
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
         streamRef.current = stream;
-        if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play().catch(() => {}); }
-        setReady(true);
+        // Wait for the stream to actually produce a frame before arming the
+        // shutter. setReady(true) used to fire the instant play() was called, so a
+        // fast tap could reach capture() while video.videoWidth was still 0 — the
+        // `|| 1280` fallback below then drew an empty canvas: a blank photo with a
+        // perfectly good overlay burned onto it.
+        if (videoRef.current) {
+          var v = videoRef.current;
+          v.srcObject = stream;
+          v.onloadedmetadata = function () { v.play().catch(function () {}); };
+          v.oncanplay = function () { if (!cancelled) setReady(true); };
+          v.play().catch(function () {});
+        }
       })
       .catch(err => setCamError(err && err.message ? err.message : "Camera unavailable"));
 
+    // watchPosition, not getCurrentPosition (2026-08-06): now that the camera
+    // stays open for several shots, a single fix meant photo 4 carried photo 1's
+    // coordinates even if the operator had walked to another bay. maximumAge is
+    // short so a stale fix is not silently reused either.
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
+      geoWatchId = navigator.geolocation.watchPosition(
         pos => {
           if (cancelled) return;
           const lat = pos.coords.latitude, lon = pos.coords.longitude, accuracy = pos.coords.accuracy;
           setCoords({ lat, lon, accuracy });
           setGeoStatus("ok");
+          // Re-geocode on the first fix, then only after a real move (~55 m).
+          // Nominatim's policy is 1 request/second; distance-throttling keeps us
+          // far under it even while walking around the warehouse.
+          const moved = lastGeo.lat === null ||
+            Math.abs(lat - lastGeo.lat) > 0.0005 || Math.abs(lon - lastGeo.lon) > 0.0005;
+          if (!moved) return;
+          lastGeo = { lat: lat, lon: lon };
           fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=0`)
             .then(r => r.json())
             .then(d => { if (!cancelled && d && d.display_name) setAddress(d.display_name); })
             .catch(() => {});
         },
         () => { if (!cancelled) setGeoStatus("denied"); },
-        { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 }
       );
     } else {
       setGeoStatus("unavailable");
@@ -1383,6 +1457,7 @@ function GeoCameraModal({ onClose, onCapture, onFallback }) {
     return () => {
       cancelled = true;
       clearInterval(clock);
+      if (geoWatchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(geoWatchId);
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     };
   }, []);
@@ -1398,7 +1473,9 @@ function GeoCameraModal({ onClose, onCapture, onFallback }) {
 
   function capture() {
     const video = videoRef.current;
-    if (!video || !ready) return;
+    // videoWidth is the authoritative "there is a frame" signal — belt and braces
+    // alongside `ready`, since a track can drop mid-session.
+    if (!video || !ready || left <= 0 || !video.videoWidth) return;
     setCapturing(true);
     const MAX_DIM = 2048;
     let w = video.videoWidth || 1280, h = video.videoHeight || 720;
@@ -1451,17 +1528,31 @@ function GeoCameraModal({ onClose, onCapture, onFallback }) {
       q = Math.round((q - 0.05) * 100) / 100;
       dataUrl = canvas.toDataURL("image/jpeg", q);
     }
-    onCapture({
+    var shot = {
       name: `geo_${Date.now()}.jpg`,
       dataUrl,
       type: "image/jpeg",
-      size: (Math.round(dataUrl.length * 0.75) / 1024).toFixed(1) + " KB"
-    });
-    stopStream();
+      size: (Math.round(dataUrl.length * 0.75) / 1024).toFixed(1) + " KB",
+      // Tells MovModal.submit to upload this as-is. The overlay is already burned
+      // in and the frame is already compressed here, so a second pass through
+      // makeUpload would only soften the address text for no size benefit.
+      geo: true
+    };
+    setShots(function (s) { return s.concat([shot]); });
+    // Stream deliberately left running — the next shot should be instant.
     setCapturing(false);
   }
 
-  function close() {
+  // Done — commit the session's shots to the movement.
+  function commit() {
+    stopStream();
+    if (shots.length && onDone) onDone(shots);
+    else onClose();
+  }
+  // × — a genuine cancel. Previously this kept every photo, because each frame had
+  // already been pushed to the parent as it was taken.
+  function discard() {
+    if (shots.length && !window.confirm("Discard " + shots.length + " photo(s) and close the camera?")) return;
     stopStream();
     onClose();
   }
@@ -1474,7 +1565,7 @@ function GeoCameraModal({ onClose, onCapture, onFallback }) {
     },
       /*#__PURE__*/React.createElement("div", { style: { color: "#fff", fontSize: 13, fontWeight: 700 } }, "📍 Geo-tagged Photo"),
       /*#__PURE__*/React.createElement("button", {
-        onClick: close,
+        onClick: discard,
         style: { background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", fontSize: 20, width: 32, height: 32, borderRadius: 16, cursor: "pointer" }
       }, "×")
     ),
@@ -1491,7 +1582,7 @@ function GeoCameraModal({ onClose, onCapture, onFallback }) {
       /*#__PURE__*/React.createElement("div", { style: { fontSize: 14 } }, "⚠️ Live camera unavailable: ", camError),
       /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#bbb" } }, "You can still use your phone's regular camera — the photo just won't be geo-tagged in the picture itself."),
       /*#__PURE__*/React.createElement("button", {
-        onClick: () => { close(); onFallback && onFallback(); },
+        onClick: () => { discard(); onFallback && onFallback(); },
         style: { background: "#a97b52", border: "none", color: "#fff", padding: "10px 18px", borderRadius: 8, cursor: "pointer", fontWeight: 700 }
       }, "Use Regular Camera Instead")
     ),
@@ -1510,17 +1601,40 @@ function GeoCameraModal({ onClose, onCapture, onFallback }) {
       /*#__PURE__*/React.createElement("div", { style: { color: "#cfc7b8", marginTop: 2 } }, dtLine(now))
     ),
     !camError && /*#__PURE__*/React.createElement("div", {
-      style: { position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", justifyContent: "center", padding: "20px 0 28px", background: "rgba(0,0,0,0.35)", zIndex: 2 }
+      style: { position: "absolute", left: 0, right: 0, bottom: 0, padding: "12px 16px 22px", background: "rgba(0,0,0,0.42)", zIndex: 2 }
     },
-      /*#__PURE__*/React.createElement("button", {
-        onClick: capture,
-        disabled: !ready || capturing,
-        style: {
-          width: 68, height: 68, borderRadius: 34, background: "#fff",
-          border: "4px solid rgba(255,255,255,0.4)", cursor: ready ? "pointer" : "default",
-          opacity: capturing ? 0.6 : 1
-        }
-      })
+      shots.length > 0 && /*#__PURE__*/React.createElement("div", {
+        style: { display: "flex", gap: 6, marginBottom: 10, overflowX: "auto" }
+      }, shots.map(function (s, i) {
+        return /*#__PURE__*/React.createElement("img", {
+          key: i, src: s.dataUrl,
+          style: { width: 42, height: 42, objectFit: "cover", borderRadius: 6, border: "1px solid rgba(255,255,255,0.5)", flexShrink: 0 }
+        });
+      })),
+      /*#__PURE__*/React.createElement("div", {
+        style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }
+      },
+        /*#__PURE__*/React.createElement("div", { style: { color: "#e7e0d4", fontSize: 11, width: 78 } },
+          left > 0 ? shots.length + " taken · " + left + " left" : "Limit reached (4)"),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: capture,
+          disabled: !ready || capturing || left <= 0,
+          title: left <= 0 ? "Maximum 4 attachments per movement" : "Take photo",
+          style: {
+            width: 68, height: 68, borderRadius: 34, background: "#fff",
+            border: "4px solid rgba(255,255,255,0.4)",
+            cursor: (ready && left > 0) ? "pointer" : "default",
+            opacity: (capturing || left <= 0) ? 0.4 : 1
+          }
+        }),
+        /*#__PURE__*/React.createElement("button", {
+          onClick: commit,
+          style: {
+            width: 78, background: "none", border: "1px solid rgba(255,255,255,0.55)",
+            color: "#fff", borderRadius: 9, padding: "9px 0", fontSize: 12.5, fontWeight: 700, cursor: "pointer"
+          }
+        }, shots.length > 0 ? "Done (" + shots.length + ")" : "Cancel")
+      )
     )
   );
 }
@@ -1574,6 +1688,8 @@ function MovModal({
   const fileInputRef = React.useRef(null);
   const cameraInputRef = React.useRef(null);
   const [showGeoCamera, setShowGeoCamera] = React.useState(false);
+  // Slots already claimed, counting files still compressing.
+  const atLimit = (images.length + compressing) >= MAX_ATTACH;
   const sd = SRC_DST[type] || {
     src: "",
     dst: ""
@@ -1584,6 +1700,7 @@ function MovModal({
       // PDF — read as-is, no compression
       const r = new FileReader();
       r.onload = e => callback(e.target.result, file.size, file.type);
+      r.onerror = () => callback(null, 0, file.type);
       r.readAsDataURL(file);
       return;
     }
@@ -1613,30 +1730,62 @@ function MovModal({
         }
         callback(dataUrl, Math.round(dataUrl.length * 0.75), "image/jpeg");
       };
+      // A corrupt or unsupported image used to leave `compressing` permanently
+      // above zero, which disables Submit for the rest of the session.
+      img.onerror = () => callback(null, 0, file.type);
       img.src = e.target.result;
     };
+    r.onerror = () => callback(null, 0, file.type);
     r.readAsDataURL(file);
   }
   function handleFiles(files) {
+    // 2026-08-06: single choke point for every non-camera route in — Gallery,
+    // Document, the regular-camera fallback, drag-and-drop and the "+" tile.
+    // Without this the extras were accepted, shown as thumbnails, counted in the
+    // notes ("[6 attachment(s): ...]") and then silently discarded by submit()'s
+    // .slice(MAX_ATTACH) — the same quiet data loss the geo camera used to have.
+    // images.length + compressing = slots already claimed, including files still
+    // being compressed from an earlier selection. `room` is decremented
+    // synchronously so a multi-file selection is counted correctly.
+    var room = MAX_ATTACH - images.length - compressing;
+    var skipped = 0, tooBig = 0;
+    var accepted = [];
     Array.from(files).forEach(file => {
       if (!file.type.startsWith("image/") && file.type !== "application/pdf") return;
       // PDFs are sent uncompressed (base64 inflates them ~33%), so cap them
       // rather than let a huge invoice stall the submit on warehouse mobile data.
-      if (file.type === "application/pdf" && file.size > 2 * 1024 * 1024) {
-        setErr("That PDF is " + (file.size / 1048576).toFixed(1) + " MB — max 2 MB. Photograph the invoice instead, or compress the PDF.");
-        return;
-      }
-      setCompressing(n => n + 1); // block submit until this resolves
-      compressToTarget(file, (dataUrl, finalBytes, finalType) => {
-        setImages(prev => [...prev, {
-          name: file.name,
-          dataUrl,
-          type: finalType,
-          size: (finalBytes / 1024).toFixed(1) + " KB"
-        }]);
-        setCompressing(n => Math.max(0, n - 1)); // done — unblock submit
-      });
+      if (file.type === "application/pdf" && file.size > 2 * 1024 * 1024) { tooBig++; return; }
+      if (room <= 0) { skipped++; return; }
+      room--;
+      accepted.push(file);
     });
+    // Compression is async and finishes out of order — a 12 MB photo picked first
+    // would otherwise land after a small one picked second. Each result is written
+    // into a fixed slot and the batch is appended in one go, so attachments keep
+    // the order they were selected in. A file that cannot be read resolves to null
+    // and is dropped, rather than leaving `compressing` stuck above zero and the
+    // Submit button disabled forever.
+    if (accepted.length) {
+      var results = new Array(accepted.length);
+      var finished = 0;
+      setCompressing(n => n + accepted.length); // block submit until all resolve
+      accepted.forEach(function (file, i) {
+        compressToTarget(file, function (dataUrl, finalBytes, finalType) {
+          if (dataUrl) results[i] = { name: file.name, dataUrl: dataUrl, type: finalType, size: (finalBytes / 1024).toFixed(1) + " KB" };
+          finished++;
+          setCompressing(n => Math.max(0, n - 1));
+          if (finished === accepted.length) {
+            var usable = results.filter(Boolean);
+            if (usable.length) setImages(prev => prev.concat(usable));
+            if (usable.length < accepted.length) setErr((accepted.length - usable.length) + " file(s) could not be read and were skipped.");
+          }
+        });
+      });
+    }
+    var notes = [];
+    if (tooBig > 0)  notes.push(tooBig + " PDF(s) over 2 MB — photograph the invoice instead, or compress it");
+    if (skipped > 0) notes.push("maximum " + MAX_ATTACH + " attachments — " + skipped + " file(s) not added");
+    if (notes.length) setErr(notes.join(". ") + ".");
   }
   function removeImage(i) {
     setImages(imgs => imgs.filter((_, j) => j !== i));
@@ -1673,10 +1822,7 @@ function MovModal({
       // notes ("[1 attachment(s): invoice.pdf]") and then dropped here, because
       // this filter only kept data:image. Supplier invoices are usually PDFs, so
       // they now ride through uncompressed while photos still get resized.
-      const MAX_ATTACH = 4;
       const picked   = images.filter(i => i.dataUrl && (i.dataUrl.startsWith("data:image") || i.dataUrl.startsWith("data:application/pdf"))).slice(0, MAX_ATTACH);
-      const imgFiles = picked.filter(i => i.dataUrl.startsWith("data:image"));
-      const pdfFiles = picked.filter(i => i.dataUrl.startsWith("data:application/pdf"));
       function makeUpload(dataUrl) {
         return new Promise(resolve => {
           const img = new Image();
@@ -1693,8 +1839,14 @@ function MovModal({
           img.src = dataUrl;
         });
       }
-      const uploads = (await Promise.all(imgFiles.map(f => makeUpload(f.dataUrl)))).filter(Boolean)
-        .concat(pdfFiles.map(f => f.dataUrl));
+      // Order-preserving: each attachment is resolved in the order the user added
+      // it. Geo-camera frames and PDFs pass through untouched; gallery and native
+      // camera photos still get resized, since those arrive at full device size.
+      const uploads = (await Promise.all(picked.map(function (f) {
+        if (f.dataUrl.startsWith("data:application/pdf")) return f.dataUrl;
+        if (f.geo) return f.dataUrl;
+        return makeUpload(f.dataUrl);
+      }))).filter(Boolean);
       const hasImgs = uploads.length > 0;
       const reasonPrefix = reasonCode ? `Reason: ${reasonCode} | ` : "";
       const finalNotes = reasonPrefix + (notes ? notes + " " : "") + (images.length > 0 ? `[${images.length} attachment(s): ${images.map(i => i.name).join(", ")}]` : "");
@@ -2149,12 +2301,15 @@ function MovModal({
     key: btn.label,
     onClick: () => btn.action === "geocam" ? setShowGeoCamera(true) : (btn.ref.current && btn.ref.current.click()),
     type: "button",
+    disabled: atLimit,
+    title: atLimit ? "Maximum " + MAX_ATTACH + " attachments per movement" : "",
     style: {
       background: btn.color + "12",
       border: `1px solid ${btn.color}30`,
       borderRadius: 10,
       padding: "10px 6px",
-      cursor: "pointer",
+      opacity: atLimit ? 0.45 : 1,
+      cursor: atLimit ? "not-allowed" : "pointer",
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
@@ -2287,9 +2442,11 @@ function MovModal({
   }, "×"))), /*#__PURE__*/React.createElement("button", {
     onClick: () => fileInputRef.current && fileInputRef.current.click(),
     type: "button",
+    disabled: atLimit,
     style: {
       height: 80,
       borderRadius: 8,
+      opacity: atLimit ? 0.4 : 1,
       border: "2px dashed #e0d2bd",
       background: "transparent",
       color: "#a89680",
@@ -2302,7 +2459,7 @@ function MovModal({
       fontSize: 11,
       color: "#a89680"
     }
-  }, images.length, " file", images.length > 1 ? "s" : "", " attached · Names will be saved in movement notes")), err && /*#__PURE__*/React.createElement("div", {
+  }, images.length, " of ", MAX_ATTACH, " attached", atLimit ? " · limit reached" : "", " · names are saved in the movement notes")), err && /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#ef444420",
       border: "1px solid #ef444460",
@@ -2333,7 +2490,8 @@ function MovModal({
     }
   }, busy ? "Saving…" : compressing > 0 ? "Processing image…" : "Record Movement")))), showGeoCamera && /*#__PURE__*/React.createElement(GeoCameraModal, {
     onClose: () => setShowGeoCamera(false),
-    onCapture: img => { setImages(prev => [...prev, img]); setShowGeoCamera(false); },
+    onDone: imgs => { setImages(prev => prev.concat(imgs)); setShowGeoCamera(false); },
+    remaining: Math.max(0, MAX_ATTACH - images.length - compressing),
     onFallback: () => { cameraInputRef.current && cameraInputRef.current.click(); }
   }));
 }
