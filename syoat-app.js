@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20260806a";
+const BUILD_VERSION = "20260806b";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -251,6 +251,39 @@ async function apiWritePost(action, email, payload) {
     headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
     body: JSON.stringify(enriched)
   });
+}
+
+// LOGIN — server-side PIN check (2026-08-06). Deliberately NOT routed through
+// apiWrite/apiWritePost: those call requestPinConfirm(), which would be circular
+// here, and they attach CURRENT_PIN, which is the very thing we are trying to
+// establish. POST-only — a PIN in a GET query string would land in browser
+// history and proxy logs.
+async function apiVerifyPin(email, pin, userAgent) {
+  return fetchWithRetry(API, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
+    body: JSON.stringify({ action: "verifyPin", email: email, pin: pin, userAgent: userAgent || "" })
+  });
+}
+
+// Returns true/false, or throws on a genuine network failure.
+// TRANSITIONAL SHIM: if the older Apps Script is still deployed, verifyPin does
+// not exist yet and the request falls through to handleWrite — which runs
+// requireStaff(email, pin) BEFORE reaching its unknown-action branch. So
+// "Unknown action" means the PIN it just validated was correct, and
+// "Unauthorised" means it was wrong. That makes the deploy order of the script
+// and the frontend irrelevant, instead of either order locking the team out.
+// Delete this catch block once the new Apps Script is live.
+async function verifyPinRemote(email, pin, userAgent) {
+  try {
+    var res = await apiVerifyPin(email, pin, userAgent);
+    return !!(res && res.ok);
+  } catch (e) {
+    var msg = String((e && e.message) || "");
+    if (msg.indexOf("Unknown action") !== -1) return true;
+    if (msg.indexOf("Unauthorised") !== -1) return false;
+    throw e;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -500,6 +533,7 @@ function LoginScreen({
   const [pin, setPin] = React.useState("");
   const [error, setError] = React.useState("");
   const [shake, setShake] = React.useState(false);
+  const [checking, setChecking] = React.useState(false);
   const [dropVal, setDropVal] = React.useState("");
   const ROLE_ICON = {
     Founder: "🌟",
@@ -534,22 +568,34 @@ function LoginScreen({
       setTimeout(() => checkPin(newPin), 150);
     }
   }
-  function checkPin(enteredPin) {
+  // 2026-08-06: the PIN is now proved against the server instead of compared
+  // against a value getAppLogins had handed to the browser. On success the typed
+  // PIN is kept in memory (CURRENT_PIN) exactly as before, so every write still
+  // carries it for requireStaff() to re-check — the write path is unchanged.
+  // The old "Logins didn't load (offline)" branch is gone with selected.pin;
+  // an unreachable server now surfaces as its own message below.
+  // Login attempts are logged server-side by verifyPin(), so the browser no
+  // longer calls logLoginAttempt separately and cannot double-count them.
+  async function checkPin(enteredPin) {
     const ua = (typeof navigator !== "undefined" && navigator.userAgent) ? navigator.userAgent : "";
-    if (!selected.pin) {
+    setChecking(true);
+    setError("");
+    try {
+      const okPin = await verifyPinRemote(selected.email, String(enteredPin), ua);
+      setChecking(false);
+      if (okPin) {
+        CURRENT_PIN = String(enteredPin);
+        onLogin(selected);
+      } else {
+        setShake(true);
+        setError("Wrong PIN. Try again.");
+        setPin("");
+        setTimeout(() => setShake(false), 500);
+      }
+    } catch (e) {
+      setChecking(false);
       setShake(true);
-      setError("Logins didn't load (offline). Reload the page, then try again.");
-      setPin("");
-      setTimeout(() => setShake(false), 500);
-      return;
-    }
-    if (String(enteredPin) === String(selected.pin)) {
-      api("logLoginAttempt", { email: selected.email, success: "true", reason: "", userAgent: ua }).catch(() => {});
-      onLogin(selected);
-    } else {
-      api("logLoginAttempt", { email: selected.email, success: "false", reason: "Wrong PIN", userAgent: ua }).catch(() => {});
-      setShake(true);
-      setError("Wrong PIN. Try again.");
+      setError("Couldn't reach the server. Check your connection and try again.");
       setPin("");
       setTimeout(() => setShake(false), 500);
     }
@@ -792,7 +838,13 @@ function LoginScreen({
       border: "2px solid " + (i < pin.length ? "#6366f1" : "#475569"),
       transition: "background 0.1s"
     }
-  }))), error && /*#__PURE__*/React.createElement("div", {
+  }))), checking && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: "#a89680",
+      fontSize: 12,
+      marginBottom: 14
+    }
+  }, "Checking…"), error && /*#__PURE__*/React.createElement("div", {
     style: {
       color: "#f87171",
       fontSize: 12,
@@ -5789,13 +5841,16 @@ function SideNav(props) {
 
 // Re-entry PIN prompt shown before every write action (2026-07-19). Purely a
 // confirmation step for the person already logged in — checks the typed PIN
-// against the known-correct `user.pin` from login, same comparison LoginScreen
-// itself uses. The real security check happens server-side (Step 0); this just
-// makes sure the person tapping Submit/Approve/Reverse means to, every time.
+// against CURRENT_PIN, the value proved server-side at login and held in memory
+// for the session (updated 2026-08-06: there is no longer any `user.pin`).
+// The real security check still happens server-side on every write via
+// requireStaff(); this just makes sure the person tapping Submit/Approve/Reverse
+// means to, every time.
 function PinConfirmModal({ user }) {
   var _st = React.useState({ show: false, label: "" }), st = _st[0], setSt = _st[1];
   var _p = React.useState(""), pin = _p[0], setPin = _p[1];
   var _sh = React.useState(false), shake = _sh[0], setShake = _sh[1];
+  var _ck = React.useState(false), checking = _ck[0], setChecking = _ck[1];
   React.useEffect(function () {
     _registerPinConfirmUI(setSt);
     return function () { _registerPinConfirmUI(null); };
@@ -5813,24 +5868,29 @@ function PinConfirmModal({ user }) {
     setPin(np);
     if (np.length === 4) {
       setTimeout(function () {
-        if (user && user.pin) {
-          // Normal case: PIN already known in memory (fresh login, or a
-          // restored session that's already been backfilled — see the
-          // session-restore effect in App()). Fast local check.
-          if (String(np) === String(user.pin)) finish(true);
-          else { setShake(true); setPin(""); setTimeout(function () { setShake(false); }, 500); }
-        } else {
-          // Edge case (2026-07-23): a session was just restored after a
-          // refresh and the staff list hasn't finished loading yet, so there's
-          // no known-correct PIN in memory to check against locally. Rather
-          // than falsely reject a correct PIN with the shake animation, pass
-          // it straight through — Apps Script's requireStaff() independently
-          // validates every PIN server-side regardless (Step 0), so a wrong
-          // PIN here still fails, just with a server error instead of a shake
-          // instead of the instant local rejection.
-          CURRENT_PIN = np;
-          finish(true);
+        function reject() {
+          setShake(true); setPin("");
+          setTimeout(function () { setShake(false); }, 500);
         }
+        if (CURRENT_PIN) {
+          // Normal case: the PIN was proved against the server at login and is
+          // held in memory for this session, so this check is instant and works
+          // even if the connection drops mid-shift.
+          if (String(np) === String(CURRENT_PIN)) finish(true);
+          else reject();
+          return;
+        }
+        // After a page refresh the identity is restored from sessionStorage but
+        // the PIN is not (it is never persisted, and as of 2026-08-06 there is
+        // no longer any client-side copy to backfill from). So re-prove it
+        // against the server. This replaces the old behaviour of waving the
+        // write through and letting requireStaff() reject it later.
+        setChecking(true);
+        verifyPinRemote(user.email, String(np), "").then(function (okPin) {
+          setChecking(false);
+          if (okPin) { CURRENT_PIN = String(np); finish(true); }
+          else reject();
+        }).catch(function () { setChecking(false); reject(); });
       }, 120);
     }
   }
@@ -5860,7 +5920,7 @@ function PinConfirmModal({ user }) {
   },
     /*#__PURE__*/React.createElement("div", { style: { fontSize: 28, marginBottom: 6 } }, "🔒"),
     /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 16, color: "#2c211a", marginBottom: 4 } }, "Confirm with PIN"),
-    /*#__PURE__*/React.createElement("div", { style: { color: "#a89680", fontSize: 12.5, marginBottom: 18 } }, "to " + st.label),
+    /*#__PURE__*/React.createElement("div", { style: { color: "#a89680", fontSize: 12.5, marginBottom: 18 } }, checking ? "Checking…" : ("to " + st.label)),
     /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 14, justifyContent: "center", marginBottom: 18, animation: shake ? "shake 0.4s ease" : "none" } },
       dots.map(function (i) {
         return /*#__PURE__*/React.createElement("div", {
@@ -6096,22 +6156,10 @@ function App() {
     loadPurchaseOrders();
     loadSuppliers();
   }, [user]);
-  // Session-restore backfill (2026-07-23): if `user` came back from
-  // sessionStorage after a refresh, it has no `.pin` (deliberately never
-  // persisted). The staff list load above already fetches everyone's PIN from
-  // App_Logins on every app boot regardless of this feature — this just
-  // copies the matching one into memory so PinConfirmModal's local check and
-  // CURRENT_PIN work the same as a fresh login. The person still has to type
-  // their PIN for the first write after a refresh, same as every write always
-  // requires; this only restores the ability to validate it locally.
-  React.useEffect(() => {
-    if (!user || user.pin || !staffDB) return;
-    const match = staffDB.find(s => s.email === user.email);
-    if (match && match.pin) {
-      CURRENT_PIN = match.pin;
-      setUser(u => (u ? { ...u, pin: match.pin } : u));
-    }
-  }, [user, staffDB]);
+  // Session-restore backfill removed 2026-08-06: getAppLogins no longer returns
+  // PINs, so there is nothing to copy into memory after a refresh. PinConfirmModal
+  // now re-proves the PIN against the server on the first write of a restored
+  // session instead.
   // Fetch approved movements for analytics dispatch panel (lazy — only when tab is opened)
   React.useEffect(() => {
     if (!user || tab !== "analytics" || analyticsMovs !== null) return;
@@ -6298,7 +6346,8 @@ function App() {
       staffSource: staffLoadError ? "offline" : "sheet",
     onLogin: async u => {
       setUser(u);
-      CURRENT_PIN = u.pin || ""; // Step 0: kept in memory only, sent with every write for server-side validation
+      // CURRENT_PIN is set in LoginScreen.checkPin, where the typed PIN is known
+      // and has just been verified server-side. `u` no longer carries a pin.
       saveSessionUser(u); // 2026-07-23: identity (not PIN) survives a refresh
       // Check stock immediately after login — alert if anything is critical
       try {
