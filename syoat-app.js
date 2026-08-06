@@ -14,7 +14,10 @@
 //  Logo — reference by filename (lives in same folder as index.html)
 // ─────────────────────────────────────────────────────────────
 const SYOAT_LOGO = "syoat-logo.png";
-const BUILD_VERSION = "20260712-live5";
+// Keep this identical to the ?v= cache-buster in index.html — it is printed on
+// the login screen and in the console, so a stale value mislabels every
+// troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
+const BUILD_VERSION = "20260806a";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -1142,8 +1145,8 @@ function MovEditModal({
   const setLine = (i, k, v) => setLines(l => l.map((x, j) => j === i ? { ...x, [k]: v } : x));
 
   async function submit() {
-    if (lines.some(l => !l.qty || isNaN(Number(l.qty)))) {
-      setErr("All lines need a quantity.");
+    if (lines.some(l => !l.qty || isNaN(Number(l.qty)) || Number(l.qty) <= 0)) {
+      setErr("Every line needs a quantity greater than 0.");
       return;
     }
     setBusy(true);
@@ -1565,6 +1568,12 @@ function MovModal({
   function handleFiles(files) {
     Array.from(files).forEach(file => {
       if (!file.type.startsWith("image/") && file.type !== "application/pdf") return;
+      // PDFs are sent uncompressed (base64 inflates them ~33%), so cap them
+      // rather than let a huge invoice stall the submit on warehouse mobile data.
+      if (file.type === "application/pdf" && file.size > 2 * 1024 * 1024) {
+        setErr("That PDF is " + (file.size / 1048576).toFixed(1) + " MB — max 2 MB. Photograph the invoice instead, or compress the PDF.");
+        return;
+      }
       setCompressing(n => n + 1); // block submit until this resolves
       compressToTarget(file, (dataUrl, finalBytes, finalType) => {
         setImages(prev => [...prev, {
@@ -1595,8 +1604,8 @@ function MovModal({
       setErr("Select a movement type.");
       return;
     }
-    if (lines.some(l => !l.qty || isNaN(Number(l.qty)))) {
-      setErr("All lines need a quantity.");
+    if (lines.some(l => !l.qty || isNaN(Number(l.qty)) || Number(l.qty) <= 0)) {
+      setErr("Every line needs a quantity greater than 0.");
       return;
     }
     if (REASON_TYPES[type] && !reasonCode) {
@@ -1608,8 +1617,14 @@ function MovModal({
     try {
       // Build a small thumbnail (≤30KB each) for every attached photo — up to 4 —
       // so the approver can see all of them, not just the first one.
+      // 2026-08-06: PDFs used to be accepted by the picker, counted in the
+      // notes ("[1 attachment(s): invoice.pdf]") and then dropped here, because
+      // this filter only kept data:image. Supplier invoices are usually PDFs, so
+      // they now ride through uncompressed while photos still get resized.
       const MAX_ATTACH = 4;
-      const imgFiles = images.filter(i => i.dataUrl && i.dataUrl.startsWith("data:image")).slice(0, MAX_ATTACH);
+      const picked   = images.filter(i => i.dataUrl && (i.dataUrl.startsWith("data:image") || i.dataUrl.startsWith("data:application/pdf"))).slice(0, MAX_ATTACH);
+      const imgFiles = picked.filter(i => i.dataUrl.startsWith("data:image"));
+      const pdfFiles = picked.filter(i => i.dataUrl.startsWith("data:application/pdf"));
       function makeUpload(dataUrl) {
         return new Promise(resolve => {
           const img = new Image();
@@ -1626,7 +1641,8 @@ function MovModal({
           img.src = dataUrl;
         });
       }
-      const uploads = (await Promise.all(imgFiles.map(f => makeUpload(f.dataUrl)))).filter(Boolean);
+      const uploads = (await Promise.all(imgFiles.map(f => makeUpload(f.dataUrl)))).filter(Boolean)
+        .concat(pdfFiles.map(f => f.dataUrl));
       const hasImgs = uploads.length > 0;
       const reasonPrefix = reasonCode ? `Reason: ${reasonCode} | ` : "";
       const finalNotes = reasonPrefix + (notes ? notes + " " : "") + (images.length > 0 ? `[${images.length} attachment(s): ${images.map(i => i.name).join(", ")}]` : "");
