@@ -65,29 +65,20 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-const API = "https://script.google.com/macros/s/AKfycbwqBI7uPnv63VYms4PHaJceFhNzEf8Y6f-6ni-2LT2G_1pWmL7WpdwK4uu6HeAuW67agg/exec";
+const API = String((window.SYOAT_CONFIG && window.SYOAT_CONFIG.apiUrl) || "").trim();
+if (!API || API === "REPLACE_WITH_APPS_SCRIPT_WEB_APP_URL") {
+  console.error("Syoat ERP runtime-config.js is missing a valid apiUrl.");
+}
 
 // ─────────────────────────────────────────────────────────────
-//  STAFF — with PINs and role-based permissions
-//  CHANGE THESE PINs before sharing the file with your team
+//  STAFF — public picker metadata only; authentication remains server-side
 // ─────────────────────────────────────────────────────────────
-// Staff loaded dynamically from App_Logins sheet via getAppLogins API
-// Fallback shown if sheet not yet configured
-const STAFF_DB_FALLBACK = [{
-  name: "Lalith Kiran",
-  email: "info@aveekids.com",
-  role: "Founder",
-  // PIN intentionally omitted — offline fallback uses localStorage cache (set on first successful load).
-  canCreate: true,
-  canApprove: true,
-  canReverse: true,
-  canViewAll: true
-}];
+// Staff are loaded live from App_Logins. There is deliberately no offline
+// identity cache or fallback account because this is a business access point.
 // What each role can CREATE
 const CAN_CREATE_TYPES = {
   Founder: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   "Co-Founder": ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  Owner: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Admin: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Manager: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   // Warehouse Manager (added 2026-07-19): treated as Manager-tier — same movement-type
@@ -112,34 +103,50 @@ function genRequestId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
-// Step 0 (2026-07-19): holds the currently logged-in staff member's PIN in memory
-// only (never localStorage) so every write can carry it for server-side validation
-// in Apps Script's requireStaff(). Set on login, cleared on logout. Previously the
-// PIN was only ever checked in the browser (LoginScreen.checkPin) — this closes
-// that gap without changing anything else about how writes are called.
-var CURRENT_PIN = "";
+// The PIN is exchanged once for a temporary opaque server session. The token is
+// memory-only: refresh/close/logout requires a new PIN login, and neither PIN nor
+// token is written to localStorage/sessionStorage.
+var CURRENT_SESSION_TOKEN = "";
+var _sessionExpiredHandler = null;
 
-// Session persistence (2026-07-23): keeps the logged-in identity (name/role/
-// permissions) across a page refresh via sessionStorage, so a refresh doesn't
-// dump the user back to the login screen. The PIN is deliberately stripped
-// before saving here — it is still never persisted — so the first write after
-// a restored session still needs the PIN typed into PinConfirmModal, same as
-// every write already requires. sessionStorage (not localStorage) is used so
-// this clears itself when the tab/browser actually closes, not just on refresh.
+function hasCapability(user, capability) {
+  return !!(user && Array.isArray(user.capabilities) && user.capabilities.includes(capability));
+}
+
+// Compatibility flags are derived once from server-issued capabilities. Older
+// components can keep using user.canCreate/canApprove/etc. without maintaining
+// a second browser-side role matrix.
+function decorateSessionUser(user) {
+  var u = Object.assign({}, user || {});
+  u.capabilities = Array.isArray(u.capabilities) ? u.capabilities.slice() : [];
+  u.canCreate = hasCapability(u, "inventory.movements.create");
+  u.canApprove = hasCapability(u, "inventory.movements.approve");
+  u.canReverse = hasCapability(u, "inventory.movements.reverse");
+  u.canViewAll = hasCapability(u, "inventory.movements.viewAll");
+  return u;
+}
+
+function registerSessionExpiredHandler(handler) {
+  _sessionExpiredHandler = handler;
+}
+
+function isAuthErrorMessage(message) {
+  return /^(Unauthorised|Unauthorized|Session expired)/i.test(String(message || ""));
+}
+
+function handleSessionExpired(message) {
+  CURRENT_SESSION_TOKEN = "";
+  clearSessionUser();
+  if (_sessionExpiredHandler) _sessionExpiredHandler(message || "Session expired. Log in again.");
+}
+
 function loadSessionUser() {
-  try {
-    var raw = sessionStorage.getItem("syoat_session_user");
-    if (!raw) return null;
-    var u = JSON.parse(raw);
-    return (u && u.email) ? u : null;
-  } catch (e) { return null; }
+  try { sessionStorage.removeItem("syoat_session_user"); } catch (e) {}
+  return null;
 }
 function saveSessionUser(u) {
-  try {
-    var safe = Object.assign({}, u);
-    delete safe.pin;
-    sessionStorage.setItem("syoat_session_user", JSON.stringify(safe));
-  } catch (e) {}
+  // Deliberately not persisted. Kept as a no-op while the React call site is
+  // migrated incrementally.
 }
 function clearSessionUser() {
   try { sessionStorage.removeItem("syoat_session_user"); } catch (e) {}
@@ -155,11 +162,9 @@ var _pinConfirmResolve = null;
 var _pinConfirmSetState = null;
 function _registerPinConfirmUI(setState) { _pinConfirmSetState = setState; }
 function requestPinConfirm(label) {
-  // Fail-safe: if the modal hasn't mounted yet for some reason, don't block every
-  // write in the app — just let it through. The server still checks the real PIN
-  // regardless (Step 0), so this popup is an added confirmation step, not the only
-  // line of defence.
-  if (!_pinConfirmSetState) return Promise.resolve(true);
+  // Fail closed if the confirmation UI is unavailable. A business write must
+  // never silently bypass the explicit PIN re-confirmation policy.
+  if (!_pinConfirmSetState) return Promise.reject(new Error("PIN confirmation is unavailable. Reload and try again."));
   return new Promise(function (resolve) {
     _pinConfirmResolve = resolve;
     _pinConfirmSetState({ show: true, label: label });
@@ -199,10 +204,22 @@ async function fetchWithRetry(url, options, retries) {
       var resp = await fetch(url, Object.assign({ redirect: "follow" }, options || {}));
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       var d = await resp.json();
-      if (d.success === false) throw new Error(d.error || "API error");
+      if (d.success === false) {
+        var reference = d.errorId || d.requestId || "";
+        var apiError = new Error((d.error || "API error") + (reference ? " Reference: " + reference : ""));
+        apiError.requestId = d.requestId || "";
+        apiError.errorId = d.errorId || "";
+        throw apiError;
+      }
       return d.data;
     } catch (e) {
       lastErr = e;
+      if (isAuthErrorMessage(e && e.message)) {
+        handleSessionExpired(e.message);
+        throw e;
+      }
+      // Permission denials are authoritative and must not be retried.
+      if (/^Forbidden:/i.test(String(e && e.message || ""))) throw e;
       if (attempt < retries) {
         await new Promise(function(r) { setTimeout(r, attempt * 1200); });
       }
@@ -211,79 +228,80 @@ async function fetchWithRetry(url, options, retries) {
   throw lastErr;
 }
 
-// READ — GET (safe, cacheable)
-async function api(action, params) {
+// Public GET is restricted to the safe pre-login staff picker and health ping.
+async function apiPublic(action, params) {
+  if (action !== "getAppLogins" && action !== "ping") throw new Error("Public action not allowed: " + action);
+  if (!API) throw new Error("API URL is not configured.");
   params = params || {};
   var qs = new URLSearchParams(Object.assign({ action: action }, params)).toString();
   return fetchWithRetry(API + "?" + qs);
 }
 
-// WRITE — GET with payload + requestId
-// requestId lets Apps Script detect and skip duplicate submissions
+// Authenticated reads use POST so the memory-only session token never appears
+// in browser history, proxy logs, or a query string.
+async function api(action, params) {
+  if (!API) throw new Error("API URL is not configured.");
+  params = params || {};
+  if (!CURRENT_SESSION_TOKEN) throw new Error("Session expired. Log in again.");
+  var body = Object.assign({}, params, { action: action, sessionToken: CURRENT_SESSION_TOKEN });
+  return fetchWithRetry(API, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(body)
+  });
+}
+
+// All writes use POST and authenticate with the temporary session token. The PIN
+// is separately re-confirmed by the modal and is never attached to this command.
 async function apiWrite(action, email, payload) {
   var confirmed = await requestPinConfirm(PIN_ACTION_LABELS[action] || "this action");
   if (!confirmed) throw new Error("Cancelled — PIN not confirmed.");
-  var enriched = Object.assign({}, payload, { requestId: genRequestId(), pin: CURRENT_PIN });
-  var serialised = JSON.stringify(enriched);
-  var qs = new URLSearchParams({
+  if (!CURRENT_SESSION_TOKEN) throw new Error("Session expired. Log in again.");
+  var enriched = Object.assign({}, payload, {
     action: action,
     email: email,
-    payload: encodeURIComponent(serialised)
-  }).toString();
-
-  // Guard: URL length limit (~7500 chars safe across all browsers/proxies)
-  if (qs.length > 7000) {
-    throw new Error(
-      "Payload too large (" + qs.length + " chars). Please reduce the number of product lines or split into two submissions."
-    );
-  }
-  return fetchWithRetry(API + "?" + qs);
-}
-
-// WRITE via POST — no URL-length ceiling. Used when the payload carries photo
-// attachments (base64 thumbnails can easily exceed the ~7000-char GET budget).
-async function apiWritePost(action, email, payload) {
-  var confirmed = await requestPinConfirm(PIN_ACTION_LABELS[action] || "this action");
-  if (!confirmed) throw new Error("Cancelled — PIN not confirmed.");
-  var enriched = Object.assign({}, payload, { action: action, email: email, requestId: genRequestId(), pin: CURRENT_PIN });
+    requestId: genRequestId(),
+    sessionToken: CURRENT_SESSION_TOKEN
+  });
   return fetchWithRetry(API, {
     method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify(enriched)
   });
 }
 
-// LOGIN — server-side PIN check (2026-08-06). Deliberately NOT routed through
-// apiWrite/apiWritePost: those call requestPinConfirm(), which would be circular
-// here, and they attach CURRENT_PIN, which is the very thing we are trying to
-// establish. POST-only — a PIN in a GET query string would land in browser
-// history and proxy logs.
-async function apiVerifyPin(email, pin, userAgent) {
+// Large attachment writes use the same authenticated POST transport.
+async function apiWritePost(action, email, payload) {
+  return apiWrite(action, email, payload);
+}
+
+async function apiLogin(email, pin, userAgent) {
+  if (!API) throw new Error("API URL is not configured.");
   return fetchWithRetry(API, {
     method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
-    body: JSON.stringify({ action: "verifyPin", email: email, pin: pin, userAgent: userAgent || "" })
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ action: "login", email: email, pin: pin, userAgent: userAgent || "" })
   });
 }
 
-// Returns true/false, or throws on a genuine network failure.
-// TRANSITIONAL SHIM: if the older Apps Script is still deployed, verifyPin does
-// not exist yet and the request falls through to handleWrite — which runs
-// requireStaff(email, pin) BEFORE reaching its unknown-action branch. So
-// "Unknown action" means the PIN it just validated was correct, and
-// "Unauthorised" means it was wrong. That makes the deploy order of the script
-// and the frontend irrelevant, instead of either order locking the team out.
-// Delete this catch block once the new Apps Script is live.
-async function verifyPinRemote(email, pin, userAgent) {
-  try {
-    var res = await apiVerifyPin(email, pin, userAgent);
-    return !!(res && res.ok);
-  } catch (e) {
-    var msg = String((e && e.message) || "");
-    if (msg.indexOf("Unknown action") !== -1) return true;
-    if (msg.indexOf("Unauthorised") !== -1) return false;
-    throw e;
-  }
+async function apiConfirmPin(pin) {
+  if (!CURRENT_SESSION_TOKEN) return { ok: false, reason: "Session expired" };
+  return fetchWithRetry(API, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ action: "confirmPin", sessionToken: CURRENT_SESSION_TOKEN, pin: pin })
+  });
+}
+
+async function apiLogout() {
+  var token = CURRENT_SESSION_TOKEN;
+  CURRENT_SESSION_TOKEN = "";
+  if (!token) return;
+  return fetchWithRetry(API, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ action: "logout", sessionToken: token })
+  }, 1);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -372,7 +390,7 @@ const TYPE_LABEL = {
 
 // Category tabs for the Record Movement form. Types are grouped by the task the
 // user is doing. A tab only appears if the user's role has ≥1 type in it, so
-// Warehouse sees 4 tabs (Receive/Ship/Returns/Damage-Samples) and owners see 5.
+// Warehouse roles see the movement groups permitted by their operational scope.
 // The 'types' are stored MovementType keys — display uses TYPE_LABEL.
 const TYPE_GROUPS = [
   { key: "receive", label: "📥 Receive",         types: ["Stock In", "FBA Receipt"] },
@@ -402,7 +420,6 @@ const VIRTUAL_LOCATIONS = ["SUPPLIER", "CUSTOMER"];
 const ROLE_COLOR = {
   Founder: "#8b1a1a",
   "Co-Founder": "#1a3a6b",
-  Owner: "#bd5d38",
   Admin: "#2c211a",
   Manager: "#a97b52",
   "Warehouse Manager": "#a97b52",
@@ -543,7 +560,6 @@ function LoginScreen({
   const ROLE_ICON = {
     Founder: "🌟",
     "Co-Founder": "💎",
-    Owner: "👑",
     Admin: "🛡️",
     Manager: "📋",
     "Warehouse Manager": "🏭",
@@ -573,27 +589,23 @@ function LoginScreen({
       setTimeout(() => checkPin(newPin), 150);
     }
   }
-  // 2026-08-06: the PIN is now proved against the server instead of compared
-  // against a value getAppLogins had handed to the browser. On success the typed
-  // PIN is kept in memory (CURRENT_PIN) exactly as before, so every write still
-  // carries it for requireStaff() to re-check — the write path is unchanged.
-  // The old "Logins didn't load (offline)" branch is gone with selected.pin;
-  // an unreachable server now surfaces as its own message below.
-  // Login attempts are logged server-side by verifyPin(), so the browser no
-  // longer calls logLoginAttempt separately and cannot double-count them.
+  // POST the PIN once and retain only the returned opaque session token in
+  // memory. The readable PIN is discarded as soon as this function returns.
   async function checkPin(enteredPin) {
     const ua = (typeof navigator !== "undefined" && navigator.userAgent) ? navigator.userAgent : "";
     setChecking(true);
     setError("");
     try {
-      const okPin = await verifyPinRemote(selected.email, String(enteredPin), ua);
+      const login = await apiLogin(selected.email, String(enteredPin), ua);
       setChecking(false);
-      if (okPin) {
-        CURRENT_PIN = String(enteredPin);
-        onLogin(selected);
+      if (login && login.ok && login.sessionToken) {
+        CURRENT_SESSION_TOKEN = String(login.sessionToken);
+        onLogin(Object.assign({}, selected, login.user || {}));
       } else {
         setShake(true);
-        setError("Wrong PIN. Try again.");
+        setError(login && login.reason === "Temporarily locked"
+          ? "Too many attempts. Try again after the temporary lock expires."
+          : "Wrong PIN or inactive account. Try again.");
         setPin("");
         setTimeout(() => setShake(false), 500);
       }
@@ -706,7 +718,7 @@ function LoginScreen({
         marginBottom: 10,
         lineHeight: 1.5
       }
-    }, /*#__PURE__*/React.createElement("strong", null, "⚠️ Sheet not connected"), /*#__PURE__*/React.createElement("br", null), staffLoadError), /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("strong", null, "⚠️ Staff list unavailable"), /*#__PURE__*/React.createElement("br", null), staffLoadError), /*#__PURE__*/React.createElement("div", {
       style: {
         position: "relative"
       }
@@ -753,7 +765,7 @@ function LoginScreen({
       }
     }, (staffSource === "sheet"
       ? "✓ " + staffDB.length + " staff from sheet"
-      : "⚠ offline — sheet not connected") + " · build " + BUILD_VERSION
+      : "⚠ server unavailable — login disabled") + " · build " + BUILD_VERSION
     ), /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 16,
@@ -807,7 +819,6 @@ function LoginScreen({
   }, {
     Founder: "🌟",
     "Co-Founder": "💎",
-    Owner: "👑",
     Admin: "🛡️",
     Manager: "📋",
     "Warehouse Manager": "🏭",
@@ -897,15 +908,85 @@ function LoginScreen({
 function parseAttachments(docFile) {
   if (!docFile) return [];
   const s = String(docFile);
-  const isImg = x => typeof x === "string" && (x.startsWith("data:image") || x.startsWith("http"));
-  if (isImg(s)) return [s]; // single attachment (legacy base64 OR Drive URL)
+  function fileIdFrom(value) {
+    if (!value) return "";
+    if (typeof value === "object" && value.fileId) return String(value.fileId);
+    var text = String(value);
+    var query = text.match(/[?&]id=([A-Za-z0-9_-]{10,})/);
+    if (query) return query[1];
+    var path = text.match(/\/d\/([A-Za-z0-9_-]{10,})/);
+    return path ? path[1] : "";
+  }
+  function normalize(value, index) {
+    if (typeof value === "string" && value.startsWith("data:")) {
+      return { key: "inline-" + index, inlineData: value, name: "Legacy attachment", mimeType: value.slice(5, value.indexOf(";")) || "image/jpeg" };
+    }
+    var fileId = fileIdFrom(value);
+    if (!fileId) return null; // never render unauthenticated remote URLs
+    return {
+      key: fileId,
+      fileId: fileId,
+      name: (value && typeof value === "object" && value.name) || "Private attachment",
+      mimeType: (value && typeof value === "object" && value.mimeType) || "",
+    };
+  }
+  if (s.startsWith("data:") || fileIdFrom(s)) return [normalize(s, 0)].filter(Boolean);
   if (s.startsWith("[")) {
     try {
       const arr = JSON.parse(s);
-      if (Array.isArray(arr)) return arr.filter(isImg).slice(0, MAX_ATTACH);
+      if (Array.isArray(arr)) return arr.map(normalize).filter(Boolean).slice(0, MAX_ATTACH);
     } catch (e) { /* fall through */ }
   }
   return [];
+}
+
+function ProtectedAttachment({ attachment, movementID, size, onOpen }) {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const dimension = size || 64;
+  async function openFile() {
+    if (attachment.inlineData) {
+      onOpen({ url: attachment.inlineData, mimeType: attachment.mimeType, name: attachment.name });
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const file = await api("getOperationalFile", { movementID: movementID, fileId: attachment.fileId, requestId: genRequestId() });
+      onOpen({ url: file.dataUrl, mimeType: file.mimeType, name: file.name });
+    } catch (e) {
+      setError(e.message);
+    }
+    setBusy(false);
+  }
+  const inlineImage = attachment.inlineData && String(attachment.mimeType || "").startsWith("image/");
+  return /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: openFile,
+    title: error || attachment.name,
+    style: { cursor: busy ? "wait" : "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #bd5d38", width: dimension, height: dimension, flexShrink: 0, padding: 0, background: "#fdf9f1", color: error ? "#b23a2e" : "#6f6152" }
+  }, inlineImage ? /*#__PURE__*/React.createElement("img", {
+    src: attachment.inlineData, alt: attachment.name, style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
+  }) : /*#__PURE__*/React.createElement("span", {
+    style: { display: "flex", height: "100%", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 3, fontSize: dimension > 70 ? 11 : 9, fontWeight: 700 }
+  }, busy ? "…" : error ? "Retry" : "🔒", /*#__PURE__*/React.createElement("span", null, String(attachment.mimeType || "").includes("pdf") ? "PDF" : "View")));
+}
+
+function FileLightbox({ file, onClose }) {
+  if (!file) return null;
+  const isImage = String(file.mimeType || "").startsWith("image/");
+  return /*#__PURE__*/React.createElement("div", {
+    onClick: onClose,
+    style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", cursor: "zoom-out", padding: 20 }
+  }, isImage ? /*#__PURE__*/React.createElement("img", {
+    src: file.url, alt: file.name || "Operational attachment", onClick: e => e.stopPropagation(),
+    style: { maxWidth: "95vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 4px 40px rgba(0,0,0,0.6)" }
+  }) : /*#__PURE__*/React.createElement("iframe", {
+    src: file.url, title: file.name || "Operational attachment", onClick: e => e.stopPropagation(),
+    style: { width: "92vw", height: "88vh", border: "none", borderRadius: 8, background: "#fff" }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose, style: { position: "absolute", top: 14, right: 18, color: "#fff", fontSize: 32, cursor: "pointer", fontWeight: 700, lineHeight: 1, background: "none", border: "none" }
+  }, "×"));
 }
 
 function PendingBanner({
@@ -919,7 +1000,7 @@ function PendingBanner({
 }) {
   const [busy, setBusy] = React.useState(null);
   const [busyAll, setBusyAll] = React.useState(false);
-  const [viewImg, setViewImg] = React.useState(null); // lightbox image URL
+  const [viewImg, setViewImg] = React.useState(null); // authenticated in-memory file payload
   const [rejectTarget, setRejectTarget] = React.useState(null); // movementID with reject-reason box open
   const [rejectReason, setRejectReason] = React.useState("");
   const [rejectBusy, setRejectBusy] = React.useState(null);
@@ -945,7 +1026,7 @@ function PendingBanner({
         fontSize: 12,
         marginTop: 3
       }
-    }, "A Manager or Owner needs to approve before stock updates."));
+    }, "An authorized approver needs to approve before stock updates."));
   }
   async function approveOne(movID) {
     setBusy(movID);
@@ -965,17 +1046,7 @@ function PendingBanner({
     setRejectTarget(null);
     setRejectReason("");
   }
-  const lightbox = viewImg ? /*#__PURE__*/React.createElement("div", {
-    onClick: () => setViewImg(null),
-    style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 9999,
-      display: "flex", alignItems: "center", justifyContent: "center", cursor: "zoom-out" }
-  }, /*#__PURE__*/React.createElement("img", {
-    src: viewImg,
-    style: { maxWidth: "95vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 4px 40px rgba(0,0,0,0.6)" }
-  }), /*#__PURE__*/React.createElement("div", {
-    style: { position: "absolute", top: 14, right: 18, color: "#fff", fontSize: 32, cursor: "pointer", fontWeight: 700, lineHeight: 1 },
-    onClick: e => { e.stopPropagation(); setViewImg(null); }
-  }, "×")) : null;
+  const lightbox = /*#__PURE__*/React.createElement(FileLightbox, { file: viewImg, onClose: () => setViewImg(null) });
   return /*#__PURE__*/React.createElement(React.Fragment, null, lightbox, /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#bd5d3810",
@@ -1021,15 +1092,9 @@ function PendingBanner({
     }
   }, drafts.map(m => {
     const atts = parseAttachments(m.DocumentFile);
-    const thumbs = atts.map((img, i) => /*#__PURE__*/React.createElement("div", {
-      key: i,
-      onClick: () => setViewImg(img),
-      style: { cursor: "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #bd5d38", width: 90, height: 90, flexShrink: 0 }
-    }, /*#__PURE__*/React.createElement("img", {
-      src: img, style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
-    }), /*#__PURE__*/React.createElement("div", {
-      style: { position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(60,40,20,0.78)", fontSize: 9, color: "#fff", textAlign: "center", padding: "2px 0", fontWeight: 700 }
-    }, "👁 Tap to view")));
+    const thumbs = atts.map((attachment, i) => /*#__PURE__*/React.createElement(ProtectedAttachment, {
+      key: attachment.key || i, attachment: attachment, movementID: m.MovementID, size: 90, onOpen: setViewImg
+    }));
     const pdfBadge = m.Notes && m.Notes.includes("attachment(s)") && atts.length === 0 ? /*#__PURE__*/React.createElement("div", {
       style: { background: "#bd5d3812", border: "1px solid #bd5d3840", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: "#bd5d38", fontWeight: 600 }
     }, "📄 PDF invoice attached — filename in notes") : null;
@@ -1647,11 +1712,11 @@ function MovModal({
   onClose,
   onDone
 }) {
-  // Opening Balance is ONLY available to Owner — never any other role
-  const OWNER_ONLY = ["Opening Balance – WH", "Opening Balance – FBA"];
-  const isOwner = user.role === "Owner" || user.role === "Founder" || user.role === "Co-Founder";
+  // Opening Balance is reserved for the two top-authority roles.
+  const TOP_LEVEL_ONLY = ["Opening Balance – WH", "Opening Balance – FBA"];
+  const canCreateOpeningBalance = hasCapability(user, "inventory.openingBalance.create");
   const allAllowed = CAN_CREATE_TYPES[user.role] || [];
-  const allowedTypes = allAllowed.filter(t => isOwner || !OWNER_ONLY.includes(t));
+  const allowedTypes = allAllowed.filter(t => canCreateOpeningBalance || !TOP_LEVEL_ONLY.includes(t));
   const [type, setType] = React.useState(allowedTypes[0] || "");
   const availGroups = TYPE_GROUPS
     .map(g => ({ key: g.key, label: g.label, types: g.types.filter(t => allowedTypes.includes(t)) }))
@@ -2516,7 +2581,7 @@ function MovListModal({
   const [reverseModal, setReverseModal] = React.useState(null); // movementID to reverse
   const [reverseReason, setReverseReason] = React.useState("");
   const [reverseBusy, setReverseBusy] = React.useState(false);
-  const [viewImg, setViewImg] = React.useState(null); // lightbox image URL
+  const [viewImg, setViewImg] = React.useState(null); // authenticated in-memory file payload
   const [productFilter, setProductFilter] = React.useState(""); // ProductID or "" for all
   const load = React.useCallback(async lim => {
     setLoading(true);
@@ -2571,17 +2636,7 @@ function MovListModal({
     setReverseBusy(false);
   }
   const displayMovs = productFilter ? movs.filter(m => m.lines && m.lines.some(l => l.ProductID === productFilter)) : movs;
-  const lightbox = viewImg ? /*#__PURE__*/React.createElement("div", {
-    onClick: () => setViewImg(null),
-    style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 9999,
-      display: "flex", alignItems: "center", justifyContent: "center", cursor: "zoom-out" }
-  }, /*#__PURE__*/React.createElement("img", {
-    src: viewImg,
-    style: { maxWidth: "95vw", maxHeight: "88vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 4px 40px rgba(0,0,0,0.6)" }
-  }), /*#__PURE__*/React.createElement("div", {
-    style: { position: "absolute", top: 14, right: 18, color: "#fff", fontSize: 32, cursor: "pointer", fontWeight: 700, lineHeight: 1 },
-    onClick: e => { e.stopPropagation(); setViewImg(null); }
-  }, "×")) : null;
+  const lightbox = /*#__PURE__*/React.createElement(FileLightbox, { file: viewImg, onClose: () => setViewImg(null) });
   return /*#__PURE__*/React.createElement(React.Fragment, null, lightbox, /*#__PURE__*/React.createElement("div", {
     style: {
       position: "fixed",
@@ -2747,15 +2802,9 @@ function MovListModal({
       style: { marginTop: 4, fontSize: 11, fontWeight: 700, color: TICKET_STATUS_COLOR[linkedTicket.Status] || "#a89680" }
     }, "🎫 " + linkedTicket.TicketID + " · " + linkedTicket.CustomerName + " (" + linkedTicket.Status + ")");
   })(),
-  parseAttachments(m.DocumentFile).map((img, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    onClick: () => setViewImg(img),
-    style: { cursor: "pointer", position: "relative", borderRadius: 8, overflow: "hidden", border: "2px solid #bd5d38", width: 64, height: 64, flexShrink: 0, marginTop: 6 }
-  }, /*#__PURE__*/React.createElement("img", {
-    src: img, style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
-  }), /*#__PURE__*/React.createElement("div", {
-    style: { position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(60,40,20,0.75)", fontSize: 8, color: "#fff", textAlign: "center", padding: "2px 0", fontWeight: 700 }
-  }, "👁"))),
+  parseAttachments(m.DocumentFile).map((attachment, i) => /*#__PURE__*/React.createElement(ProtectedAttachment, {
+    key: attachment.key || i, attachment: attachment, movementID: m.MovementID, size: 64, onOpen: setViewImg
+  })),
   m.Notes && m.Notes.includes("attachment(s)") && parseAttachments(m.DocumentFile).length === 0 && /*#__PURE__*/React.createElement("span", {
     style: { fontSize: 10, color: "#bd5d38", fontWeight: 600, marginTop: 4 }
   }, "📄 PDF"),
@@ -3085,7 +3134,7 @@ function StockCountModal({
       fontSize: 12,
       color: "#bd5d38"
     }
-  }, "ℹ️ This count will be saved as ", /*#__PURE__*/React.createElement("b", null, "Pending"), ". A Manager or Owner must approve it before any stock adjustment is created."), err && /*#__PURE__*/React.createElement("div", {
+  }, "ℹ️ This count will be saved as ", /*#__PURE__*/React.createElement("b", null, "Pending"), ". An authorized approver must approve it before any stock adjustment is created."), err && /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#b23a2e12",
       border: "1px solid #b23a2e40",
@@ -3119,18 +3168,13 @@ function StockCountModal({
 
 // ─────────────────────────────────────────────────────────────
 //  MODULE A: SUPPORT / RETURNS TICKETS MODAL
-//  v3.4: create/resolve is Sravanthi (Operations Manager) or Founder/Co-Founder/
-//  Owner only — Warehouse and Warehouse Manager have no role in this workflow.
+//  Create/resolve access is supplied by the authenticated server session.
 //  Simple lifecycle, no stock impact: Open → In Progress → Resolved → Closed.
 // ─────────────────────────────────────────────────────────────
 const SUPPORT_REASONS = ["Product Damaged on Arrival", "Wrong Item Received", "Missing Item", "Quality Issue", "Size / Fit Issue", "Delayed Delivery", "Refund Request", "Exchange Request", "General Inquiry", "Other"];
 const TICKET_STATUSES = ["Open", "In Progress", "Resolved", "Closed"];
 const TICKET_STATUS_COLOR = { "Open": "#b23a2e", "In Progress": "#a97b52", "Resolved": "#4a7c59", "Closed": "#a89680" };
 
-// v3.4: narrowed per Lalith — only Sravanthi (Operations Manager) or Founder/Co-Founder/Owner
-// can create or resolve tickets. Zubedha (Warehouse) and Pushpanjali (Warehouse Manager) are
-// not part of this workflow at all.
-const SUPPORT_TICKET_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Operations Manager"];
 // v3.6: a ticket links to the order that was actually shipped to the customer (most Support
 // queries are about a new order, before or after delivery) — plus Return-type movements for
 // tickets opened after a physical return. Website – FBA Ship and FBA Dispatch are deliberately
@@ -3139,7 +3183,7 @@ const TICKET_LINKABLE_MOVEMENT_TYPES_FE = ["Website – WH Ship", "Flipkart Disp
 const TICKET_LINK_OTHER = "__OTHER__";
 
 function SupportModal({ tickets, products, returnMovements, user, onClose, onDone, reload }) {
-  const canManage = SUPPORT_TICKET_ROLES_FE.includes(user.role);
+  const canManage = hasCapability(user, "support.tickets.create") || hasCapability(user, "support.tickets.update");
   const [view, setView] = React.useState("list");
   const [customerName, setCustomerName] = React.useState("");
   const [contactInfo, setContactInfo] = React.useState("");
@@ -3325,20 +3369,17 @@ function SupportModal({ tickets, products, returnMovements, user, onClose, onDon
 
 // ─────────────────────────────────────────────────────────────
 //  MODULE B: PURCHASING / SUPPLIER PO MODAL (2026-07-19)
-//  Roles revised 2026-07-19: Owner retired ("There is no Owner any more").
+//  Roles revised 2026-07-19; browser actions now use server capabilities.
 //  Create and approve are now two separate tiers:
 //    - Create:  Founder, Co-Founder, Warehouse Manager (Pushpanjali creates POs)
 //    - Approve/Reject/Close: Founder, Co-Founder only — a PO commits real
 //      money, so Warehouse Manager creates but can't sign off on her own.
-//  Tab visibility is its own, narrower list (see SideNav / PURCHASE_ORDER_VIEW_ROLES_FE):
+//  Tab visibility follows the server-issued purchasing.orders.view capability:
 //  only Founder, Co-Founder, Warehouse Manager, and Warehouse Operator (Zubedha,
 //  view-only — she needs to see what's expected when linking a Stock In to a PO)
 //  see the Purchasing tab at all. Admin, Manager, Accounts, Operations Manager
 //  no longer see it.
 // ─────────────────────────────────────────────────────────────
-const PURCHASE_ORDER_CREATE_ROLES_FE  = ["Founder", "Co-Founder", "Warehouse Manager"];
-const PURCHASE_ORDER_APPROVE_ROLES_FE = ["Founder", "Co-Founder"];
-const PURCHASE_ORDER_VIEW_ROLES_FE    = ["Founder", "Co-Founder", "Warehouse Manager", "Warehouse Operator", "Warehouse"];
 const PO_STATUS_COLOR = { "Draft": "#a97b52", "Approved": "#4a7c59", "Rejected": "#b23a2e", "Closed": "#a89680" };
 // Fixed company header + boilerplate terms — matches the existing Aashya
 // Cosmetics PO template exactly (Lalith's choice: fixed, not editable per PO).
@@ -3364,8 +3405,8 @@ const PO_TERMS = [
 ];
 
 function PurchasingModal({ purchaseOrders, suppliers, products, user, onClose, onDone, reload }) {
-  const canCreate = PURCHASE_ORDER_CREATE_ROLES_FE.includes(user.role);
-  const canApprove = PURCHASE_ORDER_APPROVE_ROLES_FE.includes(user.role);
+  const canCreate = hasCapability(user, "purchasing.orders.create");
+  const canApprove = hasCapability(user, "purchasing.orders.approve");
   const canManage = canCreate || canApprove; // used only for shared list-view chrome, not for gating individual buttons below
   const [view, setView] = React.useState("list");
   const [printingPO, setPrintingPO] = React.useState(null);
@@ -3730,12 +3771,10 @@ function regionOf(fc) { return FC_REGIONS[fc] || "Other"; }
 // FBA Shipment tracking (Module C, 2026-07-19): sit-alongside tracking layer
 // over FBA Dispatch/FBA Receipt movements. Same roles as who already sees
 // this Amazon tab today — no new role decisions needed.
-const FBA_SHIPMENT_ROLES_FE = ["Founder", "Co-Founder", "Owner", "Admin", "Manager", "Warehouse Manager"];
 const FBA_SHIPMENT_STATUSES_FE = ["Working", "Shipped", "In Transit", "Received"];
 const FBA_SHIPMENT_STATUS_COLOR = { "Working": "#a97b52", "Shipped": "#6d5ae6", "In Transit": "#4a7c9e", "Received": "#4a7c59" };
 // Undoing a link is a correction, not routine — Founder/Co-Founder only, same
 // higher bar as Reversal. Pushpanjali (Warehouse Manager) can link but not unlink.
-const UNLINK_SHIPMENT_ROLES_FE = ["Founder", "Co-Founder"];
 
 function FbaReconcileTab(props) {
   var products = props.products, stock = props.stock, user = props.user, notify = props.notify;
@@ -3762,8 +3801,8 @@ function FbaReconcileTab(props) {
   var _shpLines = React.useState([{ productID: "", expectedQty: "" }]), shpLines = _shpLines[0], setShpLines = _shpLines[1];
   var _linkFor = React.useState(null), linkForShipment = _linkFor[0], setLinkForShipment = _linkFor[1]; // ShipmentID currently picking a movement for
   var _unlinkedMovs = React.useState(null), unlinkedMovs = _unlinkedMovs[0], setUnlinkedMovs = _unlinkedMovs[1];
-  var canManageShipments = FBA_SHIPMENT_ROLES_FE.includes(user.role);
-  var canUnlinkShipment = UNLINK_SHIPMENT_ROLES_FE.includes(user.role);
+  var canManageShipments = hasCapability(user, "amazon.shipments.create") || hasCapability(user, "amazon.shipments.update");
+  var canUnlinkShipment = hasCapability(user, "amazon.shipments.unlinkMovement");
 
   // --- Locations–FC / Analytics visual redesign (2026-07-24, approved via
   // mockup) --- Mobile: dropdown cards per product, collapsed by default.
@@ -4033,7 +4072,7 @@ function FbaReconcileTab(props) {
         if (!items.length && !fcSnapshot.length) { notify("✅ FBA already matches the ledger — nothing to adjust."); resetUp(); if (props.onCountCreated) props.onCountCreated(); return; }
         var fp = payloadRef.current || {};
         var res = await apiWritePost("createFbaReconciliation", user.email, { items: items, fileText: fp.text, fileName: fp.name, fileMime: fp.mime, reportDate: reportDate, fcSnapshot: fcSnapshot });
-        notify("✅ " + (res.appliedCount != null ? res.appliedCount : items.length) + " product(s) synced to Amazon FBA — stock updated." + (res.driveUrl ? " Ledger archived to Drive." : ""));
+        notify("✅ " + (res.appliedCount != null ? res.appliedCount : items.length) + " product(s) synced to Amazon FBA — stock updated." + (res.ledgerArchived ? " Ledger archived privately in Drive." : ""));
         resetUp(); if (props.onCountCreated) props.onCountCreated();
       } catch (e) { notify("❌ " + e.message); }
       setBusy(false);
@@ -5921,22 +5960,10 @@ function NavItems(user, showList, showSupportModal, showPurchasingModal, tab, pe
     { k: "support", label: "Support", icon: "🎫" },
     { k: "analytics", label: "Analytics", icon: "📊" }
   ];
-  // Permission: Warehouse has no Amazon import access; Operations Manager (Sravanthi)
-  // does no Amazon work either — hide that tab for both.
-  if (user.role === "Warehouse" || user.role === "Warehouse Operator" || user.role === "Operations Manager") items = items.filter(function(it){ return it.k !== "amazon"; });
-  // Permission: Support tickets are Sravanthi (Operations Manager) / Founder / Co-Founder / Owner
-  // only — Zubedha (Warehouse) and Pushpanjali (Warehouse Manager) have no role in this workflow,
-  // so hide the tab entirely for them rather than showing an empty/disabled view.
-  // "Warehouse Operator" is included defensively — App_Logins.Role (the sheet actually read at
-  // login) has Zubedha as "Warehouse", but the separate Staff sheet lists her as "Warehouse
-  // Operator", so both strings are blocked here in case that field is ever wired in later.
-  var NO_SUPPORT_ROLES = ["Warehouse", "Warehouse Operator", "Warehouse Manager"];
-  if (NO_SUPPORT_ROLES.includes(user.role)) items = items.filter(function(it){ return it.k !== "support"; });
-  // Permission (revised 2026-07-19): Purchasing is visible only to Founder, Co-Founder,
-  // Warehouse Manager (creates POs), and Warehouse Operator/Warehouse (Zubedha — view-only,
-  // she needs to see what's expected when linking a Stock In to a PO). Admin, Manager,
-  // Accounts, and Operations Manager no longer see this tab at all.
-  if (!PURCHASE_ORDER_VIEW_ROLES_FE.includes(user.role)) items = items.filter(function(it){ return it.k !== "purchasing"; });
+  if (!hasCapability(user, "amazon.reconciliation.view")) items = items.filter(function(it){ return it.k !== "amazon"; });
+  if (!hasCapability(user, "support.tickets.view")) items = items.filter(function(it){ return it.k !== "support"; });
+  if (!hasCapability(user, "purchasing.orders.view")) items = items.filter(function(it){ return it.k !== "purchasing"; });
+  if (!hasCapability(user, "inventory.movements.approve")) items = items.filter(function(it){ return it.k !== "approvals"; });
   var active = showList ? "movements" : (showSupportModal ? "support" : (showPurchasingModal ? "purchasing" : ((tab === "product" || tab === "location" || tab === "counts") ? "product" : tab)));
   return { items: items, active: active };
 }
@@ -5997,13 +6024,9 @@ function SideNav(props) {
   );
 }
 
-// Re-entry PIN prompt shown before every write action (2026-07-19). Purely a
-// confirmation step for the person already logged in — checks the typed PIN
-// against CURRENT_PIN, the value proved server-side at login and held in memory
-// for the session (updated 2026-08-06: there is no longer any `user.pin`).
-// The real security check still happens server-side on every write via
-// requireStaff(); this just makes sure the person tapping Submit/Approve/Reverse
-// means to, every time.
+// Re-entry PIN prompt shown before every current write action. Confirmation is
+// performed by the server against the authenticated session; the browser never
+// retains a readable PIN for local comparison.
 function PinConfirmModal({ user }) {
   var _st = React.useState({ show: false, label: "" }), st = _st[0], setSt = _st[1];
   var _p = React.useState(""), pin = _p[0], setPin = _p[1];
@@ -6030,23 +6053,10 @@ function PinConfirmModal({ user }) {
           setShake(true); setPin("");
           setTimeout(function () { setShake(false); }, 500);
         }
-        if (CURRENT_PIN) {
-          // Normal case: the PIN was proved against the server at login and is
-          // held in memory for this session, so this check is instant and works
-          // even if the connection drops mid-shift.
-          if (String(np) === String(CURRENT_PIN)) finish(true);
-          else reject();
-          return;
-        }
-        // After a page refresh the identity is restored from sessionStorage but
-        // the PIN is not (it is never persisted, and as of 2026-08-06 there is
-        // no longer any client-side copy to backfill from). So re-prove it
-        // against the server. This replaces the old behaviour of waving the
-        // write through and letting requireStaff() reject it later.
         setChecking(true);
-        verifyPinRemote(user.email, String(np), "").then(function (okPin) {
+        apiConfirmPin(String(np)).then(function (result) {
           setChecking(false);
-          if (okPin) { CURRENT_PIN = String(np); finish(true); }
+          if (result && result.ok) finish(true);
           else reject();
         }).catch(function () { setChecking(false); reject(); });
       }, 120);
@@ -6138,10 +6148,19 @@ function App() {
   const [purchaseOrders, setPurchaseOrders] = React.useState([]);
   const [suppliers, setSuppliers] = React.useState([]);
   const [showPurchasingModal, setShowPurchasingModal] = React.useState(false);
+  const [systemHealth, setSystemHealth] = React.useState(null);
   const notify = msg => {
     setToast(msg);
     setTimeout(() => setToast(""), 5000);
   };
+  React.useEffect(() => {
+    registerSessionExpiredHandler(function(message) {
+      setUser(null);
+      setError(message || "Session expired. Log in again.");
+      setToast("Session expired. Please log in again.");
+    });
+    return function() { registerSessionExpiredHandler(null); };
+  }, []);
   const load = React.useCallback(async () => {
     setSyncing(true);
     try {
@@ -6170,138 +6189,38 @@ function App() {
     setSyncing(false);
   }, []);
 
-  // Load staff/PINs from sheet on app mount (before login)
+  // Load the safe staff picker from the server before login. Failure leaves the
+  // picker empty; no identity data is accepted from offline browser storage.
   React.useEffect(() => {
-    // Safety net: if the API hasn't responded within 7s, show login with offline fallback.
-    // fetchWithRetry has no per-request timeout, so a slow/cold GAS endpoint can hang
-    // for 30–90s per attempt × 3 retries, keeping staffDB===null (loading spinner) indefinitely.
     let done = false;
     const loginTimer = setTimeout(() => {
       if (!done) {
         done = true;
-        const _ct = (() => { try { return JSON.parse(localStorage.getItem("syoat_staff_cache") || "null"); } catch { return null; } })();
-        setStaffDB(_ct || STAFF_DB_FALLBACK);
-        setStaffLoadError(_ct
-          ? "Google Sheet is slow — using cached logins. Refresh to retry."
-          : "Google Sheet is slow — using offline mode. Refresh to retry."
-        );
+        setStaffDB([]);
+        setStaffLoadError("Google Sheet is taking too long to respond. Refresh to retry.");
       }
     }, 12000);
-    api("getAppLogins").then(data => {
+    apiPublic("getAppLogins").then(data => {
       clearTimeout(loginTimer);
       if (Array.isArray(data) && data.length > 0) {
-        // Merge sheet roles with permission map
-        const rolePerms = {
-          Founder: {
-            canCreate: true,
-            canApprove: true,
-            canReverse: true,
-            canViewAll: true
-          },
-          "Co-Founder": {
-            canCreate: true,
-            canApprove: true,
-            canReverse: true,
-            canViewAll: true
-          },
-          Owner: {
-            canCreate: true,
-            canApprove: true,
-            canReverse: true,
-            canViewAll: true
-          },
-          Admin: {
-            canCreate: true,
-            canApprove: true,
-            canReverse: true,
-            canViewAll: true
-          },
-          Manager: {
-            canCreate: true,
-            canApprove: true,
-            canReverse: false,
-            canViewAll: true
-          },
-          // Added 2026-07-19: Pushpanjali (Warehouse Manager) — Manager-tier permissions.
-          "Warehouse Manager": {
-            canCreate: true,
-            canApprove: true,
-            canReverse: false,
-            canViewAll: true
-          },
-          // v3.4 (2026-07-19): Sravanthi (Operations Manager) is scoped to Support Tickets
-          // only — she does no Amazon or warehouse operations, so movement create/approve
-          // are both locked off here. (Ticket create/resolve is gated separately via
-          // SUPPORT_TICKET_ROLES_FE, not through this object.)
-          "Operations Manager": {
-            canCreate: false,
-            canApprove: false,
-            canReverse: false,
-            canViewAll: true
-          },
-          Warehouse: {
-            canCreate: true,
-            canApprove: false,
-            canReverse: false,
-            canViewAll: false
-          },
-          // Alias (2026-07-19): Zubedha's App_Logins.Role now reads "Warehouse Operator".
-          "Warehouse Operator": {
-            canCreate: true,
-            canApprove: false,
-            canReverse: false,
-            canViewAll: false
-          },
-          Accounts: {
-            canCreate: false,
-            canApprove: false,
-            canReverse: false,
-            canViewAll: true
-          }
-        };
-        const enriched = data.map(s => {
-          // Role is the source of truth for permissions.
-          // Sheet CanCreate/CanApprove columns are IGNORED — role determines access.
-          // This prevents sheet typos from locking out team members.
-          const perms = rolePerms[s.role] || rolePerms["Warehouse"];
-          return { ...s, ...perms };
-        });
-        // Cache the staff list in localStorage for the timeout/error fallback —
-        // names/roles only, so the offline picker still works. PINs are
-        // deliberately stripped before writing (2026-07-23): localStorage is
-        // permanent, unlike the in-memory-only PIN handling everywhere else in
-        // the app, so a cached PIN here would defeat that. Practical effect: if
-        // the sheet is unreachable, staff can still be *selected* from the
-        // cached list, but checkPin() already refuses to authenticate against a
-        // missing `.pin` ("Logins didn't load (offline). Reload the page...") —
-        // so login during an outage now correctly requires a live connection
-        // instead of silently trusting a locally stored PIN.
-        try {
-          const cacheSafe = enriched.map(({ pin, ...rest }) => rest);
-          localStorage.setItem("syoat_staff_cache", JSON.stringify(cacheSafe));
-        } catch {}
-        setStaffDB(enriched);
+        setStaffDB(data);
         setStaffLoadError(null);
         done = true;
         return;
       }
-      if (done) return; // timeout already applied a fallback — keep it rather than replace with another fallback
+      if (done) return;
       done = true;
+      setStaffDB([]);
       if (data && data.error) {
-        const _c1 = (() => { try { return JSON.parse(localStorage.getItem("syoat_staff_cache") || "null"); } catch { return null; } })();
-        setStaffDB(_c1 || STAFF_DB_FALLBACK);
         setStaffLoadError("Sheet error: " + data.error);
       } else {
-        const _c2 = (() => { try { return JSON.parse(localStorage.getItem("syoat_staff_cache") || "null"); } catch { return null; } })();
-        setStaffDB(_c2 || STAFF_DB_FALLBACK);
-        setStaffLoadError("App_Logins sheet has no Active rows. Add staff rows with Status = Active.");
+        setStaffLoadError("App_Logins has no active staff with a supported role.");
       }
     }).catch(err => {
       if (done) return;
       done = true;
       clearTimeout(loginTimer);
-      const _c3 = (() => { try { return JSON.parse(localStorage.getItem("syoat_staff_cache") || "null"); } catch { return null; } })();
-      setStaffDB(_c3 || STAFF_DB_FALLBACK);
+      setStaffDB([]);
       setStaffLoadError("API error: " + (err && err.message ? err.message : String(err)));
     });
   }, []);
@@ -6313,6 +6232,13 @@ function App() {
     loadReturnMovements();
     loadPurchaseOrders();
     loadSuppliers();
+  }, [user]);
+  React.useEffect(() => {
+    if (!user || !hasCapability(user, "system.health.view")) {
+      setSystemHealth(null);
+      return;
+    }
+    api("getSystemHealth", {}).then(setSystemHealth).catch(function () { setSystemHealth(null); });
   }, [user]);
   // Session-restore backfill removed 2026-08-06: getAppLogins no longer returns
   // PINs, so there is nothing to copy into memory after a refresh. PinConfirmModal
@@ -6501,12 +6427,11 @@ function App() {
   if (!user) return /*#__PURE__*/React.createElement(LoginScreen, {
     staffDB: staffDB,
       staffLoadError: staffLoadError,
-      staffSource: staffLoadError ? "offline" : "sheet",
+      staffSource: staffLoadError ? "unavailable" : "sheet",
     onLogin: async u => {
-      setUser(u);
-      // CURRENT_PIN is set in LoginScreen.checkPin, where the typed PIN is known
-      // and has just been verified server-side. `u` no longer carries a pin.
-      saveSessionUser(u); // 2026-07-23: identity (not PIN) survives a refresh
+      const sessionUser = decorateSessionUser(u);
+      setUser(sessionUser);
+      saveSessionUser(sessionUser); // no-op: identity and token remain memory-only
       // Check stock immediately after login — alert if anything is critical
       try {
         const [prods, stk] = await Promise.all([api("getProducts"), api("getStock")]);
@@ -6619,7 +6544,7 @@ function App() {
     onClick: load, title: "Sync now",
     style: { width: 38, height: 38, borderRadius: "50%", border: "1px solid #e7d9c4", background: "#fdf9f1", color: syncing ? "#bd5d38" : "#6f6152", fontSize: 16, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }
   }, "⟳"), /*#__PURE__*/React.createElement("button", {
-    onClick: function(){ if (window.confirm("Log out of Syoat ERP?")) { setUser(null); CURRENT_PIN = ""; clearSessionUser(); } }, title: user.name + " · tap to log out",
+    onClick: function(){ if (window.confirm("Log out of Syoat ERP?")) { apiLogout().catch(function(){}); setUser(null); clearSessionUser(); } }, title: user.name + " · tap to log out",
     style: { width: 40, height: 40, borderRadius: "50%", background: "#2a201a", color: "#f2e7d5", border: "none", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0, cursor: "pointer", position: "relative" }
   }, (user.name || "?").split(" ").map(function(w){ return w[0] || ""; }).slice(0, 2).join("").toUpperCase(), /*#__PURE__*/React.createElement("span", { style: { position: "absolute", bottom: 1, right: 1, width: 9, height: 9, borderRadius: "50%", background: "#5f9e6a", border: "2px solid #efe4d2" } }))), !loading && drafts.length > 0 && tab !== "approvals" && /*#__PURE__*/React.createElement("div", {
     onClick: function(){ setTab("approvals"); },
@@ -6635,7 +6560,18 @@ function App() {
       margin: "0 auto",
       padding: "0 14px"
     }
-  }, error && /*#__PURE__*/React.createElement("div", {
+  }, systemHealth && systemHealth.status !== "ok" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      margin: "16px 0",
+      background: "#fff3cd",
+      border: "1px solid #e3c96b",
+      borderRadius: 10,
+      padding: "12px 16px",
+      color: "#6b5326",
+      fontSize: 12,
+      lineHeight: 1.5
+    }
+  }, "⚠️ System attention: ", (systemHealth.recoveryRequired || []).length, " write recovery item(s), ", (systemHealth.unresolvedErrors || []).length, " unresolved error(s), ", (systemHealth.missingSheets || []).length, " missing sheet(s). Reference IDs are available in the Apps Script health/recovery tools."), error && /*#__PURE__*/React.createElement("div", {
     style: {
       margin: "16px 0",
       background: "#ef444415",
@@ -6946,7 +6882,7 @@ function App() {
       padding: "6px 14px",
       fontSize: 12
     }
-  }, "⟳ Refresh"), (user.role === "Founder" || user.role === "Co-Founder" || user.role === "Owner" || user.role === "Admin" || user.role === "Manager" || user.role === "Warehouse Manager" || user.role === "Accounts") && /*#__PURE__*/React.createElement("button", {
+  }, "⟳ Refresh"), hasCapability(user, "inventory.counts.create") && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowCountModal(true),
     style: {
       ...btnS(),
@@ -7145,7 +7081,7 @@ function App() {
         fontSize: 12,
         whiteSpace: "nowrap"
       }
-    }, "✅ Approve"), (user.canApprove || user.role === "Accounts") && /*#__PURE__*/React.createElement("button", {
+    }, "✅ Approve"), hasCapability(user, "inventory.counts.edit") && /*#__PURE__*/React.createElement("button", {
       onClick: () => setEditingCount({
         ...c,
         diff
@@ -7183,7 +7119,7 @@ function App() {
         background: "#b23a2e08"
       }
     }, "🚫 Reject")))));
-  }))), tab === "amazon" && ((user.role === "Warehouse" || user.role === "Warehouse Operator") ? /*#__PURE__*/React.createElement("div", {
+  }))), tab === "amazon" && (!hasCapability(user, "amazon.reconciliation.view") ? /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#fdf9f1",
       border: "1px solid #e7d9c4",
