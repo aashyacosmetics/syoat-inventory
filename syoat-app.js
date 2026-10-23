@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20260806e";
+const BUILD_VERSION = "20260819-phase2-wp1.1";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -66,6 +66,8 @@ class ErrorBoundary extends React.Component {
 }
 
 const API = String((window.SYOAT_CONFIG && window.SYOAT_CONFIG.apiUrl) || "").trim();
+const APP_ENVIRONMENT = String((window.SYOAT_CONFIG && window.SYOAT_CONFIG.environment) || "production").trim().toLowerCase();
+const IS_STAGING = APP_ENVIRONMENT === "staging";
 if (!API || API === "REPLACE_WITH_APPS_SCRIPT_WEB_APP_URL") {
   console.error("Syoat ERP runtime-config.js is missing a valid apiUrl.");
 }
@@ -195,10 +197,61 @@ const PIN_ACTION_LABELS = {
   linkMovementToShipment: "link this movement to a shipment",
 };
 
+// In-memory timing contains action names and durations only. It deliberately
+// excludes request bodies, PINs, session tokens, identities and business data.
+var CLIENT_PERFORMANCE = {};
+
+function recordClientPerformance(action, totalMs, serverMs, succeeded) {
+  var safeAction = /^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(String(action || "")) ? String(action) : "unknown";
+  var current = CLIENT_PERFORMANCE[safeAction] || { action: safeAction, count: 0, successCount: 0, failureCount: 0, totalMs: 0, maxMs: 0, serverTotalMs: 0 };
+  current.count += 1;
+  current.successCount += succeeded ? 1 : 0;
+  current.failureCount += succeeded ? 0 : 1;
+  current.totalMs += Math.max(0, Number(totalMs) || 0);
+  current.maxMs = Math.max(current.maxMs, Math.max(0, Number(totalMs) || 0));
+  current.serverTotalMs += Math.max(0, Number(serverMs) || 0);
+  CLIENT_PERFORMANCE[safeAction] = current;
+}
+
+function getClientPerformanceSummary() {
+  var actions = Object.keys(CLIENT_PERFORMANCE).sort().map(function(action) {
+    var item = CLIENT_PERFORMANCE[action];
+    return {
+      action: action,
+      count: item.count,
+      successCount: item.successCount,
+      failureCount: item.failureCount,
+      averageMs: item.count ? Math.round(item.totalMs / item.count) : 0,
+      maxMs: Math.round(item.maxMs),
+      serverAverageMs: item.count ? Math.round(item.serverTotalMs / item.count) : 0
+    };
+  });
+  var count = actions.reduce(function(total, item) { return total + item.count; }, 0);
+  var weightedTotal = actions.reduce(function(total, item) { return total + item.averageMs * item.count; }, 0);
+  return {
+    scope: "current browser session",
+    count: count,
+    averageMs: count ? Math.round(weightedTotal / count) : 0,
+    maxMs: actions.reduce(function(maximum, item) { return Math.max(maximum, item.maxMs); }, 0),
+    failures: actions.reduce(function(total, item) { return total + item.failureCount; }, 0),
+    actions: actions
+  };
+}
+
+function slowestPerformanceActions(summary) {
+  return (summary && Array.isArray(summary.actions) ? summary.actions : [])
+    .slice()
+    .sort(function(left, right) { return right.averageMs - left.averageMs; })
+    .slice(0, 3)
+    .map(function(item) { return item.action + " " + item.averageMs + " ms"; })
+    .join(" · ");
+}
+
 // Retry with exponential backoff — 3 attempts, 1.2s / 2.4s gaps
-async function fetchWithRetry(url, options, retries) {
+async function fetchWithRetry(url, options, retries, metricAction) {
   retries = retries || 3;
   var lastErr;
+  var requestStartedAt = Date.now();
   for (var attempt = 1; attempt <= retries; attempt++) {
     try {
       var resp = await fetch(url, Object.assign({ redirect: "follow" }, options || {}));
@@ -209,22 +262,29 @@ async function fetchWithRetry(url, options, retries) {
         var apiError = new Error((d.error || "API error") + (reference ? " Reference: " + reference : ""));
         apiError.requestId = d.requestId || "";
         apiError.errorId = d.errorId || "";
+        apiError.serverDurationMs = d.serverDurationMs || 0;
         throw apiError;
       }
+      recordClientPerformance(metricAction, Date.now() - requestStartedAt, d.serverDurationMs, true);
       return d.data;
     } catch (e) {
       lastErr = e;
       if (isAuthErrorMessage(e && e.message)) {
         handleSessionExpired(e.message);
+        recordClientPerformance(metricAction, Date.now() - requestStartedAt, e.serverDurationMs, false);
         throw e;
       }
       // Permission denials are authoritative and must not be retried.
-      if (/^Forbidden:/i.test(String(e && e.message || ""))) throw e;
+      if (/^Forbidden:/i.test(String(e && e.message || ""))) {
+        recordClientPerformance(metricAction, Date.now() - requestStartedAt, e.serverDurationMs, false);
+        throw e;
+      }
       if (attempt < retries) {
         await new Promise(function(r) { setTimeout(r, attempt * 1200); });
       }
     }
   }
+  recordClientPerformance(metricAction, Date.now() - requestStartedAt, lastErr && lastErr.serverDurationMs, false);
   throw lastErr;
 }
 
@@ -234,7 +294,7 @@ async function apiPublic(action, params) {
   if (!API) throw new Error("API URL is not configured.");
   params = params || {};
   var qs = new URLSearchParams(Object.assign({ action: action }, params)).toString();
-  return fetchWithRetry(API + "?" + qs);
+  return fetchWithRetry(API + "?" + qs, undefined, undefined, action);
 }
 
 // Authenticated reads use POST so the memory-only session token never appears
@@ -248,7 +308,7 @@ async function api(action, params) {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify(body)
-  });
+  }, undefined, action);
 }
 
 // All writes use POST and authenticate with the temporary session token. The PIN
@@ -267,7 +327,7 @@ async function apiWrite(action, email, payload) {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify(enriched)
-  });
+  }, undefined, action);
 }
 
 // Large attachment writes use the same authenticated POST transport.
@@ -281,7 +341,7 @@ async function apiLogin(email, pin, userAgent) {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action: "login", email: email, pin: pin, userAgent: userAgent || "" })
-  });
+  }, undefined, "login");
 }
 
 async function apiConfirmPin(pin) {
@@ -290,7 +350,7 @@ async function apiConfirmPin(pin) {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action: "confirmPin", sessionToken: CURRENT_SESSION_TOKEN, pin: pin })
-  });
+  }, undefined, "confirmPin");
 }
 
 async function apiLogout() {
@@ -301,7 +361,7 @@ async function apiLogout() {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action: "logout", sessionToken: token })
-  }, 1);
+  }, 1, "logout");
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -683,7 +743,19 @@ function LoginScreen({
         letterSpacing: -0.5,
         color: "#2c211a"
       }
-    }, "Inventory ERP"), /*#__PURE__*/React.createElement("div", {
+    }, IS_STAGING ? "Inventory ERP — STAGING" : "Inventory ERP"), IS_STAGING && /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "inline-block",
+        marginTop: 8,
+        padding: "4px 10px",
+        borderRadius: 20,
+        background: "#7c3aed",
+        color: "#fff",
+        fontSize: 10,
+        fontWeight: 800,
+        letterSpacing: "0.12em"
+      }
+    }, "PRIVATE TEST ENVIRONMENT"), /*#__PURE__*/React.createElement("div", {
       style: {
         color: "#a89680",
         fontSize: 13,
@@ -2109,7 +2181,11 @@ function MovModal({
       fontSize: 12
     }
   }, "+ Add Line")), lines.map((line, i) => {
-    const avail = stock ? stock.filter(s => s.ProductID === line.pid && STOCK_LOCATIONS.includes(s.LocationID)).reduce((a, s) => a + Number(s.Quantity), 0) : null;
+    const sourceTracksStock = STOCK_LOCATIONS.includes(sd.src) && sd.src !== sd.dst;
+    const avail = sourceTracksStock && stock
+      ? stock.filter(s => s.ProductID === line.pid && s.LocationID === sd.src).reduce((a, s) => a + Number(s.Quantity), 0)
+      : null;
+    const sourceLabel = LOC_LABEL[sd.src] || sd.src;
     const availColor = avail === 0 ? "#b23a2e" : avail !== null && avail < 50 ? "#bd5d38" : "#bd5d38";
     const availBg = avail === 0 ? "#b23a2e12" : avail !== null && avail < 50 ? "#bd5d3812" : "#bd5d3812";
     return /*#__PURE__*/React.createElement("div", {
@@ -2183,10 +2259,10 @@ function MovModal({
     }, "✕")), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "grid",
-        gridTemplateColumns: "1fr 1fr 1fr",
+        gridTemplateColumns: sourceTracksStock ? "1fr 1fr 1fr" : "1fr 1fr",
         gap: 8
       }
-    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    }, sourceTracksStock && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 10,
         fontWeight: 700,
@@ -2195,7 +2271,7 @@ function MovModal({
         letterSpacing: 0.5,
         marginBottom: 4
       }
-    }, "Stock"), /*#__PURE__*/React.createElement("div", {
+    }, "Available"), /*#__PURE__*/React.createElement("div", {
       style: {
         background: availBg,
         border: `1px solid ${availColor}30`,
@@ -2222,7 +2298,7 @@ function MovModal({
         color: "#a89680",
         marginTop: 2
       }
-    }, "units"))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    }, sourceLabel))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 10,
         fontWeight: 700,
@@ -2281,7 +2357,7 @@ function MovModal({
         color: "#bd5d38",
         fontWeight: 600
       }
-    }, "⚠️ Qty ", line.qty, " exceeds available stock (", avail, " units)"), avail === 0 && Number(line.qty) > 0 && /*#__PURE__*/React.createElement("div", {
+    }, "⚠️ Qty ", line.qty, " exceeds available at ", sourceLabel, " (", avail, " units)"), avail === 0 && Number(line.qty) > 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         marginTop: 8,
         background: "#b23a2e12",
@@ -2292,7 +2368,7 @@ function MovModal({
         color: "#b23a2e",
         fontWeight: 600
       }
-    }, "🚫 No stock available at this location"));
+    }, "🚫 No stock available at ", sourceLabel));
   })), REASON_TYPES[type] && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
   }, "Reason *"), /*#__PURE__*/React.createElement("select", {
@@ -6153,6 +6229,34 @@ function App() {
     setToast(msg);
     setTimeout(() => setToast(""), 5000);
   };
+  const buildLowStockAlerts = React.useCallback(function(productRows, stockRows) {
+    const thresholds = {};
+    productRows.forEach(function(product) {
+      const level = parseInt(product.ReorderLevel);
+      if (product.ProductID && !isNaN(level) && level > 0) thresholds[product.ProductID] = level;
+    });
+
+    const totals = {};
+    const sellableLocations = ["MAIN_WH", "AMAZON_FBA", "FBA_TRANSIT"];
+    stockRows.forEach(function(row) {
+      if (!sellableLocations.includes(row.LocationID)) return;
+      totals[row.ProductID] = (totals[row.ProductID] || 0) + (parseFloat(row.Quantity) || 0);
+    });
+
+    return productRows
+      .filter(function(product) { return thresholds[product.ProductID] !== undefined; })
+      .map(function(product) {
+        const qty = totals[product.ProductID] || 0;
+        const threshold = thresholds[product.ProductID];
+        const pct = threshold > 0 ? Math.round((qty / threshold) * 100) : 0;
+        let status = "ok";
+        if (qty === 0) status = "oos";
+        else if (pct <= 30) status = "critical";
+        else if (pct <= 60) status = "low";
+        return { ...product, totalQty: qty, threshold: threshold, pct: pct, status: status };
+      })
+      .filter(function(product) { return product.status !== "ok"; });
+  }, []);
   React.useEffect(() => {
     registerSessionExpiredHandler(function(message) {
       setUser(null);
@@ -6164,10 +6268,10 @@ function App() {
   const load = React.useCallback(async () => {
     setSyncing(true);
     try {
-      const [p, s, movs] = await Promise.all([api("getProducts"), api("getStock"), api("getMovements", {
-        includeLines: "true",
-        limit: "50"
-      })]);
+      const startup = await api("getInventoryBootstrap", { limit: "50" });
+      const p = Array.isArray(startup.products) ? startup.products : [];
+      const s = Array.isArray(startup.stock) ? startup.stock : [];
+      const movs = Array.isArray(startup.movements) ? startup.movements : [];
       setProducts(p);
       setStock(s);
       setDrafts(movs.filter(m => m.Status === "Draft"));
@@ -6180,6 +6284,9 @@ function App() {
         }
       });
       setAlertThresholds(alertMap);
+      const lowStockAlerts = buildLowStockAlerts(p, s);
+      setLowStockItems(lowStockAlerts);
+      if (lowStockAlerts.length > 0) setShowLowStockAlert(true);
       setLastSync(new Date());
       setError("");
     } catch (e) {
@@ -6223,23 +6330,61 @@ function App() {
       setStaffDB([]);
       setStaffLoadError("API error: " + (err && err.message ? err.message : String(err)));
     });
-  }, []);
+  }, [buildLowStockAlerts]);
   React.useEffect(() => {
     if (!user) return;
     load();
+  }, [user]);
+  // Secondary modules load only when opened. Keeping them out of the login
+  // path makes inventory usable sooner and avoids competing Sheet reads.
+  React.useEffect(() => {
+    if (!user || tab !== "counts") return;
     loadCounts();
+  }, [user, tab]);
+  React.useEffect(() => {
+    if (!user || !showMov || !hasCapability(user, "purchasing.orders.view")) return;
+    loadPurchaseOrders();
+  }, [user, showMov]);
+  React.useEffect(() => {
+    if (!user || !showList || !hasCapability(user, "support.tickets.view")) return;
+    loadTickets();
+  }, [user, showList]);
+  React.useEffect(() => {
+    if (!user || !showSupportModal) return;
     loadTickets();
     loadReturnMovements();
+  }, [user, showSupportModal]);
+  React.useEffect(() => {
+    if (!user || !showPurchasingModal) return;
     loadPurchaseOrders();
     loadSuppliers();
-  }, [user]);
+  }, [user, showPurchasingModal]);
   React.useEffect(() => {
     if (!user || !hasCapability(user, "system.health.view")) {
       setSystemHealth(null);
       return;
     }
-    api("getSystemHealth", {}).then(setSystemHealth).catch(function () { setSystemHealth(null); });
-  }, [user]);
+    // Founder health is useful but must not compete with the inventory needed
+    // to render the first operational screen.
+    if (loading) return;
+    var cancelled = false;
+    api("getSystemHealth", {}).then(function(health) {
+      if (!cancelled) setSystemHealth({ ...health, performance: getClientPerformanceSummary() });
+    }).catch(function () { setSystemHealth(null); });
+    var performanceTimer = setInterval(function() {
+      var performance = getClientPerformanceSummary();
+      setSystemHealth(function(current) {
+        if (!current) return current;
+        var prior = current.performance || {};
+        if (prior.count === performance.count && prior.failures === performance.failures && prior.maxMs === performance.maxMs) return current;
+        return { ...current, performance: performance };
+      });
+    }, 2000);
+    return function() {
+      cancelled = true;
+      clearInterval(performanceTimer);
+    };
+  }, [user, loading]);
   // Session-restore backfill removed 2026-08-06: getAppLogins no longer returns
   // PINs, so there is nothing to copy into memory after a refresh. PinConfirmModal
   // now re-proves the PIN against the server on the first write of a restored
@@ -6428,45 +6573,10 @@ function App() {
     staffDB: staffDB,
       staffLoadError: staffLoadError,
       staffSource: staffLoadError ? "unavailable" : "sheet",
-    onLogin: async u => {
+    onLogin: u => {
       const sessionUser = decorateSessionUser(u);
       setUser(sessionUser);
       saveSessionUser(sessionUser); // no-op: identity and token remain memory-only
-      // Check stock immediately after login — alert if anything is critical
-      try {
-        const [prods, stk] = await Promise.all([api("getProducts"), api("getStock")]);
-        const alertMap = {};
-        prods.forEach(p => {
-          const lvl = parseInt(p.ReorderLevel);
-          if (p.ProductID && !isNaN(lvl) && lvl > 0) alertMap[p.ProductID] = lvl;
-        });
-        const totals = {};
-        stk.forEach(row => {
-          // Only count sellable physical locations — same formula as product cards (fba + wh + transit)
-          // Excludes Returns Hold since those units need QC before they can be sold
-          const SELLABLE = ["MAIN_WH","AMAZON_FBA","FBA_TRANSIT"];
-          if (SELLABLE.includes(row.LocationID)) {
-            totals[row.ProductID] = (totals[row.ProductID] || 0) + (parseFloat(row.Quantity) || 0);
-          }
-        });
-        const alerts = prods
-          .filter(p => alertMap[p.ProductID] !== undefined)
-          .map(p => {
-            const qty = totals[p.ProductID] || 0;
-            const threshold = alertMap[p.ProductID];
-            const pct = threshold > 0 ? Math.round((qty / threshold) * 100) : 0;
-            let status = "ok";
-            if (qty === 0) status = "oos";
-            else if (pct <= 30) status = "critical";
-            else if (pct <= 60) status = "low";
-            return { ...p, totalQty: qty, threshold, pct, status };
-          })
-          .filter(p => p.status !== "ok");
-        if (alerts.length > 0) {
-          setLowStockItems(alerts);
-          setShowLowStockAlert(true);
-        }
-      } catch (e) { /* silent — don't block login on alert fetch failure */ }
     }
   });
   return /*#__PURE__*/React.createElement("div", {
@@ -6540,7 +6650,7 @@ function App() {
     style: { width: 44, height: 44, borderRadius: 13, background: "#fff", border: "1px solid #e7d9c4", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0, boxShadow: "0 2px 6px -3px rgba(0,0,0,0.2)" }
   }, /*#__PURE__*/React.createElement("img", { src: SYOAT_LOGO, alt: "Syoat", style: { width: "100%", height: "100%", objectFit: "contain", padding: 4 } })), /*#__PURE__*/React.createElement("div", {
     style: { flex: 1, minWidth: 0 }
-  }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 600, color: "#2c211a", lineHeight: 1.05 } }, "Inventory ERP"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#6f6152", display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" } }, "Aashya Cosmetics · Hyderabad", /*#__PURE__*/React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 4, background: "#e2e8d3", color: "#5f7a4f", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", padding: "2px 7px", borderRadius: 20, textTransform: "uppercase" } }, /*#__PURE__*/React.createElement("span", { style: { width: 5, height: 5, borderRadius: "50%", background: "#5f9e6a" } }), "Live"))), /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 20, fontWeight: 600, color: "#2c211a", lineHeight: 1.05 } }, IS_STAGING ? "Inventory ERP — STAGING" : "Inventory ERP"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#6f6152", display: "flex", alignItems: "center", gap: 6, marginTop: 2, flexWrap: "wrap" } }, "Aashya Cosmetics · Hyderabad", /*#__PURE__*/React.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: 4, background: IS_STAGING ? "#ede9fe" : "#e2e8d3", color: IS_STAGING ? "#6d28d9" : "#5f7a4f", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", padding: "2px 7px", borderRadius: 20, textTransform: "uppercase" } }, /*#__PURE__*/React.createElement("span", { style: { width: 5, height: 5, borderRadius: "50%", background: IS_STAGING ? "#7c3aed" : "#5f9e6a" } }), IS_STAGING ? "Staging" : "Live"))), /*#__PURE__*/React.createElement("button", {
     onClick: load, title: "Sync now",
     style: { width: 38, height: 38, borderRadius: "50%", border: "1px solid #e7d9c4", background: "#fdf9f1", color: syncing ? "#bd5d38" : "#6f6152", fontSize: 16, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }
   }, "⟳"), /*#__PURE__*/React.createElement("button", {
@@ -6571,7 +6681,18 @@ function App() {
       fontSize: 12,
       lineHeight: 1.5
     }
-  }, "⚠️ System attention: ", (systemHealth.recoveryRequired || []).length, " write recovery item(s), ", (systemHealth.unresolvedErrors || []).length, " unresolved error(s), ", (systemHealth.missingSheets || []).length, " missing sheet(s). Reference IDs are available in the Apps Script health/recovery tools."), error && /*#__PURE__*/React.createElement("div", {
+  }, "⚠️ System attention: ", (systemHealth.recoveryRequired || []).length, " write recovery item(s), ", (systemHealth.unresolvedErrors || []).length, " unresolved error(s), ", (systemHealth.missingSheets || []).length, " missing sheet(s). Reference IDs are available in the Apps Script health/recovery tools."), systemHealth && systemHealth.performance && /*#__PURE__*/React.createElement("div", {
+    style: {
+      margin: systemHealth.status === "ok" ? "16px 0" : "0 0 16px",
+      background: "#edf4e8",
+      border: "1px solid #c6d8bb",
+      borderRadius: 10,
+      padding: "10px 14px",
+      color: "#49603f",
+      fontSize: 11.5,
+      lineHeight: 1.5
+    }
+  }, "API performance · ", systemHealth.performance.scope, ": ", systemHealth.performance.count, " call(s), average ", systemHealth.performance.averageMs, " ms, maximum ", systemHealth.performance.maxMs, " ms, failures ", systemHealth.performance.failures, ".", slowestPerformanceActions(systemHealth.performance) && /*#__PURE__*/React.createElement("span", null, " Slowest: ", slowestPerformanceActions(systemHealth.performance), "."), " Timing contains no PIN or session data."), error && /*#__PURE__*/React.createElement("div", {
     style: {
       margin: "16px 0",
       background: "#ef444415",
