@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20260819-phase2-wp1.1";
+const BUILD_VERSION = "20261023-access-baseline.1";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ if (!API || API === "REPLACE_WITH_APPS_SCRIPT_WEB_APP_URL") {
 // What each role can CREATE
 const CAN_CREATE_TYPES = {
   Founder: ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
-  "Co-Founder": ["Opening Balance – WH", "Opening Balance – FBA", "Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
+  "Co-Founder": ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Admin: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   Manager: ["Stock In", "FBA Dispatch", "FBA Receipt", "Website – WH Ship", "Website – FBA Ship", "Flipkart Dispatch", "Firstcry Dispatch", "Returns – to WH", "Returns – Damaged", "Damage", "Samples"],
   // Warehouse Manager (added 2026-07-19): treated as Manager-tier — same movement-type
@@ -1784,7 +1784,7 @@ function MovModal({
   onClose,
   onDone
 }) {
-  // Opening Balance is reserved for the two top-authority roles.
+  // Opening Balance is reserved for the Founder as a migration/setup action.
   const TOP_LEVEL_ONLY = ["Opening Balance – WH", "Opening Balance – FBA"];
   const canCreateOpeningBalance = hasCapability(user, "inventory.openingBalance.create");
   const allAllowed = CAN_CREATE_TYPES[user.role] || [];
@@ -6681,7 +6681,19 @@ function App() {
       fontSize: 12,
       lineHeight: 1.5
     }
-  }, "⚠️ System attention: ", (systemHealth.recoveryRequired || []).length, " write recovery item(s), ", (systemHealth.unresolvedErrors || []).length, " unresolved error(s), ", (systemHealth.missingSheets || []).length, " missing sheet(s). Reference IDs are available in the Apps Script health/recovery tools."), systemHealth && systemHealth.performance && /*#__PURE__*/React.createElement("div", {
+  }, "⚠️ System attention: ", (systemHealth.recoveryRequired || []).length, " write recovery item(s), ", (systemHealth.unresolvedErrors || []).length, " unresolved error(s), ", (systemHealth.missingSheets || []).length, " missing sheet(s), ", (systemHealth.staffAccessMismatches || []).length, " staff access mismatch(es). Reference IDs are available in the Apps Script health/recovery tools.", (systemHealth.staffAccessMismatches || []).length > 0 && /*#__PURE__*/React.createElement("ul", {
+    style: { margin: "8px 0 0", paddingLeft: 20 }
+  }, systemHealth.staffAccessMismatches.map(function(item, index) {
+    const labels = {
+      LOGIN_MISSING_OR_INACTIVE: "needs an active app login",
+      DUPLICATE_ACTIVE_LOGIN: "has more than one active app login",
+      LOGIN_ROLE_DIFFERS: "has different Staff and App Login roles",
+      STAFF_MISSING: "has an app login but no Staff record",
+      STAFF_INACTIVE: "has an active app login but an inactive Staff record",
+      UNSUPPORTED_STAFF_ROLE: "has an unsupported Staff role"
+    };
+    return /*#__PURE__*/React.createElement("li", { key: (item.staffId || item.name || "staff") + "-" + index }, (item.name || "Staff record"), ": ", labels[item.issue] || "access records need review");
+  }))), systemHealth && systemHealth.performance && /*#__PURE__*/React.createElement("div", {
     style: {
       margin: systemHealth.status === "ok" ? "16px 0" : "0 0 16px",
       background: "#edf4e8",
