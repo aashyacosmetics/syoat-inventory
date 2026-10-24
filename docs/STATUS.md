@@ -4,9 +4,9 @@ Last updated: 2026-10-24
 
 ## Active phase
 
-Phase 1 is complete and stored in `PHASE_1_COMPLETION.md`. Backend `3.1-phase2-wp1.5` and frontend build `20261023-access-baseline.1` are in production. Phase 2 Work Package 1—production stabilization and isolated staging—is in progress. Read-only workbook/schema evidence and local staging-isolation safeguards are prepared; isolated resources, UAT and rollback rehearsal remain mandatory before inventory correction or migration.
+Phase 1 is complete and stored in `PHASE_1_COMPLETION.md`. Backend `3.1-phase2-wp1.6` and frontend build `20261023-access-baseline.1` are in production. Phase 2 Work Package 1—production stabilization and isolated staging—is in progress. Read-only workbook/schema evidence and local staging-isolation safeguards are prepared; isolated resources, UAT and rollback rehearsal remain mandatory before inventory correction or migration.
 
-Backend `3.1-phase2-wp1.5` retains the safe owner-only diagnostic and adds request-scoped Sheet read reuse with write invalidation. The owner deployed it on 2026-10-24; the frontend is unchanged.
+Backend `3.1-phase2-wp1.6` retains request-scoped Sheet read reuse and adds a 30-second sanitized picker cache plus a compact session-property index for the measured startup delays. The owner deployed it on 2026-10-24; the frontend is unchanged.
 
 ## Current implementation baseline
 
@@ -14,8 +14,8 @@ Backend `3.1-phase2-wp1.5` retains the safe owner-only diagnostic and adds reque
 - Local audit checkout contains `index.html`, `syoat-app.js`, styling, images, and older redesign artifacts.
 - Current backend: bound Google Apps Script connected to the live workbook.
 - The original supplied 2,145-line backend source was saved locally as `Code.gs`; that local file now contains the reviewed Work Package 2–7 changes and is no longer a byte-for-byte copy of the attachment.
-- GitHub `main` was verified at commit `104c6e8` on 2026-10-24.
-- The current Apps Script and GitHub frontend have been deployed by the owner. Documentation changes in this checkout are local until the owner chooses to publish them.
+- GitHub `main` was verified at commit `8443e09` on 2026-10-24. The four owner upload commits correctly stored backend `3.1-phase2-wp1.5`, its three documentation files and two performance-test files in their intended paths.
+- The current Apps Script and GitHub frontend have been deployed by the owner. Updated source/test/documentation files for backend `3.1-phase2-wp1.6` are local until owner publication to GitHub.
 - No package manifest, automated test suite, CI workflow, deployment guide, or staging configuration was present at the audit baseline.
 - Both committed JavaScript artifacts passed a basic Node syntax check during the audit.
 
@@ -63,18 +63,34 @@ This list records the original audit baseline for history. Later releases deploy
 
 ## Next recommended task
 
-Close the two reviewed stock-count recovery markers as no-retry, resolve the seven reviewed transient login errors, reject stale counts `CNT-037` and `CNT-038`, and perform one fresh physical count for `PRD-P002` at `MAIN_WH`. Before the next migration, establish isolated staging and rehearse rollback.
+Publish the reviewed backend `3.1-phase2-wp1.6` source/test/documentation files to GitHub. Then return to the remaining Work Package 1 gate: establish isolated staging and rehearse rollback before the next inventory migration.
 
 ## Production state
 
-- Documentation files: local project updated through the production record; documentation push status not independently verified.
-- Apps Script `Code.gs`: owner deployed backend `3.1-phase2-wp1.5`; public health returned status `ok` and the expected version on 2026-10-24 15:40 IST.
+- Documentation/test files for backend `3.1-phase2-wp1.5`: verified on GitHub `main` through commit `8443e09`; candidate `3.1-phase2-wp1.6` records remain local.
+- Apps Script `Code.gs`: owner deployed backend `3.1-phase2-wp1.6`; public health returned status `ok`, the expected version and 2 ms server duration on 2026-10-24 16:04:30 IST.
 - GitHub frontend: build `20261023-access-baseline.1` published from commit `104c6e8` and GitHub Pages deployment #80 at verification time.
 - Live Google Sheet: PIN hashes/salts populated, readable PIN cells cleared, and 85 movement file references normalized.
 - Live Drive: the earlier migration audit reported 187 checked and private; the later read-only folder inventory observed at least 359 owner-only/not-shared files.
 - Deployment: owner-run production deployment completed and the owner confirmed the ERP is working.
 
 ## Handoff log
+
+### 2026-10-24 — Phase 2 startup authentication optimization deployed and measured
+
+- Status: deployed by the owner, verified read-only in production and measured with cold and immediate warm samples. No frontend publication was required.
+- Goal: reduce the measured `getAppLogins` 3,012 ms and `login` 4,125 ms startup delays without weakening PIN, status, session, capability or audit controls.
+- Roadmap item: Phase 2 Work Package 1 performance stabilization.
+- Files changed: `Code.gs`, `tests/helpers/apps-script-harness.mjs`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `docs/PHASE_2_WP1_STABILIZATION.md`, `docs/CHANGELOG.md`, and this status record.
+- Picker behavior: the server caches only the sanitized public picker array (`name`, `email`, `role`) for 30 seconds. A login never trusts that cache; it rereads current Staff and App Login rows and verifies the stored salted PIN hash.
+- Login behavior: session cleanup now maintains a compact session-property index. After the first discovery scan, later logins no longer enumerate unrelated write-request, recovery and operational-error properties. Session maximum/idle expiry, deactivation checks, token hashing, lockout, login audit and logout remain enforced.
+- Local version: backend `3.1-phase2-wp1.6`; frontend remains `20261023-access-baseline.1`.
+- Checks and results: both active JavaScript files parse; all 73 automated tests pass, including sanitized picker caching, live-row login enforcement and session-index reuse; the 48-action API catalogue is current; the environment template passes its structural safety check with expected unconfigured-environment warnings.
+- Production evidence: a direct read-only ping returned backend `3.1-phase2-wp1.6`, status `ok` and 2 ms server duration at 16:04:30 IST. The owner screenshot showed four calls, 3,436 ms average, 4,156 ms maximum and zero failures. The displayed slowest actions were `getInventoryBootstrap` 4,156 ms, `login` 4,003 ms and `getSystemHealth` 3,096 ms; `getAppLogins` was not in the slowest three.
+- Live/production changes: the owner updated the existing Apps Script deployment. Codex did not change Sheet data, Drive, live Script Properties, GitHub or the frontend.
+- Warm evidence: the immediate repeat showed four calls, 3,875 ms average, 5,373 ms maximum and zero failures. The displayed slowest actions were `getInventoryBootstrap` 5,373 ms, `login` 3,891 ms and `getSystemHealth` 3,367 ms. The rounded aggregate places the unlisted `getAppLogins` call at approximately 2,869 ms.
+- Interpretation: versus the `3.1-phase2-wp1.5` sample, login improved by about 6% and the picker by about 5%, but both remain above the 1–2 second warm target and the bootstrap varied upward. The change is retained because it removes bounded duplicate work; no stronger cache of authoritative authentication rows is justified because that would increase stale-access risk for little measured benefit.
+- Next recommended action: publish the reviewed `3.1-phase2-wp1.6` source/test/documentation files to GitHub, then complete the isolated-staging and rollback-rehearsal gate before inventory migration work.
 
 ### 2026-10-24 — Phase 2 request-scoped Sheet read optimization ready for owner review
 

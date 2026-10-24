@@ -88,3 +88,14 @@ Production timing after the reviewed `CNT-046` correction showed `approveStockCo
 - Authentication, authorization, PIN confirmation, idempotency, recovery checkpoints, maker-checker rules, audit records and stock validation are unchanged.
 
 This is a local candidate only. Its performance effect must be measured after owner deployment using the same Founder current-browser summary; no duration improvement is claimed from local in-memory tests.
+
+## Startup authentication optimization — 2026-10-24
+
+The clean production startup sample after backend `3.1-phase2-wp1.5` measured `getAppLogins` at 3,012 ms and `login` at 4,125 ms. Local candidate `3.1-phase2-wp1.6` makes two bounded changes:
+
+- `getAppLogins` caches only the already-public sanitized picker array (`name`, `email`, `role`) in server-side Script Cache for 30 seconds. PIN material, status rows, session data and internal capabilities are excluded. A real login still rereads the live Staff and App Login sheets and fails closed for an inactive or unsupported account.
+- Session cleanup records a compact index of session-property keys. The first login after upgrade discovers existing session keys once; later logins inspect only those keys instead of scanning unrelated idempotency, recovery and operational-error properties. Expiry, inactivity, deactivation and revocation checks are unchanged.
+
+The owner deployed this candidate on 2026-10-24. A read-only ping confirmed backend `3.1-phase2-wp1.6`, status `ok` and 2 ms server duration at 16:04:30 IST. The first/cold four-call screenshot recorded 3,436 ms average, 4,156 ms maximum and zero failures; `getInventoryBootstrap` was 4,156 ms, `login` was 4,003 ms and `getSystemHealth` was 3,096 ms. `getAppLogins` was not among the three slowest actions.
+
+The immediate warm repeat recorded four calls, 3,875 ms average, 5,373 ms maximum and zero failures. `getInventoryBootstrap` was 5,373 ms, `login` was 3,891 ms and `getSystemHealth` was 3,367 ms. From the rounded aggregate, the unlisted fourth call (`getAppLogins`) was approximately 2,869 ms. Compared with the `3.1-phase2-wp1.5` sample, login improved from 4,125 ms by about 6% and the picker improved from 3,012 ms by about 5%; both remain above the 1–2 second warm target and the overall sample shows normal Apps Script variability. The bounded optimization is retained because it removes known duplicate work without weakening controls, but stronger caching of authoritative authentication rows is not justified by this evidence.
