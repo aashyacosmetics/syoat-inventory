@@ -142,11 +142,18 @@ export function createAppsScriptHarness(sheetValues = {}) {
   const cache = new Map();
   let uuidCounter = 0;
   const properties = new Map();
+  const propertyStats = { getPropertyCalls: 0, getPropertiesCalls: 0 };
   const scriptProperties = {
-    getProperty: key => properties.get(key) ?? null,
+    getProperty: key => {
+      propertyStats.getPropertyCalls += 1;
+      return properties.get(key) ?? null;
+    },
     setProperty: (key, value) => { properties.set(key, String(value)); return scriptProperties; },
     deleteProperty: key => { properties.delete(key); return scriptProperties; },
-    getProperties: () => Object.fromEntries(properties),
+    getProperties: () => {
+      propertyStats.getPropertiesCalls += 1;
+      return Object.fromEntries(properties);
+    },
   };
   const lockStats = { waitCalls: 0, releaseCalls: 0 };
   const scriptLock = {
@@ -193,6 +200,7 @@ export function createAppsScriptHarness(sheetValues = {}) {
   return {
     spreadsheet,
     properties,
+    propertyStats,
     lockStats,
     call(functionName, ...args) {
       if (typeof context[functionName] !== "function") throw new Error(`Apps Script function not found: ${functionName}`);
