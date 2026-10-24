@@ -46,7 +46,10 @@ const AUTH_CONFIG = {
   SESSION_HOURS:           8,
   SESSION_IDLE_MINUTES:   30,
   SESSION_PROPERTY_PREFIX: "SYOAT_SESSION_",
+  SESSION_INDEX_PROPERTY:  "SYOAT_AUTH_SESSION_INDEX",
   ATTEMPT_PROPERTY_PREFIX: "SYOAT_AUTH_ATTEMPT_",
+  SAFE_PICKER_CACHE_PREFIX: "SYOAT_SAFE_STAFF_PICKER_",
+  SAFE_PICKER_CACHE_SECONDS: 30,
 };
 
 const WRITE_CONFIG = {
@@ -57,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.1-phase2-wp1.5",
+  VERSION:               "3.1-phase2-wp1.6",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -526,6 +529,18 @@ function getLists(listName) {
 // and App_Logins, while Staff remains authoritative for name and role.
 function getAppLogins() {
   try {
+    const cache = CacheService.getScriptCache();
+    const cacheKey = AUTH_CONFIG.SAFE_PICKER_CACHE_PREFIX + OPERATIONS_CONFIG.VERSION;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (cacheError) {
+        cache.remove(cacheKey);
+      }
+    }
+
     const ss    = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(SHEETS.APP_LOGINS);
     const staffSheet = ss.getSheetByName(SHEETS.STAFF);
@@ -538,7 +553,7 @@ function getAppLogins() {
       }
     });
     const seen = {};
-    return sheetToObjects(SHEETS.APP_LOGINS)
+    const picker = sheetToObjects(SHEETS.APP_LOGINS)
       .filter(login => {
         const email = normaliseEmail(login.Email);
         if (!email || seen[email] || String(login.Status).trim().toLowerCase() !== "active" || !staffByEmail[email]) return false;
@@ -553,6 +568,8 @@ function getAppLogins() {
           role:  String(staff.Role || "Warehouse"),
         };
       });
+    cache.put(cacheKey, JSON.stringify(picker), AUTH_CONFIG.SAFE_PICKER_CACHE_SECONDS);
+    return picker;
   } catch(e) {
     recordOperationalError(e, "getAppLogins");
     return { error: "Staff directory is unavailable. Reference: " + CURRENT_CORRELATION_ID };
@@ -704,24 +721,47 @@ function safeStaffProfile(staff) {
 
 function cleanupExpiredSessions() {
   const properties = authProperties();
-  const all = properties.getProperties();
+  let sessionKeys = [];
+  const indexed = properties.getProperty(AUTH_CONFIG.SESSION_INDEX_PROPERTY);
+  if (indexed) {
+    try {
+      const parsed = JSON.parse(indexed);
+      if (Array.isArray(parsed)) {
+        sessionKeys = parsed.filter(key => String(key).startsWith(AUTH_CONFIG.SESSION_PROPERTY_PREFIX));
+      }
+    } catch (e) {
+      sessionKeys = [];
+    }
+  }
+  if (!indexed || !sessionKeys.length) {
+    sessionKeys = Object.keys(properties.getProperties())
+      .filter(key => key.startsWith(AUTH_CONFIG.SESSION_PROPERTY_PREFIX));
+  }
+
   const nowMs = Date.now();
   const idleMs = AUTH_CONFIG.SESSION_IDLE_MINUTES * 60 * 1000;
-  Object.keys(all).forEach(key => {
-    if (!key.startsWith(AUTH_CONFIG.SESSION_PROPERTY_PREFIX)) return;
+  const activeKeys = [];
+  sessionKeys.forEach(key => {
+    const raw = properties.getProperty(key);
+    if (!raw) return;
     try {
-      const record = JSON.parse(all[key]);
+      const record = JSON.parse(raw);
       if (record.expiresAt <= nowMs || record.lastSeenAt + idleMs <= nowMs) {
         properties.deleteProperty(key);
+      } else {
+        activeKeys.push(key);
       }
     } catch (e) {
       properties.deleteProperty(key);
     }
   });
+  properties.setProperty(AUTH_CONFIG.SESSION_INDEX_PROPERTY, JSON.stringify(activeKeys));
+  return activeKeys;
 }
 
 function createSession(staff) {
-  cleanupExpiredSessions();
+  const activeSessionKeys = cleanupExpiredSessions();
+  const properties = authProperties();
   const token = randomSessionToken();
   const nowMs = Date.now();
   const record = {
@@ -730,7 +770,10 @@ function createSession(staff) {
     lastSeenAt: nowMs,
     expiresAt: nowMs + AUTH_CONFIG.SESSION_HOURS * 60 * 60 * 1000,
   };
-  authProperties().setProperty(sessionPropertyKey(token), JSON.stringify(record));
+  const key = sessionPropertyKey(token);
+  properties.setProperty(key, JSON.stringify(record));
+  activeSessionKeys.push(key);
+  properties.setProperty(AUTH_CONFIG.SESSION_INDEX_PROPERTY, JSON.stringify(activeSessionKeys));
   return {
     sessionToken: token,
     expiresAt: new Date(record.expiresAt).toISOString(),
