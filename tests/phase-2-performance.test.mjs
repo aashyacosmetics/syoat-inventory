@@ -77,6 +77,95 @@ test("one request reuses Sheet object reads and invalidates rows after a write",
   assert.equal(harness.evaluate("REQUEST_SHEET_READ_CACHE"), null, "request cache must be discarded after completion");
 });
 
+test("safe staff picker reuses a short server cache without exposing authentication fields", () => {
+  const sheets = {
+    Staff: [
+      ["StaffID", "Name", "Email", "Role", "Status"],
+      ["STF001", "Founder", "founder@example.invalid", "Founder", "Active"],
+    ],
+    App_Logins: [
+      ["Name", "Email", "Role", "Status", "PINHash", "PINSalt"],
+      ["Founder", "founder@example.invalid", "Founder", "Active", "private-hash", "private-salt"],
+    ],
+  };
+  const harness = createAppsScriptHarness(sheets);
+
+  const first = harness.callJson("doGet", { parameter: { action: "getAppLogins" } });
+  const second = harness.callJson("doGet", { parameter: { action: "getAppLogins" } });
+
+  assert.deepEqual(second.data, first.data);
+  assert.equal(harness.spreadsheet.getSheetByName("Staff").dataRangeReads, 1);
+  assert.equal(harness.spreadsheet.getSheetByName("App_Logins").dataRangeReads, 1);
+  assert.deepEqual(Object.keys(second.data[0]).sort(), ["email", "name", "role"]);
+  assert.doesNotMatch(JSON.stringify(second), /PINHash|PINSalt|private-hash|private-salt/);
+});
+
+test("login still checks live Staff and App Login rows after the safe picker cache is warm", () => {
+  const pin = "2468";
+  const salt = "test-salt";
+  const harness = createAppsScriptHarness({
+    Staff: [
+      ["StaffID", "Name", "Email", "Role", "Status"],
+      ["STF001", "Founder", "founder@example.invalid", "Founder", "Active"],
+    ],
+    App_Logins: [
+      ["Name", "Email", "Role", "Status", "PINHash", "PINSalt"],
+      ["Founder", "founder@example.invalid", "Founder", "Active", "", salt],
+    ],
+    Login_Log: [["LoginID", "Timestamp", "Email", "Success", "Reason", "UserAgent"]],
+  });
+  const hash = harness.call("pinHash", pin, salt);
+  harness.spreadsheet.getSheetByName("App_Logins").getRange(2, 5).setValue(hash);
+  harness.callJson("doGet", { parameter: { action: "getAppLogins" } });
+  harness.spreadsheet.getSheetByName("Staff").getRange(2, 5).setValue("Inactive");
+
+  const response = harness.callJson("doPost", {
+    postData: { contents: JSON.stringify({
+      action: "login",
+      email: "founder@example.invalid",
+      pin,
+      userAgent: "local-test",
+    }) },
+  });
+
+  assert.equal(response.data.ok, false);
+  assert.match(response.data.reason, /Invalid PIN or inactive account/);
+  assert.equal(harness.spreadsheet.getSheetByName("Staff").dataRangeReads, 2);
+  assert.equal(harness.spreadsheet.getSheetByName("App_Logins").dataRangeReads, 2);
+});
+
+test("session cleanup uses its session-key index after the first login", () => {
+  const pin = "2468";
+  const salt = "test-salt";
+  const harness = createAppsScriptHarness({
+    Staff: [
+      ["StaffID", "Name", "Email", "Role", "Status"],
+      ["STF001", "Founder", "founder@example.invalid", "Founder", "Active"],
+    ],
+    App_Logins: [
+      ["Name", "Email", "Role", "Status", "PINHash", "PINSalt"],
+      ["Founder", "founder@example.invalid", "Founder", "Active", "", salt],
+    ],
+    Login_Log: [["LoginID", "Timestamp", "Email", "Success", "Reason", "UserAgent"]],
+  });
+  const hash = harness.call("pinHash", pin, salt);
+  harness.spreadsheet.getSheetByName("App_Logins").getRange(2, 5).setValue(hash);
+  const loginBody = {
+    postData: { contents: JSON.stringify({
+      action: "login",
+      email: "founder@example.invalid",
+      pin,
+      userAgent: "local-test",
+    }) },
+  };
+
+  assert.equal(harness.callJson("doPost", loginBody).data.ok, true);
+  assert.equal(harness.propertyStats.getPropertiesCalls, 1);
+  assert.equal(harness.callJson("doPost", loginBody).data.ok, true);
+  assert.equal(harness.propertyStats.getPropertiesCalls, 1, "later logins should not scan unrelated Script Properties");
+  assert.ok(harness.properties.has("SYOAT_AUTH_SESSION_INDEX"));
+});
+
 test("movement entry shows availability for the actual source location only", () => {
   const frontend = readProjectFile("syoat-app.js");
   const modalStart = frontend.indexOf("function MovModal(");
@@ -110,7 +199,7 @@ test("API responses expose safe server duration metadata", () => {
   const response = harness.callJson("doGet", { parameter: { action: "ping" } });
 
   assert.equal(response.success, true);
-  assert.equal(response.data.version, "3.1-phase2-wp1.5");
+  assert.equal(response.data.version, "3.1-phase2-wp1.6");
   assert.equal(Number.isFinite(response.serverDurationMs), true);
   assert.ok(response.serverDurationMs >= 0);
   assert.equal(Object.hasOwn(response, "pin"), false);
