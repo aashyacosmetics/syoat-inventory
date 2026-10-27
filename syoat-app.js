@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20261023-access-baseline.1";
+const BUILD_VERSION = "20261027-fba-bridge.2";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -1813,6 +1813,30 @@ function MovModal({
   // so received-vs-ordered quantities can be tracked back to the PO (Module B).
   const [purchaseOrderID, setPurchaseOrderID] = React.useState("");
   const openPOs = (purchaseOrders || []).filter(po => po.Status === "Approved");
+  // Warehouse operators receive only the minimum open-shipment information
+  // needed to record an FBA Dispatch. The full Amazon module remains hidden.
+  const [fbaShipmentOptions, setFbaShipmentOptions] = React.useState(null);
+  const [fbaShipmentError, setFbaShipmentError] = React.useState("");
+  const [fbaShipmentID, setFbaShipmentID] = React.useState("");
+  React.useEffect(() => {
+    if (type !== "FBA Dispatch") {
+      setFbaShipmentID("");
+      return;
+    }
+    let alive = true;
+    setFbaShipmentOptions(null);
+    setFbaShipmentError("");
+    api("getFbaDispatchShipmentOptions").then(rows => {
+      if (alive) setFbaShipmentOptions(Array.isArray(rows) ? rows : []);
+    }).catch(e => {
+      if (alive) {
+        setFbaShipmentOptions([]);
+        setFbaShipmentError(e.message);
+      }
+    });
+    return () => { alive = false; };
+  }, [type]);
+  const selectedFbaShipment = (fbaShipmentOptions || []).find(shipment => shipment.shipmentID === fbaShipmentID) || null;
   const [lines, setLines] = React.useState([{
     pid: products[0]?.ProductID || "",
     qty: "",
@@ -1950,6 +1974,14 @@ function MovModal({
       setErr("Select a reason.");
       return;
     }
+    if (type === "FBA Dispatch" && !fbaShipmentID) {
+      setErr("Select the open FBA shipment for this dispatch.");
+      return;
+    }
+    if (type === "FBA Dispatch" && !refNo.trim()) {
+      setErr("Enter the Amazon Shipment ID in Reference No.");
+      return;
+    }
     setBusy(true);
     setErr("");
     try {
@@ -1992,6 +2024,7 @@ function MovModal({
         sourceLocationID: sd.src,
         destinationLocationID: sd.dst,
         referenceNumber: refNo,
+        amazonShipmentID: type === "FBA Dispatch" ? fbaShipmentID : "",
         carrierTrackingNumber: carrier,
         amazonDestinationFC: (type === "FBA Dispatch" || type === "FBA Receipt") ? destFC : "",
         notes: finalNotes,
@@ -2145,12 +2178,26 @@ function MovModal({
     }
   }, user.role)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
-  }, "Reference No."), /*#__PURE__*/React.createElement("input", {
+  }, type === "FBA Dispatch" ? "Amazon Shipment ID / Reference *" : "Reference No."), /*#__PURE__*/React.createElement("input", {
     value: refNo,
     onChange: e => setRefNo(e.target.value),
-    placeholder: "Invoice / Order ID",
+    placeholder: type === "FBA Dispatch" ? "Exact Amazon Shipment ID" : "Invoice / Order ID",
     style: inp
-  }))), (type === "FBA Dispatch" || type === "Website – WH Ship" || type === "Website – FBA Ship" || type === "Flipkart Dispatch" || type === "Firstcry Dispatch") && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+  }))), type === "FBA Dispatch" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, "Open FBA Shipment *"), /*#__PURE__*/React.createElement("select", {
+    value: fbaShipmentID,
+    onChange: e => {
+      const shipmentID = e.target.value;
+      setFbaShipmentID(shipmentID);
+      const shipment = (fbaShipmentOptions || []).find(row => row.shipmentID === shipmentID);
+      setDestFC(shipment ? shipment.destinationFC : "");
+    },
+    disabled: fbaShipmentOptions === null,
+    style: inp
+  }, [/*#__PURE__*/React.createElement("option", { key: "", value: "" }, fbaShipmentOptions === null ? "Loading open shipments..." : "Select shipment...")].concat(
+    (fbaShipmentOptions || []).map(shipment => /*#__PURE__*/React.createElement("option", { key: shipment.shipmentID, value: shipment.shipmentID }, shipment.shipmentID + " · " + shipment.destinationFC + " · " + shipment.lines.reduce((sum, line) => sum + Number(line.remainingQty || 0), 0) + " units remaining"))
+  )), fbaShipmentError && /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 11, marginTop: -8, marginBottom: 10 } }, fbaShipmentError), fbaShipmentOptions !== null && fbaShipmentOptions.length === 0 && !fbaShipmentError && /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 11, marginTop: -8, marginBottom: 10 } }, "No open shipment plan is available. Ask the Warehouse Manager to create one in Amazon FBA first."), selectedFbaShipment && /*#__PURE__*/React.createElement("div", { style: { background: "#f5ecdc", borderRadius: 8, padding: "8px 10px", fontSize: 11, color: "#6f6152", marginTop: -6, marginBottom: 10 } }, selectedFbaShipment.lines.map(line => line.productID + ": " + line.remainingQty + " remaining").join(" · "))), (type === "FBA Dispatch" || type === "Website – WH Ship" || type === "Website – FBA Ship" || type === "Flipkart Dispatch" || type === "Firstcry Dispatch") && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
   }, "Carrier / AWB"), /*#__PURE__*/React.createElement("input", {
     value: carrier,
@@ -2162,8 +2209,9 @@ function MovModal({
   }, "Destination FC"), /*#__PURE__*/React.createElement("input", {
     value: destFC,
     onChange: e => setDestFC(e.target.value),
+    readOnly: type === "FBA Dispatch",
     placeholder: "e.g. HYD3 — check the shipment plan from Pushpa",
-    style: inp
+    style: { ...inp, background: type === "FBA Dispatch" ? "#f5ecdc" : inp.background }
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -3863,7 +3911,10 @@ function FbaReconcileTab(props) {
   var _e = React.useState(""), error = _e[0], setError = _e[1];
   var _b = React.useState(false), busy = _b[0], setBusy = _b[1];
   var _o = React.useState(false), drag = _o[0], setDrag = _o[1];
-  var _lg = React.useState(function () { try { return JSON.parse(localStorage.getItem("syoat_fba_ledger") || "null"); } catch (e) { return null; } }), ledger = _lg[0], setLedger = _lg[1];
+  // Latest ledger state is reconstructed from the authenticated backend
+  // snapshot history. Browser-local state must never claim that a production
+  // report is current, missing or imported.
+  var _lg = React.useState(null), ledger = _lg[0], setLedger = _lg[1];
   var fileRef = React.useRef(null);
   var payloadRef = React.useRef(null);
 
@@ -3930,7 +3981,23 @@ function FbaReconcileTab(props) {
   async function loadLedgerHistory() {
     try {
       var rows = await api("getFbaLedgerSnapshots", {});
-      setLedgerHistory(Array.isArray(rows) ? rows : []);
+      rows = Array.isArray(rows) ? rows : [];
+      setLedgerHistory(rows);
+      var dates = {};
+      rows.forEach(function (row) { dates[ledgerDate(row.ReportDate)] = true; });
+      var latestDate = Object.keys(dates).filter(Boolean).sort().pop() || "";
+      var byProduct = {};
+      rows.filter(function (row) { return ledgerDate(row.ReportDate) === latestDate; }).forEach(function (row) {
+        var pid = row.ProductID;
+        if (!pid) return;
+        var product = (products || []).find(function (item) { return item.ProductID === pid; }) || {};
+        if (!byProduct[pid]) byProduct[pid] = { productID: pid, name: product.ProductName || pid, fnsku: product.FNSKU || "", total: 0, sold: 0, perFC: [] };
+        var qty = Number(row.Qty) || 0, sold = Number(row.Sold) || 0;
+        byProduct[pid].total += qty;
+        byProduct[pid].sold += sold;
+        byProduct[pid].perFC.push({ fc: row.FC, qty: qty, sold: sold });
+      });
+      setLedger(latestDate ? { reportDate: latestDate, reportDays: 1, products: Object.keys(byProduct).map(function (pid) { return byProduct[pid]; }) } : null);
     } catch (e) { setLedgerHistory([]); }
   }
   // Sheets stores FBA_Ledger_Snapshots.ReportDate as a real date, not text, so
@@ -4063,7 +4130,7 @@ function FbaReconcileTab(props) {
     }
     // Locations–FC, Recommendations, and Analytics all need weekly ledger
     // history for their "vs last Monday" deltas/trend.
-    if ((sub === "fc" || sub === "reco" || sub === "analytics") && ledgerHistory === null) loadLedgerHistory();
+    if ((sub === "upload" || sub === "fc" || sub === "reco" || sub === "analytics") && ledgerHistory === null) loadLedgerHistory();
   }, [sub]);
 
   function splitCSV(line) { var out = [], cur = "", q = false; for (var i = 0; i < line.length; i++) { var c = line[i]; if (c === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; } else if (c === "," && !q) { out.push(cur); cur = ""; } else cur += c; } out.push(cur); return out; }
@@ -4087,7 +4154,16 @@ function FbaReconcileTab(props) {
         if (H["event type"] !== undefined && !hasEnd) { setError("This is the Ledger Detailed view. Switch to the Summary view and download again."); return; }
         if (!(hasEnd && hasDisp && hasAsin)) { setError("Unrecognised file. Upload Inventory Ledger — Summary (needs ASIN, Disposition, Ending Warehouse Balance)."); return; }
         var iAsin = H["asin"], iDisp = H["disposition"], iEnd = H["ending warehouse balance"], iDate = H["date"], iLoc = H["location"], iShip = H["customer shipments"];
-        var asinQty = {}, endFC = {}, shipTot = {}, shipFC = {}, datesSet = {}, dateSeen = "";
+        function normaliseReportDate(raw) {
+          var value = String(raw || "").trim();
+          var iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+          if (iso) return iso[1] + "-" + iso[2] + "-" + iso[3];
+          var us = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+          if (us) return us[3] + "-" + ("0" + us[1]).slice(-2) + "-" + ("0" + us[2]).slice(-2);
+          var parsed = new Date(value);
+          return isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+        }
+        var parsedRows = [], datesSet = {}, dateSeen = "";
         for (var r = 1; r < lines.length; r++) {
           var c = pl(lines[r]);
           if (String(c[iDisp]).toUpperCase() !== "SELLABLE") continue;
@@ -4095,12 +4171,24 @@ function FbaReconcileTab(props) {
           var fc = (iLoc !== undefined && c[iLoc]) ? c[iLoc] : "FBA";
           var end = parseFloat(c[iEnd]) || 0;
           var ship = (iShip !== undefined) ? Math.abs(parseFloat(c[iShip]) || 0) : 0;
-          asinQty[a] = (asinQty[a] || 0) + end;
-          endFC[a] = endFC[a] || {}; endFC[a][fc] = (endFC[a][fc] || 0) + end;
-          shipTot[a] = (shipTot[a] || 0) + ship;
-          shipFC[a] = shipFC[a] || {}; shipFC[a][fc] = (shipFC[a][fc] || 0) + ship;
-          if (iDate !== undefined && c[iDate]) { datesSet[c[iDate]] = 1; dateSeen = c[iDate]; }
+          var rowDate = iDate !== undefined ? normaliseReportDate(c[iDate]) : "";
+          if (rowDate) datesSet[rowDate] = 1;
+          parsedRows.push({ asin: a, fc: fc, ending: end, shipped: ship, date: rowDate });
         }
+        var reportDates = Object.keys(datesSet).sort();
+        dateSeen = reportDates.length ? reportDates[reportDates.length - 1] : "";
+        var asinQty = {}, endFC = {}, shipTot = {}, shipFC = {};
+        parsedRows.forEach(function (row) {
+          // Customer shipments are a period flow, but ending warehouse balance
+          // is a point-in-time value. For a multi-date Summary report, using
+          // every ending balance would multiply current stock; keep only the
+          // newest report date while retaining the full-period shipped total.
+          shipTot[row.asin] = (shipTot[row.asin] || 0) + row.shipped;
+          shipFC[row.asin] = shipFC[row.asin] || {}; shipFC[row.asin][row.fc] = (shipFC[row.asin][row.fc] || 0) + row.shipped;
+          if (dateSeen && row.date !== dateSeen) return;
+          asinQty[row.asin] = (asinQty[row.asin] || 0) + row.ending;
+          endFC[row.asin] = endFC[row.asin] || {}; endFC[row.asin][row.fc] = (endFC[row.asin][row.fc] || 0) + row.ending;
+        });
         var a2p = {}; (products || []).forEach(function (p) { if (p.AmazonASIN) a2p[String(p.AmazonASIN).trim()] = p; });
         var mapped = [], unm = [], snapProducts = [];
         Object.keys(asinQty).forEach(function (a) {
@@ -4113,11 +4201,9 @@ function FbaReconcileTab(props) {
         });
         mapped.sort(function (x, y) { return Math.abs(y.delta) - Math.abs(x.delta); });
         if (!mapped.length) { setError("No Syoat products matched by ASIN. Check the AmazonASIN column in your Products sheet."); return; }
-        var rd = dateSeen, m = dateSeen.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-        if (m) rd = m[3] + "-" + ("0" + m[1]).slice(-2) + "-" + ("0" + m[2]).slice(-2);
+        var rd = dateSeen;
         var reportDays = Math.max(1, Object.keys(datesSet).length);
         var snapshot = { reportDate: rd, reportDays: reportDays, savedAt: new Date().toISOString().slice(0, 16).replace("T", " "), products: snapProducts };
-        try { localStorage.setItem("syoat_fba_ledger", JSON.stringify(snapshot)); } catch (e) {}
         setLedger(snapshot);
         payloadRef.current = { text: text, name: file.name, mime: isTab ? "text/plain" : "text/csv" };
         setReportDate(rd); setPreview(mapped); setUnmapped(unm); setStep("preview");
@@ -4148,7 +4234,7 @@ function FbaReconcileTab(props) {
         if (!items.length && !fcSnapshot.length) { notify("✅ FBA already matches the ledger — nothing to adjust."); resetUp(); if (props.onCountCreated) props.onCountCreated(); return; }
         var fp = payloadRef.current || {};
         var res = await apiWritePost("createFbaReconciliation", user.email, { items: items, fileText: fp.text, fileName: fp.name, fileMime: fp.mime, reportDate: reportDate, fcSnapshot: fcSnapshot });
-        notify("✅ " + (res.appliedCount != null ? res.appliedCount : items.length) + " product(s) synced to Amazon FBA — stock updated." + (res.ledgerArchived ? " Ledger archived privately in Drive." : ""));
+        notify("✅ Report saved. " + (res.pendingReviewCount != null ? res.pendingReviewCount : items.length) + " variance(s) need review; stock was not changed." + (res.ledgerArchived ? " Ledger archived privately in Drive." : ""));
         resetUp(); if (props.onCountCreated) props.onCountCreated();
       } catch (e) { notify("❌ " + e.message); }
       setBusy(false);

@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.1-phase2-wp1.6",
+  VERSION:               "3.2-phase2-fba-bridge.2",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -103,6 +103,7 @@ const ACTION_CAPABILITIES = {
   getSuppliers:                "purchasing.suppliers.view",
   getPurchaseOrders:           "purchasing.orders.view",
   getFbaShipments:             "amazon.shipments.view",
+  getFbaDispatchShipmentOptions: "inventory.movements.create",
   getFbaLedgerSnapshots:       "amazon.reconciliation.view",
   getOperationalFile:          "inventory.files.view",
   getSystemHealth:             "system.health.view",
@@ -320,6 +321,7 @@ function handleAuthenticatedAction(action, body, email) {
   if (action === "getSuppliers")       return ok(getSuppliers(body));
   if (action === "getPurchaseOrders")  return ok(getPurchaseOrders(body));
   if (action === "getFbaShipments")    return ok(getFbaShipments(body));
+  if (action === "getFbaDispatchShipmentOptions") return ok(getFbaDispatchShipmentOptions(staff));
   if (action === "getFbaLedgerSnapshots") return ok(getFbaLedgerSnapshots(body));
   if (action === "getOperationalFile") return ok(getOperationalFile(body, staff));
   if (action === "getSystemHealth")    return ok(getSystemHealth(staff));
@@ -1187,6 +1189,11 @@ function createMovement(body, staff) {
 
   checkFeatureGate(body.movementType, staff.Role);
 
+  // Every new warehouse-to-FBA dispatch belongs to one open shipment plan.
+  // The server validates the selected plan and remaining quantities; the
+  // limited frontend picker is only a convenience and is not trusted.
+  assertFbaDispatchShipmentPlan(body, body.lines);
+
   // Step 0 (2026-07-19): negative-stock guard. Previously a typo or double-entry
   // on Stock In/Returns/Damage/dispatch movements could push a physical location
   // negative with no warning — assembleCombo already validated this for combos,
@@ -1294,6 +1301,10 @@ function approveMovement(body, staff) {
 
   const movementLines = sheetToObjects(SHEETS.MOV_LINES).filter(line => line.MovementID === body.movementID);
   if (!movementLines.length) throw new Error("Movement has no lines and cannot be approved.");
+  // Recheck the shipment plan under the global write lock. Two drafts can be
+  // created against the same remaining quantity, but only the first valid
+  // approval may consume it.
+  assertFbaDispatchShipmentPlan(header, movementLines);
   // This check runs while the global business-write lock is held. It evaluates
   // the latest Approved stock, not the earlier quantity seen when the Draft was
   // created, so two competing drafts cannot both consume the same units.
@@ -1748,13 +1759,11 @@ function auditOperationalFilePrivacy() {
 }
 
 // ──────────────────────────────────────────────────────────
-//  v3.1: FBA Inventory Ledger reconciliation
-//  Frontend parses the Ledger SUMMARY, aggregates SELLABLE on-hand per
-//  ProductID (matched by ASIN) and POSTs items[]. We archive the raw file
-//  to Drive (Syoat Inventory ERP > 03_FBA_Documents > 01_Inventory_Ledgers,
-//  found by name) and create one PENDING stock count at AMAZON_FBA per
-//  CHANGED product. Manager approval then makes the adjustment movement via
-//  the existing approveStockCount flow — full audit, no new stock logic.
+//  Phase 2 FBA Inventory Ledger evidence import.
+//  The frontend parses the Ledger SUMMARY and POSTs the latest SELLABLE
+//  balance per product/FC. The raw report is archived privately, the snapshot
+//  is stored once, and each variance becomes a Pending review count. Importing
+//  a report never creates or approves a stock movement.
 // ──────────────────────────────────────────────────────────
 function getLedgerArchiveFolder() {
   var root = getInventoryErpRoot();
@@ -1774,6 +1783,17 @@ function saveLedgerToDrive(fileName, fileText, mime) {
   return privateFileDescriptor(file);
 }
 
+function fbaReportDateKey(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, "Asia/Kolkata", "yyyy-MM-dd");
+  }
+  var text = String(value || "").trim();
+  var direct = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (direct) return direct[1];
+  var parsed = new Date(text);
+  return isNaN(parsed.getTime()) ? text : Utilities.formatDate(parsed, "Asia/Kolkata", "yyyy-MM-dd");
+}
+
 function createFbaReconciliation(body, staff) {
   requireRole(staff, ["Founder","Co-Founder","Admin","Manager","Warehouse Manager"]);
   var items = body.items || [];
@@ -1782,19 +1802,31 @@ function createFbaReconciliation(body, staff) {
   // needed) still needs its history row saved for week-over-week comparisons —
   // only reject if there's truly nothing to do at all.
   if (!items.length && !fcSnapshotIn.length) throw new Error("No products to reconcile.");
+  var reportDate = fbaReportDateKey(body.reportDate);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) throw new Error("A valid FBA report date is required.");
+  if (!String(body.fileText || "").trim()) throw new Error("The original FBA report file is required for review evidence.");
+
+  var existingSnapshots = sheetToObjects(SHEETS.FBA_LEDGER_SNAPSHOTS);
+  if (existingSnapshots.some(function (row) { return fbaReportDateKey(row.ReportDate) === reportDate; })) {
+    throw new Error("Invalid FBA report import: this report date was already imported. Review the existing snapshot instead of uploading it again.");
+  }
+  var importKey = sha256Base64Url(reportDate + "\n" + String(body.fileText)).slice(0, 18);
 
   var driveFile = null;
   try {
     if (body.fileText) {
       var ext   = (body.fileMime === "text/plain") ? ".txt" : ".csv";
       var who   = String(staff.Name || staff.Email || "staff").split(" ")[0];
-      var stamp = body.reportDate || Utilities.formatDate(new Date(), "Asia/Kolkata", "yyyy-MM-dd");
+      var stamp = reportDate;
       driveFile = saveLedgerToDrive(stamp + "_FBA-Ledger_" + who + ext, body.fileText, body.fileMime || "text/csv");
     }
   } catch (e) { driveFile = null; }
+  if (!driveFile && operationalEnvironment() !== "development") {
+    throw new Error("Invalid FBA report import: the original report could not be archived privately, so no snapshot or review row was created.");
+  }
 
-  var note = "FBA Ledger " + (body.reportDate || "") + (driveFile ? " | private-file:" + driveFile.fileId : "");
-  var applied = 0, unchanged = 0;
+  var note = "FBA report " + reportDate + " | import:" + importKey + (driveFile ? " | private-file:" + driveFile.fileId : "");
+  var pending = 0, unchanged = 0;
   items.forEach(function (it) {
     var pid = it.productID;
     var ledgerQty = parseFloat(it.ledgerQty);
@@ -1803,19 +1835,6 @@ function createFbaReconciliation(body, staff) {
     var sys  = rows.length ? Number(rows[0].Quantity) : 0;
     var diff = ledgerQty - sys;
     if (diff === 0) { unchanged++; return; }
-    var isPos = diff > 0;
-    // create the adjustment movement and APPROVE it immediately (auto-apply)
-    var mv = createMovement({
-      movementType:          "Stock Adjustment",
-      sourceLocationID:      isPos ? "SUPPLIER"   : "AMAZON_FBA",
-      destinationLocationID: isPos ? "AMAZON_FBA" : "DAMAGE",
-      referenceType:         "FBA Ledger",
-      referenceNumber:       body.reportDate || "",
-      notes:                 note,
-      lines: [{ productID: pid, quantity: Math.abs(diff), lineNotes: "FBA ledger sync" }],
-    }, staff);
-    approveMovement({ movementID: mv.movementID }, staff);
-    // write an already-Approved audit row into Stock_Counts (history + traceability)
     var countID = nextID("CNT");
     appendRow(SHEETS.STOCK_COUNTS, {
       CountID:              countID,
@@ -1826,13 +1845,14 @@ function createFbaReconciliation(body, staff) {
       PhysicalQty:          ledgerQty,
       Difference:           diff,
       CountedByEmail:       staff.Email,
-      ApprovedByEmail:      staff.Email,
-      Status:               "Approved",
-      Reason:               "FBA Ledger Reconcile",
-      AdjustmentMovementID: mv.movementID,
+      ApprovedByEmail:      "",
+      Status:               "Pending",
+      Reason:               "FBA Report Variance Review",
+      AdjustmentMovementID: "",
       Notes:                note,
     });
-    applied++;
+    recordWriteCheckpoint("StockCount", countID, "pending_fba_report_variance");
+    pending++;
   });
 
   // 2026-07-24: persist the FULL per-product-per-FC breakdown of this upload —
@@ -1841,18 +1861,16 @@ function createFbaReconciliation(body, staff) {
   // against instead of only ever seeing the single latest snapshot. Uploads
   // happen weekly (Monday mornings), so "history" here means one row set per
   // Monday, not a daily series — deliberately not over-building for a
-  // cadence that doesn't exist. Silently no-ops (does not fail the whole
-  // reconciliation) if the sheet doesn't exist yet or fcSnapshot wasn't sent,
-  // so this never blocks the reconciliation itself.
+  // cadence that doesn't exist. Snapshot writes fail closed so a partial
+  // report import remains visible in the write-recovery queue.
   var snapshotSaved = 0;
   try {
     var fcSnapshot = Array.isArray(body.fcSnapshot) ? body.fcSnapshot : [];
-    var reportDate = body.reportDate || Utilities.formatDate(new Date(), "Asia/Kolkata", "yyyy-MM-dd");
     var uploadedAt = now();
-    fcSnapshot.forEach(function (row) {
+    fcSnapshot.forEach(function (row, index) {
       if (!row.productID || !row.fc) return;
       appendRow(SHEETS.FBA_LEDGER_SNAPSHOTS, {
-        SnapshotID:      "LSN-" + reportDate + "-" + row.fc + "-" + row.productID,
+        SnapshotID:      "LSN-" + importKey + "-" + String(index + 1).padStart(3, "0"),
         ReportDate:      reportDate,
         ProductID:       row.productID,
         FC:              row.fc,
@@ -1861,14 +1879,15 @@ function createFbaReconciliation(body, staff) {
         UploadedByEmail: staff.Email,
         UploadedAt:      uploadedAt,
       });
+      recordWriteCheckpoint("FbaLedgerSnapshot", "LSN-" + importKey + "-" + String(index + 1).padStart(3, "0"), "snapshot_saved");
       snapshotSaved++;
     });
-  } catch (e) { /* sheet may not exist yet — don't fail the reconciliation over it */ }
+  } catch (e) { throw new Error("FBA report snapshot could not be saved. Review recovery status before retrying."); }
 
-  writeLog("createFbaReconciliation", (body.reportDate || "-"), staff,
-    "FBA auto-sync: " + applied + " adjusted, " + unchanged + " unchanged, " + snapshotSaved + " FC-snapshot row(s). " + (driveFile ? "private-file:" + driveFile.fileId : "no-file"),
+  writeLog("createFbaReconciliation", reportDate, staff,
+    "FBA evidence import " + importKey + ": " + pending + " pending review, " + unchanged + " unchanged, " + snapshotSaved + " FC-snapshot row(s). " + (driveFile ? "private-file:" + driveFile.fileId : "no-file"),
     body.requestId);
-  return { appliedCount: applied, unchanged: unchanged, ledgerArchived: !!driveFile };
+  return { pendingReviewCount: pending, unchanged: unchanged, snapshotSaved: snapshotSaved, ledgerArchived: !!driveFile, importKey: importKey };
 }
 
 // Weekly ledger history for week-over-week comparisons (Locations–FC deltas,
@@ -2249,6 +2268,9 @@ function approveStockCount(body, staff) {
   // injected several hundred phantom units at AMAZON_FBA.
   if (count.Status === "Rejected") throw new Error("This count was rejected — record a new count instead of approving it.");
   if (count.Status !== "Pending") throw new Error("Only a Pending count can be approved. Current status: " + count.Status);
+  if (count.Reason === "FBA Report Variance Review") {
+    throw new Error("Invalid FBA variance review: an FBA report variance cannot be approved as a normal stock count. Review the shipment, receipt and Amazon exception evidence first.");
+  }
 
   // Maker-checker (v3.3): same rule as approveMovement — Admin/Manager can't
   // approve a count they submitted themselves. Founder/Co-Founder exempt,
@@ -2627,18 +2649,13 @@ function closePurchaseOrder(body, staff) {
 
 // ─────────────────────────────────────────────────────────────
 //  MODULE C: FBA SHIPMENT TRACKING (2026-07-19)
-//  "Sit alongside" design, same pattern as Module B's PO↔Stock-In linking:
-//  FBA Dispatch / FBA Receipt movements keep working exactly as they do
-//  today (Zubedha and everyone else records them the same way, same
-//  approval flow) — nothing about movement creation changes. An FBA
-//  Shipment is a separate tracking record on top: its own ID, destination
-//  FC, expected product lines, and a status lifecycle (Working → Shipped →
-//  In Transit → Received) that Amazon-tab roles advance manually. Linking
-//  an existing Approved movement to a shipment (to compute Shipped/Received
-//  quantities) is done from inside the Amazon tab only — not from the
-//  regular Record Movement screen — so Zubedha's movement form is
-//  completely untouched (Lalith's explicit choice, since she has no
-//  Amazon-tab access today and this shouldn't change that).
+//  Controlled-chain design, same pattern as Module B's PO↔Stock-In linking:
+//  Managers create an FBA shipment plan with a destination FC and expected
+//  product lines. Staff who may record FBA Dispatch receive only a minimal
+//  open-shipment picker (shipment ID, destination, status and remaining
+//  quantities); they do not receive the full Amazon module data. Creation and
+//  approval both validate the dispatch against the latest remaining plan.
+//  Amazon-tab roles retain the full shipment lifecycle and correction tools.
 //  Reuses the existing (previously unused) Movement_Headers.AmazonShipmentID
 //  column to store the link — no new Movement_Headers column needed.
 //  Roles mirror who already sees the Amazon tab today.
@@ -2671,6 +2688,93 @@ function shipmentQtyTotals() {
     bucket[line.ProductID] = (bucket[line.ProductID] || 0) + (parseFloat(line.Quantity) || 0);
   });
   return result;
+}
+
+// Minimal shipment-plan view for employees who may record an FBA Dispatch but
+// do not have access to the full Amazon module. Never returns creator identity,
+// notes, files, reconciliation history or other Amazon operational detail.
+function getFbaDispatchShipmentOptions(staff) {
+  requireRole(staff, ["Founder","Co-Founder","Admin","Manager","Warehouse Manager","Warehouse","Warehouse Operator"]);
+  checkFeatureGate("FBA Dispatch", staff.Role);
+
+  const totals = shipmentQtyTotals();
+  const allLines = sheetToObjects(SHEETS.FBA_SHIPMENT_LINES);
+  return sheetToObjects(SHEETS.FBA_SHIPMENTS)
+    .filter(shipment => ["Working","Shipped","In Transit"].includes(String(shipment.Status)))
+    .map(shipment => {
+      const shipped = (totals[shipment.ShipmentID] && totals[shipment.ShipmentID].shipped) || {};
+      const lines = allLines
+        .filter(line => line.ShipmentID === shipment.ShipmentID)
+        .map(line => {
+          const expectedQty = parseFloat(line.ExpectedQty) || 0;
+          const dispatchedQty = parseFloat(shipped[line.ProductID]) || 0;
+          return {
+            productID: line.ProductID,
+            expectedQty: expectedQty,
+            dispatchedQty: dispatchedQty,
+            remainingQty: Math.max(0, expectedQty - dispatchedQty),
+          };
+        })
+        .filter(line => line.remainingQty > 0);
+      return {
+        shipmentID: shipment.ShipmentID,
+        destinationFC: shipment.DestinationFC,
+        status: shipment.Status,
+        lines: lines,
+      };
+    })
+    .filter(shipment => shipment.lines.length > 0)
+    .sort((a, b) => _idNum(b.shipmentID) - _idNum(a.shipmentID));
+}
+
+function assertFbaDispatchShipmentPlan(header, lines) {
+  const movementType = String(header.MovementType || header.movementType || "");
+  if (movementType !== "FBA Dispatch") return;
+
+  const shipmentID = String(header.AmazonShipmentID || header.amazonShipmentID || "").trim();
+  const referenceNumber = String(header.ReferenceNumber || header.referenceNumber || "").trim();
+  if (!shipmentID) throw new Error("Invalid FBA Dispatch: select an open FBA shipment before recording this dispatch.");
+  if (!referenceNumber) throw new Error("Invalid FBA Dispatch: enter the Amazon Shipment ID in Reference No.");
+
+  const source = String(header.SourceLocationID || header.sourceLocationID || "");
+  const destination = String(header.DestinationLocationID || header.destinationLocationID || "");
+  if (source !== "MAIN_WH" || destination !== "FBA_TRANSIT") {
+    throw new Error("Invalid FBA Dispatch: stock must move from MAIN_WH to FBA_TRANSIT.");
+  }
+
+  const shipment = sheetToObjects(SHEETS.FBA_SHIPMENTS).find(row => row.ShipmentID === shipmentID);
+  if (!shipment) throw new Error("FBA shipment not found: " + shipmentID);
+  if (!["Working","Shipped","In Transit"].includes(String(shipment.Status))) {
+    throw new Error("Invalid FBA Dispatch: shipment " + shipmentID + " is not open. Current status: " + shipment.Status);
+  }
+
+  const suppliedFC = String(header.AmazonDestinationFC || header.amazonDestinationFC || "").trim().toUpperCase();
+  const plannedFC = String(shipment.DestinationFC || "").trim().toUpperCase();
+  if (suppliedFC && suppliedFC !== plannedFC) {
+    throw new Error("Invalid FBA Dispatch: destination FC must match shipment " + shipmentID + ": " + plannedFC);
+  }
+  if (Object.prototype.hasOwnProperty.call(header, "amazonDestinationFC")) header.amazonDestinationFC = plannedFC;
+
+  const expected = {};
+  sheetToObjects(SHEETS.FBA_SHIPMENT_LINES)
+    .filter(line => line.ShipmentID === shipmentID)
+    .forEach(line => { expected[line.ProductID] = (expected[line.ProductID] || 0) + (parseFloat(line.ExpectedQty) || 0); });
+  const dispatched = (shipmentQtyTotals()[shipmentID] || { shipped: {} }).shipped || {};
+  const requested = {};
+  lines.forEach(line => {
+    const productID = String(line.ProductID || line.productID || "");
+    const quantity = parseFloat(line.Quantity !== undefined ? line.Quantity : line.quantity) || 0;
+    requested[productID] = (requested[productID] || 0) + quantity;
+  });
+
+  const problems = Object.keys(requested).filter(productID => {
+    const remaining = (expected[productID] || 0) - (parseFloat(dispatched[productID]) || 0);
+    return !expected[productID] || requested[productID] > remaining;
+  }).map(productID => {
+    const remaining = Math.max(0, (expected[productID] || 0) - (parseFloat(dispatched[productID]) || 0));
+    return productID + " (dispatch " + requested[productID] + ", remaining " + remaining + ")";
+  });
+  if (problems.length) throw new Error("Invalid FBA Dispatch: quantity exceeds the selected shipment plan: " + problems.join("; "));
 }
 
 function getFbaShipments(params) {
@@ -2716,8 +2820,11 @@ function createFbaShipment(body, staff) {
   requireFields(body, ["destinationFC","lines"]);
   requireRole(staff, FBA_SHIPMENT_ROLES);
   if (!Array.isArray(body.lines) || body.lines.length === 0) throw new Error("A shipment needs at least one product line.");
-  const destination = sheetToObjects(SHEETS.LOCATIONS).find(location => String(location.LocationID) === String(body.destinationFC) && String(location.Status) === "Active");
-  if (!destination) throw new Error("Unknown or inactive destination FC: " + body.destinationFC);
+  const destinationFC = String(body.destinationFC || "").trim().toUpperCase();
+  // FC codes are shipment metadata during the Phase 2 aggregate bridge. They
+  // do not become stock locations until the reviewed Phase 3 FC migration.
+  if (!/^[A-Z0-9]{3,10}$/.test(destinationFC)) throw new Error("Invalid Amazon destination FC: " + body.destinationFC);
+  body.destinationFC = destinationFC;
   validateMovementLines(body.lines.map(line => ({ productID: line.productID, quantity: line.expectedQty })));
 
   const shipmentID = nextID("SHIP");
