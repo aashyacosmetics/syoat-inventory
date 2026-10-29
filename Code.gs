@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-bridge.2",
+  VERSION:               "3.2-phase2-fba-review.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -121,6 +121,7 @@ const ACTION_CAPABILITIES = {
   logChange:                   "audit.manual.create",
   assembleCombo:               "inventory.combos.assemble",
   createFbaReconciliation:     "amazon.reconciliation.create",
+  reviewFbaVariance:           "amazon.reconciliation.review",
   createSupportTicket:         "support.tickets.create",
   updateSupportTicket:         "support.tickets.update",
   createPurchaseOrder:         "purchasing.orders.create",
@@ -169,6 +170,7 @@ const AMAZON_MANAGER_CAPABILITIES = [
   "amazon.shipments.linkMovement",
   "amazon.reconciliation.view",
   "amazon.reconciliation.create",
+  "amazon.reconciliation.review",
 ];
 
 const FULFILMENT_CAPABILITIES = [
@@ -352,6 +354,7 @@ function dispatchBusinessWrite(action, body, staff) {
   if (action === "logChange")          return logChange(body, staff);
   if (action === "assembleCombo")      return assembleCombo(body, staff);
   if (action === "createFbaReconciliation") return createFbaReconciliation(body, staff);
+  if (action === "reviewFbaVariance") return reviewFbaVariance(body, staff);
   if (action === "createSupportTicket") return createSupportTicket(body, staff);
   if (action === "updateSupportTicket") return updateSupportTicket(body, staff);
   if (action === "createPurchaseOrder") return createPurchaseOrder(body, staff);
@@ -1794,6 +1797,30 @@ function fbaReportDateKey(value) {
   return isNaN(parsed.getTime()) ? text : Utilities.formatDate(parsed, "Asia/Kolkata", "yyyy-MM-dd");
 }
 
+const FBA_VARIANCE_REASON = "FBA Report Variance Review";
+const FBA_VARIANCE_CLASSIFICATIONS = {
+  sale_timing: "Sale timing",
+  receipt: "Receipt",
+  damage: "Damage or loss",
+  removal: "Removal order",
+  unexplained: "Unexplained",
+};
+
+function fbaVarianceReviewFromNotes(notes) {
+  var match = String(notes || "").match(/\|\s*FBA_REVIEW:(\{.*\})\s*$/);
+  if (!match) return null;
+  try { return JSON.parse(match[1]); } catch (e) { return null; }
+}
+
+function withoutFbaVarianceReview(notes) {
+  return String(notes || "").replace(/\s*\|\s*FBA_REVIEW:\{.*\}\s*$/, "").trim();
+}
+
+function isFbaVarianceReview(count) {
+  if (!count) return false;
+  return count.Reason === FBA_VARIANCE_REASON || /^FBA report\s+\d{4}-\d{2}-\d{2}\b/.test(String(count.Notes || ""));
+}
+
 function createFbaReconciliation(body, staff) {
   requireRole(staff, ["Founder","Co-Founder","Admin","Manager","Warehouse Manager"]);
   var items = body.items || [];
@@ -1847,7 +1874,7 @@ function createFbaReconciliation(body, staff) {
       CountedByEmail:       staff.Email,
       ApprovedByEmail:      "",
       Status:               "Pending",
-      Reason:               "FBA Report Variance Review",
+      Reason:               FBA_VARIANCE_REASON,
       AdjustmentMovementID: "",
       Notes:                note,
     });
@@ -1888,6 +1915,56 @@ function createFbaReconciliation(body, staff) {
     "FBA evidence import " + importKey + ": " + pending + " pending review, " + unchanged + " unchanged, " + snapshotSaved + " FC-snapshot row(s). " + (driveFile ? "private-file:" + driveFile.fileId : "no-file"),
     body.requestId);
   return { pendingReviewCount: pending, unchanged: unchanged, snapshotSaved: snapshotSaved, ledgerArchived: !!driveFile, importKey: importKey };
+}
+
+function reviewFbaVariance(body, staff) {
+  requireFields(body, ["countID", "classification", "reviewNote"]);
+  requireRole(staff, ["Founder","Co-Founder","Admin","Manager","Warehouse Manager"]);
+
+  var classification = String(body.classification || "").trim().toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(FBA_VARIANCE_CLASSIFICATIONS, classification)) {
+    throw new Error("Invalid FBA variance review: choose a valid classification.");
+  }
+  var reviewNote = String(body.reviewNote || "").trim();
+  if (reviewNote.length < 3) throw new Error("Invalid FBA variance review: add a short evidence note before saving.");
+  if (reviewNote.length > 500) throw new Error("Invalid FBA variance review: notes must be 500 characters or fewer.");
+
+  var counts = sheetToObjects(SHEETS.STOCK_COUNTS);
+  var idx = counts.findIndex(function (count) { return count.CountID === body.countID; });
+  if (idx === -1) throw new Error("CountID not found: " + body.countID);
+  var count = counts[idx];
+  if (!isFbaVarianceReview(count)) throw new Error("Invalid FBA variance review: this stock count is not an imported Amazon variance.");
+  if (count.Status !== "Pending") throw new Error("Only a Pending FBA variance can be reviewed. Current status: " + count.Status);
+
+  var previousReview = fbaVarianceReviewFromNotes(count.Notes);
+  var reviewedAt = now();
+  var review = {
+    classification: classification,
+    classificationLabel: FBA_VARIANCE_CLASSIFICATIONS[classification],
+    reviewNote: reviewNote,
+    reviewedByEmail: staff.Email,
+    reviewedAt: reviewedAt,
+  };
+  var notes = withoutFbaVarianceReview(count.Notes);
+  updateRow(SHEETS.STOCK_COUNTS, idx + 2, {
+    Notes: notes + (notes ? " | " : "") + "FBA_REVIEW:" + JSON.stringify(review),
+  });
+
+  writeLog("reviewFbaVariance", body.countID, staff, "Classified as " + classification, body.requestId);
+  writeAuditTrail("reviewFbaVariance", "StockCount", body.countID, [
+    {
+      field: "FbaVarianceClassification",
+      oldValue: previousReview ? previousReview.classification : "",
+      newValue: classification,
+    },
+  ], staff, body.requestId, FBA_VARIANCE_CLASSIFICATIONS[classification]);
+  return {
+    countID: body.countID,
+    status: count.Status,
+    classification: classification,
+    classificationLabel: FBA_VARIANCE_CLASSIFICATIONS[classification],
+    reviewedAt: reviewedAt,
+  };
 }
 
 // Weekly ledger history for week-over-week comparisons (Locations–FC deltas,
@@ -2192,6 +2269,7 @@ function editStockCount(body, staff) {
   const counts = sheetToObjects(SHEETS.STOCK_COUNTS);
   const orig   = counts.find(c => c.CountID === body.countID);
   if (!orig) throw new Error("CountID not found: " + body.countID);
+  if (isFbaVarianceReview(orig)) throw new Error("Invalid FBA variance review: use Review FBA Variance instead of editing an imported Amazon variance.");
   if (orig.Status === "Approved") throw new Error("Cannot edit an already approved count. Reject it first.");
 
   const stockRows = getStock({ productId: orig.ProductID, locationId: orig.LocationID });
@@ -2238,6 +2316,7 @@ function rejectStockCount(body, staff) {
   const counts = sheetToObjects(SHEETS.STOCK_COUNTS);
   const idx    = counts.findIndex(c => c.CountID === body.countID);
   if (idx === -1) throw new Error("CountID not found: " + body.countID);
+  if (isFbaVarianceReview(counts[idx])) throw new Error("Invalid FBA variance review: use Review FBA Variance instead of rejecting an imported Amazon variance.");
   if (counts[idx].Status === "Approved") throw new Error("Cannot reject an already approved count.");
 
   updateRow(SHEETS.STOCK_COUNTS, idx + 2, {
@@ -2268,7 +2347,7 @@ function approveStockCount(body, staff) {
   // injected several hundred phantom units at AMAZON_FBA.
   if (count.Status === "Rejected") throw new Error("This count was rejected — record a new count instead of approving it.");
   if (count.Status !== "Pending") throw new Error("Only a Pending count can be approved. Current status: " + count.Status);
-  if (count.Reason === "FBA Report Variance Review") {
+  if (isFbaVarianceReview(count)) {
     throw new Error("Invalid FBA variance review: an FBA report variance cannot be approved as a normal stock count. Review the shipment, receipt and Amazon exception evidence first.");
   }
 

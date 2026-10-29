@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20261027-fba-bridge.2";
+const BUILD_VERSION = "20261028-fba-review.1";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -186,6 +186,7 @@ const PIN_ACTION_LABELS = {
   editStockCount: "save this stock count",
   assembleCombo: "assemble this combo",
   createFbaReconciliation: "sync Amazon FBA stock",
+  reviewFbaVariance: "save this FBA variance review",
   createSupportTicket: "create this ticket",
   updateSupportTicket: "update this ticket",
   createPurchaseOrder: "create this purchase order",
@@ -3030,6 +3031,105 @@ function MovListModal({
 // ─────────────────────────────────────────────────────────────
 //  STOCK COUNT / CYCLE COUNT MODAL
 // ─────────────────────────────────────────────────────────────
+const FBA_VARIANCE_REASON_FE = "FBA Report Variance Review";
+const FBA_VARIANCE_CLASSIFICATIONS_FE = [{
+  value: "sale_timing",
+  label: "Sale timing",
+  help: "Amazon shipped units before the ERP movement history caught up."
+}, {
+  value: "receipt",
+  label: "Receipt",
+  help: "Amazon received units that still need shipment or receipt evidence."
+}, {
+  value: "damage",
+  label: "Damage or loss",
+  help: "Amazon reported damaged, lost or otherwise unavailable inventory."
+}, {
+  value: "removal",
+  label: "Removal order",
+  help: "Units are being removed or returned from Amazon."
+}, {
+  value: "unexplained",
+  label: "Unexplained",
+  help: "The difference needs more evidence before any stock correction."
+}];
+
+function isFbaVarianceCount(count) {
+  if (!count) return false;
+  return count.Reason === FBA_VARIANCE_REASON_FE || count.Reason === "FBA Ledger Reconcile" || /^FBA report\s+\d{4}-\d{2}-\d{2}\b/.test(String(count.Notes || ""));
+}
+
+function parseFbaVarianceReview(notes) {
+  var match = String(notes || "").match(/\|\s*FBA_REVIEW:(\{.*\})\s*$/);
+  if (!match) return null;
+  try { return JSON.parse(match[1]); } catch (e) { return null; }
+}
+
+function fbaVarianceBatch(count) {
+  var notes = String(count && count.Notes || "");
+  var current = notes.match(/^FBA report\s+(\d{4}-\d{2}-\d{2})\s+\|\s+import:([A-Za-z0-9_-]+)/);
+  if (current) return { key: current[1] + "|" + current[2], reportDate: current[1] };
+  var legacy = notes.match(/^FBA Ledger\s+(\S+)/);
+  if (legacy) return { key: "legacy|" + legacy[1], reportDate: legacy[1] };
+  return null;
+}
+
+function FbaVarianceReviewModal({ count, products, user, onClose, onDone }) {
+  const product = (products || []).find(p => p.ProductID === count.ProductID);
+  const existing = parseFbaVarianceReview(count.Notes) || {};
+  const [classification, setClassification] = React.useState(existing.classification || "");
+  const [reviewNote, setReviewNote] = React.useState(existing.reviewNote || "");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  const selected = FBA_VARIANCE_CLASSIFICATIONS_FE.find(x => x.value === classification);
+  const diff = Number(count.Difference) || 0;
+
+  async function submit() {
+    if (!classification) { setErr("Choose why this Amazon difference occurred."); return; }
+    if (reviewNote.trim().length < 3) { setErr("Add a short evidence note or reference."); return; }
+    setBusy(true);
+    setErr("");
+    try {
+      const result = await apiWrite("reviewFbaVariance", user.email, {
+        countID: count.CountID,
+        classification: classification,
+        reviewNote: reviewNote.trim()
+      });
+      onDone("✅ " + count.CountID + " classified as " + result.classificationLabel + ". Stock was not changed.");
+      onClose();
+    } catch (e) {
+      setErr(e.message);
+    }
+    setBusy(false);
+  }
+
+  return /*#__PURE__*/React.createElement("div", {
+    style: { position: "fixed", inset: 0, background: "rgba(60,40,20,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 320, padding: 16 }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { background: "#fefcf9", borderRadius: 16, padding: 22, width: 520, maxWidth: "100%", border: "1px solid #e0d2bd", maxHeight: "90vh", overflowY: "auto" }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }
+  }, /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 16, color: "#2c211a" } }, "Review FBA Variance"), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose, disabled: busy, style: { background: "none", border: "none", color: "#a89680", fontSize: 22, cursor: "pointer" }
+  }, "×")), /*#__PURE__*/React.createElement("div", {
+    style: { background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 12, padding: 13, marginBottom: 14 }
+  }, /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, color: "#2c211a", marginBottom: 4 } }, count.CountID, " · ", product ? product.ProductName : count.ProductID), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#6f6152" } }, "ERP ", count.SystemQty, " · Amazon report ", count.PhysicalQty, " · Difference ", diff > 0 ? "+" + diff : diff)), /*#__PURE__*/React.createElement("div", {
+    style: { background: "#f4e7c8", border: "1px solid #e8d09a", borderRadius: 10, padding: "10px 12px", marginBottom: 14, fontSize: 12, color: "#6b5326", lineHeight: 1.5 }
+  }, "Classification records the reason only. It does not approve a count or change FBA stock."), /*#__PURE__*/React.createElement("label", { style: lbl }, "Classification *"), /*#__PURE__*/React.createElement("select", {
+    value: classification, onChange: e => setClassification(e.target.value), style: inp
+  }, /*#__PURE__*/React.createElement("option", { value: "" }, "Select a reason…"), FBA_VARIANCE_CLASSIFICATIONS_FE.map(x => /*#__PURE__*/React.createElement("option", { key: x.value, value: x.value }, x.label))), selected && /*#__PURE__*/React.createElement("div", {
+    style: { color: "#6f6152", fontSize: 11.5, margin: "6px 0 12px", lineHeight: 1.45 }
+  }, selected.help), /*#__PURE__*/React.createElement("label", { style: lbl }, "Evidence note or reference *"), /*#__PURE__*/React.createElement("textarea", {
+    value: reviewNote, onChange: e => setReviewNote(e.target.value), maxLength: 500, rows: 4,
+    placeholder: "Example: Amazon removal order ID, shipment ID, case reference or what was checked",
+    style: { ...inp, resize: "vertical", lineHeight: 1.45 }
+  }), /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", textAlign: "right", marginTop: 3 } }, reviewNote.length, "/500"), err && /*#__PURE__*/React.createElement("div", {
+    style: { background: "#f3dcd5", border: "1px solid #e3b7ad", borderRadius: 10, padding: "9px 11px", color: "#b23a2e", fontSize: 12, marginTop: 10 }
+  }, err), /*#__PURE__*/React.createElement("div", {
+    style: { display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10, marginTop: 16 }
+  }, /*#__PURE__*/React.createElement("button", { onClick: onClose, disabled: busy, style: { ...ghost, padding: 11 } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: submit, disabled: busy, style: { ...btnS("#2a201a"), padding: 11, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.7 : 1 } }, busy ? "Saving…" : existing.classification ? "Update Review" : "Save Review"))));
+}
+
 function StockCountModal({
   products,
   stock,
@@ -3967,7 +4067,7 @@ function FbaReconcileTab(props) {
     } catch (e) { setAmzErr(e.message); setAmzMovs([]); }
     try {
       var counts = await api("getStockCounts", { locationId: "AMAZON_FBA" });
-      setReconCounts((Array.isArray(counts) ? counts : []).filter(function (c) { return c.Reason === "FBA Ledger Reconcile"; }));
+      setReconCounts((Array.isArray(counts) ? counts : []).filter(isFbaVarianceCount));
     } catch (e) { setReconCounts([]); }
   }
 
@@ -4616,28 +4716,42 @@ function FbaReconcileTab(props) {
           /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 8 } }, "Ledger date " + (ledger.reportDate || "—") + (histDates.length < 2 ? ". Trend line appears once a second Monday's upload is recorded." : ".")));
     var head3 = { icon: "🏬", label: "FBA stock health", value: (!ledger || !ledger.products || !ledger.products.length) ? "—" : healthCounts.ship + " of " + (healthCounts.ship + healthCounts.ok + healthCounts.idle), sub: (!ledger || !ledger.products || !ledger.products.length) ? "upload a ledger" : "FCs need refill", c: healthCounts.ship > 0 ? "#b23a2e" : "#5f7a4f" };
 
-    // --- Panel 4: Reconciliation accuracy -------------------------------
-    var reconByDate = {};
+    // --- Panel 4: latest imported-report variance ------------------------
+    // Group by the immutable report import key, not by a generic count date.
+    // This prevents older reconciliation rows from being mixed into the most
+    // recent upload's drift and keeps Pending reviews distinct from adjustments.
+    var reconByBatch = {};
     (reconCounts || []).forEach(function (c) {
-      var m = String(c.Notes || "").match(/^FBA Ledger\s+(\S+)/);
-      var d = m ? m[1] : (c.CountDateTime || "Unknown");
-      reconByDate[d] = reconByDate[d] || { count: 0, drift: 0 };
-      reconByDate[d].count++;
-      reconByDate[d].drift += Math.abs(parseFloat(c.Difference) || 0);
+      var batch = fbaVarianceBatch(c);
+      if (!batch) return;
+      var row = reconByBatch[batch.key] || { key: batch.key, reportDate: batch.reportDate, count: 0, classified: 0, drift: 0, lastCountAt: "" };
+      row.count++;
+      row.drift += Math.abs(parseFloat(c.Difference) || 0);
+      if (parseFbaVarianceReview(c.Notes)) row.classified++;
+      if (String(c.CountDateTime || "") > row.lastCountAt) row.lastCountAt = String(c.CountDateTime || "");
+      reconByBatch[batch.key] = row;
     });
-    var reconDates = Object.keys(reconByDate).sort().slice(-6);
+    var reconBatches = Object.keys(reconByBatch).map(function (key) { return reconByBatch[key]; }).sort(function (a, b) {
+      return a.reportDate === b.reportDate ? a.lastCountAt.localeCompare(b.lastCountAt) : a.reportDate.localeCompare(b.reportDate);
+    });
+    var latestReportDate = ledger && ledger.reportDate ? String(ledger.reportDate).slice(0, 10) : "";
+    var latestBatch = null;
+    reconBatches.forEach(function (batch) {
+      if (!latestReportDate || batch.reportDate === latestReportDate) latestBatch = batch;
+    });
+    if (!latestBatch && reconBatches.length) latestBatch = reconBatches[reconBatches.length - 1];
+    var recentReconBatches = reconBatches.slice(-6);
     var body4 = reconCounts === null
       ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "Loading…")
-      : reconDates.length === 0
+      : recentReconBatches.length === 0
         ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680" } }, "No ledger reconciliations recorded yet.")
-        : /*#__PURE__*/React.createElement("div", null, reconDates.map(function (d) {
-            var r = reconByDate[d];
-            return /*#__PURE__*/React.createElement("div", { key: d, style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", fontSize: 11.5 } },
-              /*#__PURE__*/React.createElement("span", { style: { color: "#2c211a" } }, d + " · " + r.count + " product(s) adjusted"),
-              /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: r.drift > 0 ? "#bd5d38" : "#5f7a4f" } }, r.drift + " units drift"));
+        : /*#__PURE__*/React.createElement("div", null, recentReconBatches.map(function (r) {
+            return /*#__PURE__*/React.createElement("div", { key: r.key, style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "5px 0", fontSize: 11.5 } },
+              /*#__PURE__*/React.createElement("span", { style: { color: "#2c211a" } }, r.reportDate + " · " + r.count + " variance(s) · " + r.classified + " classified"),
+              /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: r.drift > 0 ? "#bd5d38" : "#5f7a4f", whiteSpace: "nowrap" } }, r.drift + " units drift"));
           }));
-    var latestDrift = reconDates.length ? reconByDate[reconDates[reconDates.length - 1]].drift : null;
-    var head4 = { icon: "🔄", label: "Reconciliation accuracy", value: reconCounts === null ? "…" : (latestDrift === null ? "—" : latestDrift), sub: latestDrift === null ? "no uploads yet" : "units drift, last upload", c: latestDrift > 0 ? "#a97b52" : "#5f7a4f" };
+    var latestDrift = latestBatch ? latestBatch.drift : null;
+    var head4 = { icon: "🔄", label: "Latest report variance", value: reconCounts === null ? "…" : (latestDrift === null ? "—" : latestDrift), sub: latestDrift === null ? "no uploads yet" : "units drift, newest upload", c: latestDrift > 0 ? "#a97b52" : "#5f7a4f" };
 
     // ---- Assemble: mobile = 4 stacked dropdown cards; desktop = 2x2 compact
     // grid + one shared detail panel below (approved via mockup 2026-07-24) ----
@@ -6301,6 +6415,7 @@ function App() {
   const [showAssemble, setShowAssemble] = React.useState(false);
   const [countsLoading, setCountsLoading] = React.useState(false);
   const [editingCount, setEditingCount] = React.useState(null);
+  const [reviewingFbaCount, setReviewingFbaCount] = React.useState(null);
   const [showLowStockAlert, setShowLowStockAlert] = React.useState(false);
   const [lowStockItems, setLowStockItems] = React.useState([]);
   const [analyticsMovs, setAnalyticsMovs] = React.useState(null); // approved movs for analytics dispatch panel
@@ -7159,6 +7274,8 @@ function App() {
     const diff = Number(c.Difference) || 0;
     const diffColor = diff === 0 ? "#bd5d38" : diff > 0 ? "#a97b52" : "#b23a2e";
     const isPending = c.Status === "Pending";
+    const isFbaVariance = isFbaVarianceCount(c);
+    const fbaReview = isFbaVariance ? parseFbaVarianceReview(c.Notes) : null;
     return /*#__PURE__*/React.createElement("div", {
       key: c.CountID || i,
       style: {
@@ -7214,7 +7331,9 @@ function App() {
         color: "#a89680",
         fontSize: 12
       }
-    }, "Counted by ", (c.CountedByEmail || "").split("@")[0], c.CountDateTime && /*#__PURE__*/React.createElement("span", null, " · ", String(c.CountDateTime).substring(0, 16)), c.Reason && /*#__PURE__*/React.createElement("span", null, " · ", c.Reason)), c.AdjustmentMovementID && /*#__PURE__*/React.createElement("div", {
+    }, "Counted by ", (c.CountedByEmail || "").split("@")[0], c.CountDateTime && /*#__PURE__*/React.createElement("span", null, " · ", String(c.CountDateTime).substring(0, 16)), c.Reason && /*#__PURE__*/React.createElement("span", null, " · ", c.Reason)), fbaReview && /*#__PURE__*/React.createElement("div", {
+      style: { marginTop: 6, padding: "7px 9px", borderRadius: 8, background: "#f4e7c8", color: "#6b5326", fontSize: 11.5, lineHeight: 1.45 }
+    }, /*#__PURE__*/React.createElement("b", null, "Classified: ", fbaReview.classificationLabel || fbaReview.classification), " · ", fbaReview.reviewNote, fbaReview.reviewedByEmail && /*#__PURE__*/React.createElement("span", { style: { color: "#a89680" } }, " · by ", String(fbaReview.reviewedByEmail).split("@")[0])), c.AdjustmentMovementID && /*#__PURE__*/React.createElement("div", {
       style: {
         color: "#bd5d38",
         fontSize: 11,
@@ -7281,7 +7400,15 @@ function App() {
         flexDirection: "column",
         gap: 6
       }
-    }, user.canApprove && /*#__PURE__*/React.createElement("button", {
+    }, isFbaVariance && hasCapability(user, "amazon.reconciliation.review") && /*#__PURE__*/React.createElement("button", {
+      onClick: () => setReviewingFbaCount(c),
+      style: {
+        ...btnS("#a97b52"),
+        padding: "8px 14px",
+        fontSize: 12,
+        whiteSpace: "nowrap"
+      }
+    }, fbaReview ? "Update FBA Review" : "Review FBA Variance"), user.canApprove && !isFbaVariance && /*#__PURE__*/React.createElement("button", {
       onClick: async () => {
         try {
           await apiWrite("approveStockCount", user.email, {
@@ -7300,7 +7427,7 @@ function App() {
         fontSize: 12,
         whiteSpace: "nowrap"
       }
-    }, "✅ Approve"), hasCapability(user, "inventory.counts.edit") && /*#__PURE__*/React.createElement("button", {
+    }, "✅ Approve"), hasCapability(user, "inventory.counts.edit") && !isFbaVariance && /*#__PURE__*/React.createElement("button", {
       onClick: () => setEditingCount({
         ...c,
         diff
@@ -7314,7 +7441,7 @@ function App() {
         borderColor: "#a97b5240",
         background: "#a97b5210"
       }
-    }, "✏️ Edit"), user.canApprove && /*#__PURE__*/React.createElement("button", {
+    }, "✏️ Edit"), user.canApprove && !isFbaVariance && /*#__PURE__*/React.createElement("button", {
       onClick: async () => {
         if (!window.confirm("Reject CNT " + c.CountID + "? This cannot be undone.")) return;
         try {
@@ -8310,6 +8437,16 @@ function App() {
       loadCounts();
       load();
       setEditingCount(null);
+    }
+  }), reviewingFbaCount && /*#__PURE__*/React.createElement(FbaVarianceReviewModal, {
+    count: reviewingFbaCount,
+    products: products,
+    user: user,
+    onClose: () => setReviewingFbaCount(null),
+    onDone: msg => {
+      notify(msg);
+      loadCounts();
+      setReviewingFbaCount(null);
     }
   }), editingMov && /*#__PURE__*/React.createElement(MovEditModal, {
     movement: editingMov,
