@@ -2,9 +2,18 @@
 
 Prepared: 2026-10-30
 
-Status: executed and owner-approved as one verified local commit in isolated branch/worktree `codex/source-sync-review`. No pull, reset, clean, push, merge, deployment or production mutation was performed.
+Status: completed. The clean-room baseline was committed as `6861997`, CI was added as `276dabe`, and PR #1 was merged to protected `main` as `02eaa2f`. No application deployment, production configuration or production data was changed.
 
-## Execution result
+## Closeout result
+
+- The isolated branch was pushed and merged only after owner approval; the preserved original working directory was not pulled over, overwritten, cleaned or reset.
+- GitHub Actions passed on PR #1 and again on merge commit `02eaa2f`. The merge-triggered Pages deployment also completed successfully.
+- Read-only live verification on 2026-10-30 returned HTTP 200 for the Pages index and `runtime-config.js`; the application loaded the four authorized identities and build `20261028-fba-review.1`.
+- The repository now records backend `3.2-phase2-access-policy.1`, the allowlisted foundation and the unchanged production runtime configuration.
+- Active ruleset `Protect main` (`26201018`) requires a pull request, the `Verify repository` status check and an up-to-date branch, and blocks deletion and force pushes.
+- The preparation and comparison sections below are retained as historical execution evidence. Statements that the baseline was local, unpublished, unmerged or awaiting protection are superseded by this closeout.
+
+## Historical execution result
 
 - A read-only remote check found that the cached local `origin/main` reference at `c16493b` was stale. Current remote `main` is `f42a482`.
 - The current remote was fetched into a private review ref and used as the isolated branch base. The original working-tree files were not changed.
@@ -25,7 +34,7 @@ Read-only live verification on 2026-10-30 established:
 
 Therefore the tracked root file is the currently proven delivery mechanism. Removing it without first implementing and verifying an alternative Pages artifact-generation process would break ERP API configuration. This proposal deliberately retains it unchanged.
 
-## Current repository state
+## Historical pre-merge repository state
 
 - The original local branch `main` was behind its cached tracking ref, and that tracking ref itself was stale. The isolated proposal uses actual remote `main` commit `f42a482`.
 - Tracked local changes exist in `index.html` and `syoat-app.js`.
@@ -33,7 +42,7 @@ Therefore the tracked root file is the currently proven delivery mechanism. Remo
 - `runtime-config.js` exists in the remote base and is the proven live Pages delivery mechanism. It remains unchanged; its endpoint must not be copied into documentation, patches or review output.
 - Archived `index-redesign.html` and `syoat-app-redesign.js` remain excluded.
 
-## Four remote commits reviewed
+## Historical four-commit comparison
 
 | Commit | Date | Remote effect | Local relationship |
 | --- | --- | --- | --- |
@@ -56,9 +65,9 @@ After ignoring whitespace, local `index.html` differs from `origin/main` only in
 
 The cached comparison established that local work included the original four commits. The actual execution then refreshed the remote tip privately and confirmed that current remote `f42a482` already contains the complete reviewed frontend. The remaining application delta is backend `Code.gs` only.
 
-## Safe synchronization sequence
+## Historical safe synchronization sequence
 
-Perform these steps only after separate owner approval:
+These steps were the approved execution plan. They are retained for audit history and are no longer an open synchronization task:
 
 1. Freeze the current workspace. Record `git status --short`, the branch/ref values, and cryptographic hashes for every tracked and untracked project file. Save a recoverable copy outside the working directory. Exclude PINs, session data, populated private environment files and private URLs from any shareable manifest.
 2. Create an isolated worktree and a `codex/` branch from the reviewed `origin/main` commit. Do not change the current working tree and do not reuse it for synchronization.
@@ -81,6 +90,6 @@ Stop the synchronization review if any of the following occurs:
 - tests, catalogue verification or version alignment fail;
 - an unrelated owner file would be overwritten or omitted.
 
-## Expected result
+## Historical expected result
 
 The reviewed proposal uses current remote `f42a482` as its clean baseline, preserves the identical published frontend, applies the later backend access policy, adds the project foundation intentionally, keeps the proven production configuration unchanged, and leaves the original working-tree files untouched.

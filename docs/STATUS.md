@@ -2,37 +2,47 @@
 
 Last updated: 2026-10-30
 
+### 2026-10-30 — Source synchronization closed on protected `main`
+
+- Status: complete. PR #1 was merged to `main` as `02eaa2f` after the source baseline commit `6861997` and CI workflow commit `276dabe`.
+- Repository baseline: backend `3.2-phase2-access-policy.1`, frontend build `20261028-fba-review.1`, the allowlisted project foundation and the unchanged tracked production `runtime-config.js` are now represented in GitHub history.
+- Verification: the canonical package `check` script passed locally (both JavaScript syntax checks, 77 Node tests, 50-action API catalogue and environment-template safety). GitHub Actions CI run #1 passed on PR #1; CI run #2 passed on merge commit `02eaa2f`; the Pages deployment for that merge completed successfully. A fresh read-only load showed the four authorized staff identities and build `20261028-fba-review.1`; both the Pages index and `runtime-config.js` returned HTTP 200.
+- Protection: active ruleset `Protect main` (`26201018`) targets `main`, requires a pull request, the `Verify repository` status check and an up-to-date branch, and blocks branch deletion and force pushes. It has no bypass actors and requires zero approvals to avoid a single-owner deadlock.
+- Production actions: none in this documentation closeout. No application/runtime configuration, Apps Script deployment, workbook, Drive record or other production data was changed.
+- Historical note: the three preparation entries immediately below are retained as audit evidence of their time. Their statements that the baseline was local, unpublished, unmerged, or awaiting protection are superseded by this closeout.
+- Next recommended action: continue Phase 2 Work Package 2 with read-only inventory baseline/data-dictionary work; any production correction still requires separate owner approval, backup, dry-run, bounded execution and immediate reconciliation.
+
 ### 2026-10-30 — Pull-request CI verification added
 
-- Status: ready for review on `codex/source-sync-review` and PR #1.
+- Status: historical preparation entry; superseded by the successful PR #1 and merge-CI results recorded above.
 - Goal: make the repository's complete local verification command a visible pull-request check without adding deployment behavior.
 - Roadmap item: Phase 0 shared project foundation / ongoing verification maintenance.
 - Files changed: `.github/workflows/ci.yml`, `docs/STATUS.md`, and `docs/CHANGELOG.md`.
 - Checks and results: the workflow runs the canonical dependency-free `npm run check` command on pull requests and pushes to `main`. The equivalent complete local sequence passed: both JavaScript syntax checks, all 77 Node tests, the 50-action API catalogue check and environment-template safety.
 - Production actions: none. The workflow has read-only repository contents permission and contains no publish, deploy, secret, environment, workbook, Drive, or production step.
-- Risks or blockers: branch protection is a separate GitHub repository setting and is not changed by this task.
-- Next recommended action: review the CI result on PR #1, then configure branch protection separately if the owner wants this check to be mandatory before merge.
+- Historical risk at this checkpoint: branch protection was a separate GitHub setting. It is now active under ruleset `26201018`.
+- Historical next action: review CI and configure protection. Both actions are now complete.
 
 ### 2026-10-30 — Clean-room source synchronization baseline committed locally
 
-- Status: owner-approved local baseline commit prepared and verified on isolated branch `codex/source-sync-review`; unpublished and not merged.
+- Status: historical execution checkpoint; the verified local baseline was later published and merged through PR #1 as `02eaa2f`.
 - Base: current remote `main` commit `f42a482`, fetched into a private review ref after read-only `ls-remote` showed the earlier local `origin/main` reference was stale.
 - Production-config proof: the repository has no Pages build workflow or config generator; root `index.html` loads root `runtime-config.js` directly. The live Pages index and configuration both returned HTTP 200, the live page loads build `20261028-fba-review.1`, and the live configuration is semantically identical to the preserved/remote production file. `runtime-config.js` therefore remains tracked and unchanged in this proposal.
 - Application delta: `index.html` and `syoat-app.js` already matched the current remote byte-for-byte. Only the reviewed `Code.gs` access-policy delta was applied: exact `Inactive`/`Archived` intentional-denial handling and `Staff.FullName` display compatibility, versioned `3.2-phase2-access-policy.1`.
 - Foundation: copied only `.gitignore`, `AGENTS.md`, `README.md`, `config/`, `docs/`, `package.json`, `pnpm-lock.yaml`, `runtime-config.example.js`, `scripts/`, and `tests/`. Archived redesign files, images and other remote assets were not copied or edited.
-- Production/live changes: none. The owner authorized one local commit only; no push, merge, deployment, publication, workbook/Drive/configuration mutation, clean or reset occurred.
+- Production/live changes at this checkpoint: none. A later owner-authorized push and PR merge changed repository history only; no deployment, workbook/Drive/configuration mutation, clean or reset occurred.
 - Verification: the exact allowlisted tree passed both JavaScript syntax checks, all 77 Node tests, the 50-action API catalogue check, environment-template safety, `git diff --check`, and staged credential/forbidden-artifact scans before the local commit.
-- Review artifact: inspect the committed local baseline against parent `f42a482`; publication and all production actions remain separately owner-controlled.
+- Review artifact: the baseline was reviewed against parent `f42a482` and is now represented by commit `6861997`, CI commit `276dabe` and merge commit `02eaa2f`. Production actions remain separately owner-controlled.
 
 ### 2026-10-30 — Staff no-access task closed; staging excluded; source synchronization assessed
 
-- Status: documentation complete; application code unchanged.
+- Status: historical assessment checkpoint; its source-state and synchronization-handoff statements are superseded by the protected-main closeout above. The access and staging decisions remain current.
 - Access closure: the owner confirmed Keerthana and Sai Ram remain active Staff identities but have matching App Login rows with exact status `Inactive` and blank PIN/hash/salt fields. They remain absent from the picker and cannot authenticate. The earlier `In-Active` spelling correction task is closed.
 - Staging decision: D-022 excludes staging from the current Phase 2 continuation, synchronization and release workflow. Historical staging evidence is retained, but incomplete staging/UAT or rollback rehearsal rows are no longer release blockers unless the owner explicitly reopens staging.
 - Preserved controls: local-first work, owner-only deployment/publication, exact backups/manifests, dry-run and bounded migration controls, immediate live verification, audit/recovery safeguards and production rollback planning remain mandatory.
-- Source state: local `main` is four commits behind `origin/main`; `index.html` and `syoat-app.js` contain preserved local changes, and most project foundation files are untracked. No pull, overwrite, clean, checkout, reset, commit or application-code edit was performed.
+- Source state at this checkpoint: local `main` was four commits behind `origin/main`; preserved source and foundation files had not yet been synchronized. That condition was resolved in the isolated worktree without altering the preserved original working directory.
 - Remote comparison: the four remote commits modify only `index.html`, `syoat-app.js` and tracked `runtime-config.js`. The local frontend already contains the remote source-location availability correction; after whitespace is ignored, the remaining local delta over `origin/main` is the later access/FBA work plus current cache/build markers.
-- Synchronization handoff: follow `SOURCE_SYNC_PLAN.md`; do not synchronize in this working tree by pulling over the preserved files.
+- Historical synchronization handoff: the clean-room plan in `SOURCE_SYNC_PLAN.md` was executed and closed through PR #1; its preparation instructions are retained for audit history.
 
 ### 2026-10-29 — Intentional no-access policy deployed; status spelling correction pending
 
@@ -83,9 +93,9 @@ Backend `3.1-phase2-wp1.6` retains request-scoped Sheet read reuse and adds a 30
 - Local audit checkout contains `index.html`, `syoat-app.js`, styling, images, and older redesign artifacts.
 - Current backend: bound Google Apps Script connected to the live workbook.
 - The original supplied 2,145-line backend source was saved locally as `Code.gs`; that local file now contains the reviewed Work Package 2–7 changes and is no longer a byte-for-byte copy of the attachment.
-- GitHub `main` was verified at commit `8443e09` on 2026-10-24. The four owner upload commits correctly stored backend `3.1-phase2-wp1.5`, its three documentation files and two performance-test files in their intended paths.
-- The current Apps Script and GitHub frontend have been deployed by the owner. Updated source/test/documentation files for backend `3.1-phase2-wp1.6` are local until owner publication to GitHub.
-- No package manifest, automated test suite, CI workflow, deployment guide, or staging configuration was present at the audit baseline.
+- GitHub `main` is closed out at merge commit `02eaa2f`; PR #1 contains the audited source baseline and CI workflow commit `276dabe`.
+- The current recorded production backend is `3.2-phase2-access-policy.1`; the current live frontend is build `20261028-fba-review.1`. Source-control publication does not imply a new production deployment.
+- Historical audit baseline: no package manifest, automated test suite, CI workflow, deployment guide, or staging configuration was present. The repository now contains the project foundation and required CI workflow.
 - Both committed JavaScript artifacts passed a basic Node syntax check during the audit.
 
 ## Data baseline from read-only workbook audit
@@ -132,16 +142,16 @@ This list records the original audit baseline for history. Later releases deploy
 
 ## Next recommended task
 
-Preserve the current working tree and execute the reviewed clean-room synchronization sequence in `SOURCE_SYNC_PLAN.md` only after owner approval. Then continue Phase 2 Work Package 2 as read-only inventory baseline/data-dictionary work; do not perform a production correction or historical rewrite.
+Continue Phase 2 Work Package 2 as read-only inventory baseline/data-dictionary work. The clean-room source synchronization is complete; do not perform a production correction or historical rewrite without separate owner approval and the required safeguards.
 
 ## Production state
 
-- Local branch state: `main` is four commits behind the existing `origin/main` reference; preserved local source/documentation work is not represented by the local branch tip.
+- Source-control record: protected GitHub `main` includes the audited baseline through PR #1 merge commit `02eaa2f`; the preserved original working directory was not overwritten.
 - Apps Script record: backend `3.2-phase2-access-policy.1` is the latest recorded deployed access-policy version.
 - Frontend record: build `20261028-fba-review.1` is the latest recorded frontend build and the current local build marker.
 - Live Google Sheet: PIN hashes/salts populated, readable PIN cells cleared, and 85 movement file references normalized.
 - Live Drive: the earlier migration audit reported 187 checked and private; the later read-only folder inventory observed at least 359 owner-only/not-shared files.
-- Deployment: owner-run production deployment completed and the owner confirmed the ERP is working.
+- Deployment/health: the recorded owner-run backend deployment is healthy; merge-CI and Pages deployment succeeded, and a fresh live load confirmed frontend build `20261028-fba-review.1` with four authorized identities.
 
 ## Handoff log
 
