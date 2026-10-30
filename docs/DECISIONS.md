@@ -137,6 +137,13 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 - Decision: The owner excludes staging from the current Phase 2 continuation, synchronization and release workflow. Existing staging resources and records are retained as historical evidence but are not an open gate, required execution environment or prerequisite for current Phase 2 work. This supersedes the narrower D-019 exception and the older Phase 2 plan language that required staging/UAT and a staging rollback rehearsal.
 - Consequence: Work remains local-first and the owner alone deploys, publishes or authorizes live-data changes. Before any owner-approved live release or migration, the project still requires local automated checks, an exact changed-file manifest, current backups, dry-run output for data changes, bounded/idempotent execution, backend-first release where applicable, immediate production smoke/reconciliation checks and a documented production rollback or recovery sequence. Excluding staging does not authorize Codex to deploy, publish, push, alter live configuration or mutate production data.
 
+### D-023 — `main` is protected by pull-request CI
+
+- Date: 2026-10-30
+- Status: accepted owner decision
+- Decision: repository changes to `main` flow through a pull request and the required `Verify repository` GitHub Actions check. Active ruleset `Protect main` (`26201018`) requires the branch to be up to date, blocks branch deletion and force pushes, has no bypass actors, and requires zero approving reviews so the single owner is not deadlocked.
+- Consequence: D-007 remains the default prohibition on agents pushing or publishing without owner authority, but an explicit owner instruction may authorize branch push, pull-request creation and merge. Repository authorization never implies Apps Script deployment, GitHub Pages publication, production-configuration changes or live-data writes; those remain separately owner-controlled.
+
 ## Open decisions
 
 ### Access and production-baseline decisions captured 2026-10-23

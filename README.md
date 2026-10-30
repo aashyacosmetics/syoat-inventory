@@ -21,7 +21,7 @@ The present application is a static React frontend backed by Google Apps Script 
 - `syoat-theme.css` — application styling.
 - `index-redesign.html` and `syoat-app-redesign.js` — archived test artifacts from before the live-version edits; ignore and never publish them.
 - `images/` — product and brand images.
-- `Code.gs` — local canonical copy of the supplied Apps Script backend; pending owner review/commit and manual deployment.
+- `Code.gs` — version-controlled canonical Apps Script backend source. The latest recorded production deployment is `3.2-phase2-access-policy.1`; future deployment remains an explicit owner action.
 - `docs/` — product, architecture, security, roadmap, decisions, status, and working procedures.
 
 ## Documentation map
@@ -59,7 +59,7 @@ Phase 1 is complete and stored in `docs/PHASE_1_COMPLETION.md`. Phase 2 inventor
 
 Open `AGENTS.md` first. A task should identify one roadmap item, state whether it affects production, implement the smallest coherent change, verify it, and update the status/handoff documentation.
 
-Development changes are made locally. The owner performs Apps Script deployment and frontend publication.
+Development changes are made on reviewed branches and pass the repository check before protected `main` accepts them. The owner still controls Apps Script deployment, frontend publication, production configuration and live-data changes.
 
 ## Local verification
 
