@@ -1,0 +1,405 @@
+{
+  "schemaVersion": 1,
+  "actions": [
+    {
+      "action": "ping",
+      "routes": [
+        "GET"
+      ],
+      "currentGate": "Public",
+      "targetCapability": "system.health"
+    },
+    {
+      "action": "login",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Public PIN entry with hash verification, five-attempt lockout, and session issue",
+      "targetCapability": "auth.login"
+    },
+    {
+      "action": "logout",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Session token revocation",
+      "targetCapability": "auth.logout"
+    },
+    {
+      "action": "confirmPin",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session plus PIN hash verification and lockout",
+      "targetCapability": "auth.confirmPin"
+    },
+    {
+      "action": "verifySession",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid active non-expired session",
+      "targetCapability": "auth.session.verify"
+    },
+    {
+      "action": "getAppLogins",
+      "routes": [
+        "GET"
+      ],
+      "currentGate": "Public; returns active staff picker",
+      "targetCapability": "auth.staffPicker"
+    },
+    {
+      "action": "getProducts",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability catalog.products.view",
+      "targetCapability": "catalog.products.view"
+    },
+    {
+      "action": "getLocations",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.locations.view",
+      "targetCapability": "inventory.locations.view"
+    },
+    {
+      "action": "getStaff",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability staff.view",
+      "targetCapability": "staff.view"
+    },
+    {
+      "action": "getMovements",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.movements.view",
+      "targetCapability": "inventory.movements.view"
+    },
+    {
+      "action": "getStock",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.stock.view",
+      "targetCapability": "inventory.stock.view"
+    },
+    {
+      "action": "getInventoryBootstrap",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.stock.view",
+      "targetCapability": "inventory.stock.view"
+    },
+    {
+      "action": "getSalesOrders",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability orders.fulfilment.view",
+      "targetCapability": "orders.fulfilment.view"
+    },
+    {
+      "action": "getStockCounts",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.counts.view",
+      "targetCapability": "inventory.counts.view"
+    },
+    {
+      "action": "getFeatureSettings",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability settings.features.view",
+      "targetCapability": "settings.features.view"
+    },
+    {
+      "action": "getLists",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability settings.lists.view",
+      "targetCapability": "settings.lists.view"
+    },
+    {
+      "action": "getComboBOM",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability catalog.combos.view",
+      "targetCapability": "catalog.combos.view"
+    },
+    {
+      "action": "getSupportTickets",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability support.tickets.view",
+      "targetCapability": "support.tickets.view"
+    },
+    {
+      "action": "getSuppliers",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability purchasing.suppliers.view",
+      "targetCapability": "purchasing.suppliers.view"
+    },
+    {
+      "action": "getPurchaseOrders",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability purchasing.orders.view",
+      "targetCapability": "purchasing.orders.view"
+    },
+    {
+      "action": "getFbaShipments",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability amazon.shipments.view",
+      "targetCapability": "amazon.shipments.view"
+    },
+    {
+      "action": "getFbaDispatchShipmentOptions",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.movements.create; returns minimal open-shipment fields only",
+      "targetCapability": "inventory.movements.create"
+    },
+    {
+      "action": "getFbaLedgerSnapshots",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability amazon.reconciliation.view",
+      "targetCapability": "amazon.reconciliation.view"
+    },
+    {
+      "action": "getOperationalFile",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.files.view; movement ownership/scope and stored file reference are revalidated",
+      "targetCapability": "inventory.files.view"
+    },
+    {
+      "action": "getSystemHealth",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid Founder/Co-Founder session + central capability system.health.view",
+      "targetCapability": "system.health.view"
+    },
+    {
+      "action": "createMovement",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.movements.create; existing handler domain rules also apply",
+      "targetCapability": "inventory.movements.create"
+    },
+    {
+      "action": "approveMovement",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.movements.approve; existing handler domain rules also apply",
+      "targetCapability": "inventory.movements.approve"
+    },
+    {
+      "action": "reverseMovement",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.movements.reverse; existing handler domain rules also apply",
+      "targetCapability": "inventory.movements.reverse"
+    },
+    {
+      "action": "editMovement",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.movements.edit; existing handler domain rules also apply",
+      "targetCapability": "inventory.movements.edit"
+    },
+    {
+      "action": "rejectMovement",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.movements.reject; existing handler domain rules also apply",
+      "targetCapability": "inventory.movements.reject"
+    },
+    {
+      "action": "createSalesOrder",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability orders.fulfilment.create; existing handler domain rules also apply",
+      "targetCapability": "orders.fulfilment.create"
+    },
+    {
+      "action": "dispatchSalesOrder",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability orders.fulfilment.dispatch; existing handler domain rules also apply",
+      "targetCapability": "orders.fulfilment.dispatch"
+    },
+    {
+      "action": "createStockCount",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.counts.create; existing handler domain rules also apply",
+      "targetCapability": "inventory.counts.create"
+    },
+    {
+      "action": "approveStockCount",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.counts.approve; existing handler domain rules also apply",
+      "targetCapability": "inventory.counts.approve"
+    },
+    {
+      "action": "rejectStockCount",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.counts.reject; existing handler domain rules also apply",
+      "targetCapability": "inventory.counts.reject"
+    },
+    {
+      "action": "editStockCount",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.counts.edit; existing handler domain rules also apply",
+      "targetCapability": "inventory.counts.edit"
+    },
+    {
+      "action": "logChange",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability audit.manual.create; existing handler domain rules also apply",
+      "targetCapability": "audit.manual.create"
+    },
+    {
+      "action": "assembleCombo",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.combos.assemble; existing handler domain rules also apply",
+      "targetCapability": "inventory.combos.assemble"
+    },
+    {
+      "action": "createFbaReconciliation",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability amazon.reconciliation.create; existing handler domain rules also apply",
+      "targetCapability": "amazon.reconciliation.create"
+    },
+    {
+      "action": "reviewFbaVariance",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability amazon.reconciliation.review; Manager-level FBA variance classification only; no stock change",
+      "targetCapability": "amazon.reconciliation.review"
+    },
+    {
+      "action": "createSupportTicket",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability support.tickets.create; existing handler domain rules also apply",
+      "targetCapability": "support.tickets.create"
+    },
+    {
+      "action": "updateSupportTicket",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability support.tickets.update; existing handler domain rules also apply",
+      "targetCapability": "support.tickets.update"
+    },
+    {
+      "action": "createPurchaseOrder",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability purchasing.orders.create; existing handler domain rules also apply",
+      "targetCapability": "purchasing.orders.create"
+    },
+    {
+      "action": "approvePurchaseOrder",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability purchasing.orders.approve; existing handler domain rules also apply",
+      "targetCapability": "purchasing.orders.approve"
+    },
+    {
+      "action": "rejectPurchaseOrder",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability purchasing.orders.reject; existing handler domain rules also apply",
+      "targetCapability": "purchasing.orders.reject"
+    },
+    {
+      "action": "closePurchaseOrder",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability purchasing.orders.close; existing handler domain rules also apply",
+      "targetCapability": "purchasing.orders.close"
+    },
+    {
+      "action": "createFbaShipment",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability amazon.shipments.create; existing handler domain rules also apply",
+      "targetCapability": "amazon.shipments.create"
+    },
+    {
+      "action": "updateFbaShipmentStatus",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability amazon.shipments.update; existing handler domain rules also apply",
+      "targetCapability": "amazon.shipments.update"
+    },
+    {
+      "action": "linkMovementToShipment",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability amazon.shipments.linkMovement; existing handler domain rules also apply",
+      "targetCapability": "amazon.shipments.linkMovement"
+    },
+    {
+      "action": "unlinkMovementFromShipment",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability amazon.shipments.unlinkMovement; existing handler domain rules also apply",
+      "targetCapability": "amazon.shipments.unlinkMovement"
+    }
+  ]
+}

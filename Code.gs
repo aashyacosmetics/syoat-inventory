@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-review.1",
+  VERSION:               "3.2-phase2-access-policy.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -568,7 +568,7 @@ function getAppLogins() {
       .map(login => {
         const staff = staffByEmail[normaliseEmail(login.Email)];
         return {
-          name:  String(staff.Name || login.Name || ""),
+          name:  staffDisplayName(staff, login.Name),
           email: String(staff.Email || login.Email || ""),
           role:  String(staff.Role || "Warehouse"),
         };
@@ -615,6 +615,16 @@ function logLoginAttempt(body) {
 
 function normaliseEmail(email) {
   return String(email || "").trim().toLowerCase();
+}
+
+function staffDisplayName(staff, fallback) {
+  const row = staff || {};
+  return String(row.FullName || row.Name || fallback || "").trim();
+}
+
+function isIntentionalLoginDenial(status) {
+  const value = String(status || "").trim().toLowerCase();
+  return value === "inactive" || value === "archived";
 }
 
 function authProperties() {
@@ -717,7 +727,7 @@ function sessionPropertyKey(token) {
 
 function safeStaffProfile(staff) {
   return {
-    name:  String(staff.Name || ""),
+    name:  staffDisplayName(staff),
     email: String(staff.Email || ""),
     role:  String(staff.Role || "Warehouse"),
     capabilities: capabilitiesForRole(staff.Role),
@@ -1843,7 +1853,7 @@ function createFbaReconciliation(body, staff) {
   try {
     if (body.fileText) {
       var ext   = (body.fileMime === "text/plain") ? ".txt" : ".csv";
-      var who   = String(staff.Name || staff.Email || "staff").split(" ")[0];
+      var who   = String(staffDisplayName(staff, staff.Email) || "staff").split(" ")[0];
       var stamp = reportDate;
       driveFile = saveLedgerToDrive(stamp + "_FBA-Ledger_" + who + ext, body.fileText, body.fileMime || "text/csv");
     }
@@ -3578,6 +3588,7 @@ function listStaffAccessMismatches() {
   const staffRows = sheetToObjects(SHEETS.STAFF);
   const loginRows = sheetToObjects(SHEETS.APP_LOGINS);
   const staffByEmail = {};
+  const loginsByEmail = {};
   const activeLoginsByEmail = {};
   staffRows.forEach(staff => {
     const email = normaliseEmail(staff.Email);
@@ -3585,7 +3596,10 @@ function listStaffAccessMismatches() {
   });
   loginRows.forEach(login => {
     const email = normaliseEmail(login.Email);
-    if (email && String(login.Status).trim().toLowerCase() === "active") {
+    if (!email) return;
+    if (!loginsByEmail[email]) loginsByEmail[email] = [];
+    loginsByEmail[email].push(login);
+    if (String(login.Status).trim().toLowerCase() === "active") {
       if (!activeLoginsByEmail[email]) activeLoginsByEmail[email] = [];
       activeLoginsByEmail[email].push(login);
     }
@@ -3598,17 +3612,19 @@ function listStaffAccessMismatches() {
     if (!email || !staffActive) return;
     const activeLogins = activeLoginsByEmail[email] || [];
     if (!isSupportedRole(staff.Role)) {
-      mismatches.push({ staffId: String(staff.StaffID || ""), name: String(staff.Name || "Unknown staff"), issue: "UNSUPPORTED_STAFF_ROLE" });
+      mismatches.push({ staffId: String(staff.StaffID || ""), name: staffDisplayName(staff, "Unknown staff"), issue: "UNSUPPORTED_STAFF_ROLE" });
     }
     if (!activeLogins.length) {
-      mismatches.push({ staffId: String(staff.StaffID || ""), name: String(staff.Name || "Unknown staff"), issue: "LOGIN_MISSING_OR_INACTIVE" });
+      const explicitDenial = (loginsByEmail[email] || []).some(login => isIntentionalLoginDenial(login.Status));
+      if (explicitDenial) return;
+      mismatches.push({ staffId: String(staff.StaffID || ""), name: staffDisplayName(staff, "Unknown staff"), issue: "LOGIN_MISSING_OR_INACTIVE" });
       return;
     }
     if (activeLogins.length > 1) {
-      mismatches.push({ staffId: String(staff.StaffID || ""), name: String(staff.Name || "Unknown staff"), issue: "DUPLICATE_ACTIVE_LOGIN" });
+      mismatches.push({ staffId: String(staff.StaffID || ""), name: staffDisplayName(staff, "Unknown staff"), issue: "DUPLICATE_ACTIVE_LOGIN" });
     }
     if (String(activeLogins[0].Role || "") !== String(staff.Role || "")) {
-      mismatches.push({ staffId: String(staff.StaffID || ""), name: String(staff.Name || "Unknown staff"), issue: "LOGIN_ROLE_DIFFERS" });
+      mismatches.push({ staffId: String(staff.StaffID || ""), name: staffDisplayName(staff, "Unknown staff"), issue: "LOGIN_ROLE_DIFFERS" });
     }
   });
   Object.keys(activeLoginsByEmail).forEach(email => {
@@ -3617,7 +3633,7 @@ function listStaffAccessMismatches() {
       const login = activeLoginsByEmail[email][0];
       mismatches.push({ staffId: "", name: String(login.Name || "Unknown login"), issue: "STAFF_MISSING" });
     } else if (String(staff.Status).trim().toLowerCase() !== "active") {
-      mismatches.push({ staffId: String(staff.StaffID || ""), name: String(staff.Name || activeLoginsByEmail[email][0].Name || "Unknown staff"), issue: "STAFF_INACTIVE" });
+      mismatches.push({ staffId: String(staff.StaffID || ""), name: staffDisplayName(staff, activeLoginsByEmail[email][0].Name || "Unknown staff"), issue: "STAFF_INACTIVE" });
     }
   });
   return mismatches;

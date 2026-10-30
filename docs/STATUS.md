@@ -1,10 +1,68 @@
 # Current Status and Handoff
 
-Last updated: 2026-10-24
+Last updated: 2026-10-30
+
+### 2026-10-30 — Clean-room source synchronization baseline committed locally
+
+- Status: owner-approved local baseline commit prepared and verified on isolated branch `codex/source-sync-review`; unpublished and not merged.
+- Base: current remote `main` commit `f42a482`, fetched into a private review ref after read-only `ls-remote` showed the earlier local `origin/main` reference was stale.
+- Production-config proof: the repository has no Pages build workflow or config generator; root `index.html` loads root `runtime-config.js` directly. The live Pages index and configuration both returned HTTP 200, the live page loads build `20261028-fba-review.1`, and the live configuration is semantically identical to the preserved/remote production file. `runtime-config.js` therefore remains tracked and unchanged in this proposal.
+- Application delta: `index.html` and `syoat-app.js` already matched the current remote byte-for-byte. Only the reviewed `Code.gs` access-policy delta was applied: exact `Inactive`/`Archived` intentional-denial handling and `Staff.FullName` display compatibility, versioned `3.2-phase2-access-policy.1`.
+- Foundation: copied only `.gitignore`, `AGENTS.md`, `README.md`, `config/`, `docs/`, `package.json`, `pnpm-lock.yaml`, `runtime-config.example.js`, `scripts/`, and `tests/`. Archived redesign files, images and other remote assets were not copied or edited.
+- Production/live changes: none. The owner authorized one local commit only; no push, merge, deployment, publication, workbook/Drive/configuration mutation, clean or reset occurred.
+- Verification: the exact allowlisted tree passed both JavaScript syntax checks, all 77 Node tests, the 50-action API catalogue check, environment-template safety, `git diff --check`, and staged credential/forbidden-artifact scans before the local commit.
+- Review artifact: inspect the committed local baseline against parent `f42a482`; publication and all production actions remain separately owner-controlled.
+
+### 2026-10-30 — Staff no-access task closed; staging excluded; source synchronization assessed
+
+- Status: documentation complete; application code unchanged.
+- Access closure: the owner confirmed Keerthana and Sai Ram remain active Staff identities but have matching App Login rows with exact status `Inactive` and blank PIN/hash/salt fields. They remain absent from the picker and cannot authenticate. The earlier `In-Active` spelling correction task is closed.
+- Staging decision: D-022 excludes staging from the current Phase 2 continuation, synchronization and release workflow. Historical staging evidence is retained, but incomplete staging/UAT or rollback rehearsal rows are no longer release blockers unless the owner explicitly reopens staging.
+- Preserved controls: local-first work, owner-only deployment/publication, exact backups/manifests, dry-run and bounded migration controls, immediate live verification, audit/recovery safeguards and production rollback planning remain mandatory.
+- Source state: local `main` is four commits behind `origin/main`; `index.html` and `syoat-app.js` contain preserved local changes, and most project foundation files are untracked. No pull, overwrite, clean, checkout, reset, commit or application-code edit was performed.
+- Remote comparison: the four remote commits modify only `index.html`, `syoat-app.js` and tracked `runtime-config.js`. The local frontend already contains the remote source-location availability correction; after whitespace is ignored, the remaining local delta over `origin/main` is the later access/FBA work plus current cache/build markers.
+- Synchronization handoff: follow `SOURCE_SYNC_PLAN.md`; do not synchronize in this working tree by pulling over the preserved files.
+
+### 2026-10-29 — Intentional no-access policy deployed; status spelling correction pending
+
+- Status: historical entry; superseded by the owner-confirmed 2026-10-30 closure above.
+- Goal: preserve Keerthana and Sai Ram as active Staff while recording the owner's decision that neither may log in to the ERP.
+- Roadmap item: Phase 2 closeout — staff-access reconciliation.
+- Owner decision: both access requests are **No**. Do not generate or enter a PIN for either person.
+- Files changed: `Code.gs`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `docs/DECISIONS.md`, `docs/ROLE_CAPABILITIES.md`, `docs/CHANGELOG.md`, and this status record.
+- Behavior: backend `3.2-phase2-access-policy.1` recognizes a matching `Inactive` or `Archived` App Login row as an intentional denial. Missing login rows still raise health attention; non-active rows remain excluded from the picker and login.
+- Production evidence: live ping returned status `ok` and backend `3.2-phase2-access-policy.1`. Read-only App Login verification confirmed rows for Keerthana and Sai Ram with blank PIN, PINHash and PINSalt fields. Their current status is `In-Active`, which does not match the accepted exact `Inactive`/`Archived` values.
+- Next recommended action: change both `In-Active` Status cells to exact `Inactive` (no hyphen), wait 30 seconds, refresh Founder health, and verify zero staff-access mismatches while the public picker still shows only the existing four authorized users.
+
+### 2026-10-29 — Staff FullName schema alignment deployed and accepted
+
+- Status: complete; deployed by the owner and accepted through live Founder UAT.
+- Goal: make Founder access-mismatch diagnostics identify the affected staff safely instead of displaying `Unknown staff`.
+- Roadmap item: Phase 2 closeout — staff-access reconciliation.
+- Evidence: a read-only live schema check confirmed `Staff!B1` is `FullName`; the seven visible records include Keerthana and Sai Ram, whose documented active Staff records have no active App Login row.
+- Files changed: `Code.gs`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `docs/API_CATALOG.md`, `docs/DECISIONS.md`, `docs/ROLE_CAPABILITIES.md`, `docs/CHANGELOG.md`, and this status record.
+- Behavior: backend `3.2-phase2-access-schema.1` resolves Staff names from live `FullName`, with legacy `Name` fallback. This applies to the picker, authenticated profile, private FBA evidence filename, and Founder-only mismatch output.
+- Production evidence: a direct live ping returned success, service `Syoat ERP`, status `ok`, version `3.2-phase2-access-schema.1`, and 1 ms server duration at 2026-10-29 16:34:36 IST. The login screenshot correctly remains frontend build `20261028-fba-review.1` because no frontend change was required. Founder UAT then displayed `Keerthana: needs an active app login` and `Sai Ram: needs an active app login`; the same screen reported zero write-recovery items, unresolved errors, missing sheets and browser-call failures.
+- Data/security: no Sheet row, PIN, hash, salt, email, role, inventory record, Drive file or GitHub frontend file was changed. Mismatch output remains Founder-only and contains no email or credential field.
+- Historical follow-up: the warnings remained valid at this checkpoint. D-021 and the owner-confirmed 2026-10-30 closure above now resolve both access decisions as No.
 
 ## Active phase
 
-Phase 1 is complete and stored in `PHASE_1_COMPLETION.md`. Backend `3.1-phase2-wp1.6` and frontend build `20261023-access-baseline.1` are in production. Phase 2 Work Package 1—production stabilization and isolated staging—is in progress. Read-only workbook/schema evidence and local staging-isolation safeguards are prepared; isolated resources, UAT and rollback rehearsal remain mandatory before inventory correction or migration.
+Phase 1 is complete and stored in `PHASE_1_COMPLETION.md`. Current records identify backend `3.2-phase2-access-policy.1` and frontend `20261028-fba-review.1`. Keerthana and Sai Ram's no-access task is closed under D-021; the four effective ERP users remain Lalith Kiran, Dharani, Pushpanjali and Zubedha.
+
+Backend `3.2-phase2-fba-review.1` and frontend `20261028-fba-review.1` replace generic stock-count buttons on imported Amazon variances with `Review FBA Variance`. Manager-level Amazon roles classify each difference and save an evidence note without changing stock. Backend guards also block direct generic approve/edit/reject calls. Analytics uses the newest report import batch and shows 444 units of absolute drift for the current 2026-10-26 upload instead of the stale 1,042-unit historical total. Owner screenshots confirm the live build and workflow.
+
+The owner excluded staging from the current Phase 2 workflow under D-022. Prior staging resources, tests and the incomplete rollback rehearsal remain historical evidence, not an open gate. Work Package 2 may continue with read-only production discovery and local sanitized analysis; production correction still requires separate owner approval, backup, dry-run, bounded execution and immediate live reconciliation.
+
+FBA alignment is now an explicit Phase 2 bridge. The 2026-10-27 read-only baseline found 24 approved unlinked FBA Dispatch movements totalling 4,516 units, zero FBA Receipt movements, empty FBA shipment tables, a latest 2026-10-21 snapshot containing 1,701 sellable units, and 29 approved report-driven stock adjustments. `PHASE_2_FBA_ALIGNMENT.md` defines the controlled shipment -> dispatch -> receipt -> report comparison chain, and `INVENTORY_EXCEPTION_REGISTER.md` records the open risks. No production correction, deployment or migration occurred.
+
+The owner approved a minimal open-shipment picker for Warehouse Operators. Production backend `3.2-phase2-fba-bridge.2` and frontend `20261027-fba-bridge.2` require a selected open shipment and entered Amazon reference for new FBA Dispatch drafts, expose only minimal plan data to Warehouse roles, and revalidate remaining planned quantity during approval. Report import uses the newest dated ending balance, rejects a repeated report date, rebuilds freshness from backend snapshots, and creates blocked Pending review variances without changing stock. All 74 non-socket automated tests pass. Coordinated deployment is verified; staff upload remains paused through functional live acceptance.
+
+Live Warehouse Operator acceptance passed on 2026-10-27. Zubedha opened Record Movement -> Ship Orders -> FBA Dispatch and saw the limited open-shipment selector, Amazon reference, destination FC, carrier/AWB and product entry fields. With no production shipment plan present, the form correctly displayed that a Warehouse Manager must create one first. No movement was submitted and no stock changed. Full Amazon-module visibility remained outside the tested operator workflow.
+
+The first production shipment chain was established without duplicating inventory. Amazon shipment `FBA15MRFBLH8` to `BOM5` matched existing approved dispatch `MOV-379` exactly: `PRD-P001` 98 units and `PRD-P005` 140 units. The owner created `SHIP-001`, linked `MOV-379`, and advanced the plan through Shipped to In Transit. The ERP displays 98/98 and 140/140 dispatched. Amazon evidence still showed zero located units/receiving, so no FBA Receipt was created and the shipment was deliberately not marked Received.
+
+On 2026-10-27 the owner explicitly instructed the project to skip staging and work only in live for this Phase 2 FBA package. The controlled release order is Apps Script backend first, GitHub frontend second, then immediate live health/access/dispatch/report-safety verification. This exception does not authorize historical movement changes, and staff FBA report upload remains paused until live acceptance is complete.
 
 Backend `3.1-phase2-wp1.6` retains request-scoped Sheet read reuse and adds a 30-second sanitized picker cache plus a compact session-property index for the measured startup delays. The owner deployed it on 2026-10-24; the frontend is unchanged.
 
@@ -63,18 +121,28 @@ This list records the original audit baseline for history. Later releases deploy
 
 ## Next recommended task
 
-Publish the reviewed backend `3.1-phase2-wp1.6` source/test/documentation files to GitHub. Then return to the remaining Work Package 1 gate: establish isolated staging and rehearse rollback before the next inventory migration.
+Preserve the current working tree and execute the reviewed clean-room synchronization sequence in `SOURCE_SYNC_PLAN.md` only after owner approval. Then continue Phase 2 Work Package 2 as read-only inventory baseline/data-dictionary work; do not perform a production correction or historical rewrite.
 
 ## Production state
 
-- Documentation/test files for backend `3.1-phase2-wp1.5`: verified on GitHub `main` through commit `8443e09`; candidate `3.1-phase2-wp1.6` records remain local.
-- Apps Script `Code.gs`: owner deployed backend `3.1-phase2-wp1.6`; public health returned status `ok`, the expected version and 2 ms server duration on 2026-10-24 16:04:30 IST.
-- GitHub frontend: build `20261023-access-baseline.1` published from commit `104c6e8` and GitHub Pages deployment #80 at verification time.
+- Local branch state: `main` is four commits behind the existing `origin/main` reference; preserved local source/documentation work is not represented by the local branch tip.
+- Apps Script record: backend `3.2-phase2-access-policy.1` is the latest recorded deployed access-policy version.
+- Frontend record: build `20261028-fba-review.1` is the latest recorded frontend build and the current local build marker.
 - Live Google Sheet: PIN hashes/salts populated, readable PIN cells cleared, and 85 movement file references normalized.
 - Live Drive: the earlier migration audit reported 187 checked and private; the later read-only folder inventory observed at least 359 owner-only/not-shared files.
 - Deployment: owner-run production deployment completed and the owner confirmed the ERP is working.
 
 ## Handoff log
+
+### 2026-10-28 — Dedicated FBA variance review and current-upload analytics ready locally
+
+- Status: ready for owner review; local source only. Production remains backend `3.2-phase2-fba-bridge.2` and frontend `20261027-fba-bridge.2`.
+- Goal: replace unsafe generic count decisions with one evidence-classification workflow and make Analytics report the newest uploaded ledger batch.
+- Behavior: Manager-level Amazon roles choose sale timing, receipt, damage/loss, removal order or unexplained and add an evidence note. Saving the review leaves the row Pending and creates no movement or stock change. Generic approve, edit and reject paths are hidden and blocked server-side.
+- Analytics: the drift card groups imported variance rows by immutable report import key/date and sums absolute differences for the newest upload. The current 2026-10-26 batch totals 444 units, replacing the stale 1,042-unit historical figure.
+- Files changed: `Code.gs`, `index.html`, `syoat-app.js`, `config/api-catalog.json`, tests and project documentation.
+- Release order when approved: deploy Apps Script backend first, confirm health version, publish GitHub frontend second, then refresh and test one variance review. Do not re-upload the same report.
+- Remaining boundary: classification alone does not resolve or adjust a variance. Any later correction requires separate evidence-backed maker-checker work.
 
 ### 2026-10-24 — Phase 2 startup authentication optimization deployed and measured
 

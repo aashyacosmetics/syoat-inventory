@@ -1,14 +1,16 @@
-# Phase 2 Work Package 1 — Stabilization and Isolated Staging
+# Phase 2 Work Package 1 — Stabilization and Release Safeguards
 
-Status: in progress; local safeguards and read-only production evidence prepared. Owner staging setup and live health evidence remain pending.
+Status: closed for current planning. Local safeguards and read-only production evidence are retained; D-022 excludes further staging setup and rollback rehearsal from the current Phase 2 workflow.
+
+The staging-specific sections below are historical design and evidence. They remain useful if the owner later reopens staging, but none is a current prerequisite or release gate.
 
 ## Safety boundary
 
 - Production inspection mode: read-only.
 - No live Sheet, Drive, Apps Script or GitHub write was performed.
 - No PIN, PIN hash/salt, session token, private attachment URL or populated environment identifier is stored in this record.
-- The owner alone creates/copies staging resources, changes Apps Script Properties, deploys the staging web app and publishes any staging frontend.
-- Inventory correction and migration work remains blocked until the staging record passes.
+- The owner alone deploys, publishes, changes Apps Script Properties or authorizes live-data changes.
+- Inventory correction and migration remain blocked until the owner approves the reviewed dry-run, backup, bounded execution and production rollback/recovery plan.
 
 ## Read-only production evidence — 2026-08-19
 
@@ -21,12 +23,12 @@ The connected workbook metadata and bounded sheet ranges were inspected through 
 | Core schemas | Products, locations, staff, movements, counts, purchasing, sales, FBA, audit, settings and lists headers are present | Pass for bounded schema availability |
 | PIN migration | Readable PIN field was blank in the bounded authentication-row check | Pass; authentication hash/salt values are deliberately not recorded |
 | Privacy migration | Prior owner evidence remains 187/187 private with zero errors | Pass based on `PRODUCTION_RELEASE_RECORD.md`; not rerun |
-| Workbook timezone | `America/Los_Angeles` | Open configuration defect: business display/storage policy should use `Asia/Kolkata`; correct only after staging verification |
+| Workbook timezone | `America/Los_Angeles` | Open configuration defect: business display/storage policy should use `Asia/Kolkata`; change only after impact review, current backup and owner approval |
 | Founder system health | Requires an authenticated Founder/Co-Founder application check | Pending owner evidence |
 | Write recovery | Stored in Apps Script Properties and requires `listWriteRecoveryRecords()` or Founder health | Pending owner evidence |
 | Recent operational errors | Restricted Apps Script health data; not inferred from Sheet rows | Pending owner evidence |
 | Login failures/lockouts | Founder health/login review required; no authentication secrets should be exported | Pending owner evidence |
-| Request timing | Local candidate `3.1-phase2-wp1.1` returns safe server duration and keeps a Founder-only, in-memory browser timing summary | Ready for staging measurement; no production timing claim |
+| Request timing | Local candidate `3.1-phase2-wp1.1` returns safe server duration and keeps a Founder-only, in-memory browser timing summary | Historical staging measurement basis; no current production timing claim |
 
 The bounded schema read found no reason to stop normal production use. It is not an inventory reconciliation and does not supersede WP2.
 
@@ -39,11 +41,11 @@ Record only counts, safe request/error references and disposition—never authen
 3. Review failed/locked login counts for the first business day and identify whether each is expected user error or unexplained activity.
 4. If recovery count is non-zero, run `listWriteRecoveryRecords()` from the Apps Script editor and stop before retrying or editing any affected business record.
 5. Preserve deployment/migration execution logs and the pre-release backups.
-6. In staging, record warm/cold login-picker and inventory-load timings from the Founder performance summary; record action, duration, outcome and safe request reference only.
+6. In an owner-approved environment, record warm/cold login-picker and inventory-load timings from the Founder performance summary; record action, duration, outcome and safe request reference only.
 
-Any unexplained recovery item, privacy exposure, repeated operational error or stock change without an approved movement blocks Phase 2 staging writes.
+Any unexplained recovery item, privacy exposure, repeated operational error or stock change without an approved movement blocks the affected Phase 2 release or live write.
 
-## Isolated staging design
+## Historical isolated staging design
 
 The backend uses `SpreadsheetApp.getActiveSpreadsheet()`. Therefore the staging Apps Script project must be bound to the private staging workbook; copying only the frontend or changing a URL is insufficient.
 
@@ -73,7 +75,7 @@ The gate fails if required values remain placeholders, if staging reuses the pro
 
 ## Exit state
 
-Local WP1 preparation is complete when automated checks pass. WP1 itself remains open until `PHASE_2_STAGING_RECORD.md` contains actual owner evidence for production health, isolated resource identities, a Founder and non-founder login, a reversible staging write and a rollback rehearsal.
+Local WP1 preparation is complete when automated checks pass. The former staging closure conditions are archived by D-022 and no longer keep WP1 open. Current release safeguards are defined in `PHASE_2_PLAN.md` and `STATUS.md`.
 
 The local timing implementation does not send performance records back to the server or store them in Sheets/Drive. It aggregates action name, client round-trip duration, server duration and success/failure only in the current browser session. Closing/refreshing the browser clears it. PIN login and server PIN reconfirmation remain unchanged.
 
