@@ -1,0 +1,42 @@
+{
+  "staff": [
+    { "Email": "founder@example.invalid", "Name": "Test Founder", "Role": "Founder", "Status": "Active" },
+    { "Email": "warehouse@example.invalid", "Name": "Test Warehouse", "Role": "Warehouse", "Status": "Active" },
+    { "Email": "disabled@example.invalid", "Name": "Test Disabled", "Role": "Warehouse", "Status": "Inactive" }
+  ],
+  "products": [
+    { "ProductID": "TEST-P001", "SKU": "TEST-SKU-001", "ProductName": "Test Product", "Status": "Active", "ReorderLevel": 10 },
+    { "ProductID": "TEST-C001", "SKU": "TEST-COMBO-001", "ProductName": "Test Combo", "Status": "Active", "ReorderLevel": 5 }
+  ],
+  "locations": [
+    { "LocationID": "MAIN_WH", "LocationName": "Test Main Warehouse", "Status": "Active" },
+    { "LocationID": "FBA_TRANSIT", "LocationName": "Test FBA Transit", "Status": "Active" },
+    { "LocationID": "TEST_FC", "LocationName": "Test Amazon FC", "Status": "Active" }
+  ],
+  "movements": [
+    {
+      "header": {
+        "MovementID": "MOV-TEST-001",
+        "MovementType": "Stock In",
+        "SourceLocationID": "SUPPLIER",
+        "DestinationLocationID": "MAIN_WH",
+        "Status": "Approved",
+        "EnteredByEmail": "warehouse@example.invalid",
+        "ApprovedByEmail": "founder@example.invalid"
+      },
+      "lines": [
+        { "MovementLineID": "MOV-TEST-001-L001", "MovementID": "MOV-TEST-001", "ProductID": "TEST-P001", "Quantity": 20 }
+      ]
+    }
+  ],
+  "fbaShipments": [
+    {
+      "ShipmentID": "SHIP-TEST-001",
+      "DestinationFC": "TEST_FC",
+      "Status": "In Transit",
+      "lines": [
+        { "ShipmentLineID": "SHIP-TEST-001-L001", "ProductID": "TEST-P001", "ExpectedQty": 5 }
+      ]
+    }
+  ]
+}

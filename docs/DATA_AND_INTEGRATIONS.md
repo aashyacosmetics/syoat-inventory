@@ -1,0 +1,87 @@
+# Data and Integrations
+
+## Authoritative assets
+
+| Asset | Current role | Authority |
+| --- | --- | --- |
+| GitHub repository `aashyacosmetics/syoat-inventory` | Frontend source/history | Frontend code |
+| Google Sheet `Syoat Inventory ERP - Live Backend.xlsm` | Live operational backend | Current business data |
+| Bound Google Apps Script project | API and business logic | Current backend behavior |
+| Google Drive folders/files | Evidence and imported reports | Supporting documents |
+
+Known spreadsheet ID: `1uO8M6uvz4HKIgXZOIFUJVG7qRjPL-0Tv-niPq05zeaY`.
+
+Do not place PINs, tokens, passwords, or private file links in this document.
+
+## Production metadata baseline (verified 2026-10-23)
+
+| Asset | Verified state |
+| --- | --- |
+| Live workbook | `Syoat Inventory ERP - Live Backend.xlsm`; 24 tabs |
+| Workbook locale | `en_GB` |
+| Workbook timezone | `America/Los_Angeles` |
+| Apps Script backend | `3.1-phase2-wp1.3`; health endpoint returned `success: true` and `status: ok` on 2026-10-24 |
+| GitHub Pages frontend | Build `20261023-access-baseline.1` |
+| GitHub source baseline | Main commit `104c6e8` at verification time |
+| Private Drive root | Owner-only; all enumerated descendants were not shared |
+
+The workbook timezone is inconsistent with Syoat's India operations. Treat this as an open owner decision because changing it can alter date parsing, timestamps, reports, and triggers. Do not change it silently.
+
+Only the configured live workbook is authoritative. The two older workbook copies observed under `01_Backend` are not production data sources unless the owner explicitly designates one during recovery.
+
+The Drive ledger folder contained a ledger dated 2026-10-21 while the live Amazon page displayed that no ledger was uploaded. This is a verified cross-system inconsistency, not evidence that either record should be deleted.
+
+## Current workbook domains
+
+The inspected workbook contains product/combo/location/staff configuration, movement headers and lines, FBA snapshots, stock counts, login events, audit records, and change logs. Purchasing, sales, and FBA workflow structures exist in code but several corresponding tables currently have little or no operational data.
+
+Before changing any sheet integration:
+
+1. fetch current headers and representative rows;
+2. confirm the live schema against the code contract;
+3. preserve existing IDs and references;
+4. make a backup/export for a migration;
+5. test against non-production data;
+6. document formulas, protected ranges, validation, and triggers affected;
+7. verify row counts and reconciliation after the change.
+
+## Data rules
+
+- IDs are immutable and generated atomically.
+- Timestamps use an unambiguous stored format and display in the business timezone.
+- Quantities and identifiers are validated server-side.
+- Empty, zero, and not-applicable values are not interchangeable.
+- Approved operational records are not deleted; they are reversed or superseded with a reason.
+- Referential integrity is checked between headers, lines, products, locations, staff, shipments, and linked documents.
+- Batch and expiry are required where the product/process requires them.
+- Every imported report stores source, report period/date, import time, importer, checksum or duplicate key, and processing result.
+
+## Integration principles
+
+- Prefer official APIs or controlled report imports.
+- Each integration has a clearly named source of truth and last-success timestamp.
+- Imports are idempotent and safe to retry.
+- External status is mapped explicitly; unknown values fail visibly.
+- Credentials live in protected configuration, never frontend code or sheets exposed to normal staff.
+- Integration failure must not corrupt inventory or mark work completed.
+- Manual override requires permission, reason, and audit history.
+
+## Planned integrations
+
+- Amazon Seller/FBA for inventory, shipments, listings, and operational exceptions.
+- FirstCry and additional marketplaces as access/API availability permits.
+- Website platform for catalog, content, promotion, and operational issues.
+- Social channels or scheduling tools for content operations.
+- Google Drive for private evidence and approved report imports.
+
+An integration is added only when its scope, permissions, data ownership, failure handling, and reconciliation process have been documented.
+
+## Environment separation
+
+- `development`: local/static fixtures and no production writes.
+- `staging`: non-production Apps Script deployment and copied/sanitized workbook.
+- `production`: live portal, live script deployment, and live workbook.
+
+Environment URLs and IDs must be configuration values. The frontend must not hard-code a production endpoint into every build.
+
+Owner decision D-022 excludes staging from the current Phase 2 workflow. The staging definition remains documented for historical resources or a future owner decision; it is not a current release prerequisite.

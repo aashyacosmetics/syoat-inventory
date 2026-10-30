@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "defaultEnvironment": "development",
+  "environments": {
+    "development": {
+      "apiUrl": "http://127.0.0.1:8787/mock-api",
+      "dataClass": "synthetic-fixtures",
+      "ownerDeploymentOnly": true
+    },
+    "staging": {
+      "apiUrl": "REPLACE_WITH_STAGING_APPS_SCRIPT_URL",
+      "spreadsheetId": "REPLACE_WITH_STAGING_SPREADSHEET_ID",
+      "driveRootFolderId": "REPLACE_WITH_STAGING_DRIVE_ROOT_FOLDER_ID",
+      "legacyAttachmentsFolderId": "OPTIONAL_STAGING_LEGACY_FOLDER_ID",
+      "dataClass": "staging-copy",
+      "ownerDeploymentOnly": true
+    },
+    "production": {
+      "apiUrl": "REPLACE_WITH_PRODUCTION_APPS_SCRIPT_URL",
+      "spreadsheetId": "REPLACE_WITH_PRODUCTION_SPREADSHEET_ID",
+      "driveRootFolderId": "REPLACE_WITH_PRODUCTION_DRIVE_ROOT_FOLDER_ID",
+      "legacyAttachmentsFolderId": "OPTIONAL_PRODUCTION_LEGACY_FOLDER_ID",
+      "dataClass": "live-business-data",
+      "ownerDeploymentOnly": true
+    }
+  }
+}

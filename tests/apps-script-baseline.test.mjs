@@ -14,7 +14,13 @@ function fixtureSheets() {
     Locations: objectsToRows(fixture.locations),
     Staff: objectsToRows(fixture.staff),
     App_Logins: objectsToRows(fixture.staff),
-    Movement_Headers: objectsToRows(headers),
+    Movement_Headers: objectsToRows(headers, [
+      "MovementID", "MovementDateTime", "MovementType", "SourceLocationID",
+      "DestinationLocationID", "ReferenceType", "ReferenceNumber",
+      "AmazonShipmentID", "AmazonDestinationFC", "CarrierTrackingNumber",
+      "DocumentFile", "Status", "EnteredByEmail", "ApprovedByEmail",
+      "ApprovedAt", "ReversalOfMovementID", "PurchaseOrderID", "Notes",
+    ]),
     Movement_Lines: objectsToRows(lines),
     FBA_Shipments: objectsToRows(fixture.fbaShipments.map(({ lines: ignored, ...shipment }) => shipment)),
     FBA_Shipment_Lines: objectsToRows(fixture.fbaShipments.flatMap(shipment =>
@@ -65,7 +71,7 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.1-phase2-wp1.6");
+  assert.equal(response.data.version, "3.2-phase2-access-policy.1");
 });
 
 test("public staff picker exposes only name, email, and role", () => {
@@ -79,10 +85,10 @@ test("public staff picker exposes only name, email, and role", () => {
 });
 
 test("public staff picker returns only the active Staff and App_Logins intersection", () => {
-  const founder = { StaffID: "STF001", Email: "founder@example.invalid", Name: "Authoritative Founder", Role: "Founder", Status: "Active" };
-  const missingLogin = { StaffID: "STF002", Email: "missing-login@example.invalid", Name: "Missing Login", Role: "Accounts", Status: "Active" };
-  const archived = { StaffID: "STF003", Email: "archived@example.invalid", Name: "Archived Staff", Role: "Operations Manager", Status: "Archived" };
-  const roleMismatch = { StaffID: "STF004", Email: "role-mismatch@example.invalid", Name: "Staff Role Wins", Role: "Warehouse Manager", Status: "Active" };
+  const founder = { StaffID: "STF001", Email: "founder@example.invalid", FullName: "Authoritative Founder", Role: "Founder", Status: "Active" };
+  const missingLogin = { StaffID: "STF002", Email: "missing-login@example.invalid", FullName: "Missing Login", Role: "Accounts", Status: "Active" };
+  const archived = { StaffID: "STF003", Email: "archived@example.invalid", FullName: "Archived Staff", Role: "Operations Manager", Status: "Archived" };
+  const roleMismatch = { StaffID: "STF004", Email: "role-mismatch@example.invalid", FullName: "Staff Role Wins", Role: "Warehouse Manager", Status: "Active" };
   const sheets = authenticatedSheets();
   sheets.Staff = objectsToRows([founder, missingLogin, archived, roleMismatch]);
   sheets.App_Logins = objectsToRows([
@@ -104,11 +110,13 @@ test("Founder health reports safe Staff and App_Logins mismatches", () => {
   const sheets = authenticatedSheets();
   sheets.Staff = objectsToRows([
     ...fixture.staff,
-    { StaffID: "STF-MISSING", Email: "missing-login@example.invalid", Name: "Missing Login", Role: "Accounts", Status: "Active" },
-    { StaffID: "STF-ARCHIVED", Email: "archived@example.invalid", Name: "Archived Staff", Role: "Operations Manager", Status: "Archived" },
+    { StaffID: "STF-MISSING", Email: "missing-login@example.invalid", FullName: "Missing Login", Role: "Accounts", Status: "Active" },
+    { StaffID: "STF-DENIED", Email: "denied-login@example.invalid", FullName: "Intentional No Access", Role: "Accounts", Status: "Active" },
+    { StaffID: "STF-ARCHIVED", Email: "archived@example.invalid", FullName: "Archived Staff", Role: "Operations Manager", Status: "Archived" },
   ]);
   sheets.App_Logins = objectsToRows([
     ...fixture.staff.map(staff => ({ ...staff, PINHash: testPinHash(), PINSalt: TEST_SALT })),
+    { Email: "denied-login@example.invalid", Name: "Intentional No Access", Role: "Accounts", Status: "Inactive", PINHash: "", PINSalt: "" },
     { Email: "archived@example.invalid", Name: "Archived Staff", Role: "Operations Manager", Status: "Active", PINHash: testPinHash(), PINSalt: TEST_SALT },
     { Email: "login-only@example.invalid", Name: "Login Only", Role: "Warehouse", Status: "Active", PINHash: testPinHash(), PINSalt: TEST_SALT },
   ]);
@@ -122,6 +130,11 @@ test("Founder health reports safe Staff and App_Logins mismatches", () => {
     health.data.staffAccessMismatches.map(item => item.issue).sort(),
     ["LOGIN_MISSING_OR_INACTIVE", "STAFF_INACTIVE", "STAFF_MISSING"]
   );
+  assert.equal(
+    health.data.staffAccessMismatches.find(item => item.staffId === "STF-MISSING").name,
+    "Missing Login"
+  );
+  assert.equal(health.data.staffAccessMismatches.some(item => item.staffId === "STF-DENIED"), false);
   assert.equal(health.data.staffAccessMismatches.some(item => Object.hasOwn(item, "email")), false);
 });
 
@@ -476,6 +489,180 @@ test("serialized writes allocate distinct identifiers under the business lock", 
   assert.notEqual(first.data.movementID, second.data.movementID);
   assert.equal(harness.lockStats.waitCalls - beforeLocks, 2);
   assert.equal(harness.lockStats.releaseCalls, harness.lockStats.waitCalls);
+});
+
+test("Warehouse receives only minimal open FBA shipment options", () => {
+  const harness = createAppsScriptHarness(writeReadySheets());
+  const signedIn = post(harness, {
+    action: "login",
+    email: "warehouse@example.invalid",
+    pin: TEST_PIN,
+    userAgent: "local-test",
+  }).data;
+  const response = post(harness, {
+    action: "getFbaDispatchShipmentOptions",
+    sessionToken: signedIn.sessionToken,
+  });
+
+  assert.equal(response.success, true, JSON.stringify(response));
+  assert.equal(response.data.length, 1);
+  assert.deepEqual(Object.keys(response.data[0]).sort(), ["destinationFC", "lines", "shipmentID", "status"]);
+  assert.deepEqual(Object.keys(response.data[0].lines[0]).sort(), ["dispatchedQty", "expectedQty", "productID", "remainingQty"]);
+  assert.equal(response.data[0].shipmentID, "SHIP-TEST-001");
+  assert.equal(response.data[0].lines[0].remainingQty, 5);
+  assert.doesNotMatch(JSON.stringify(response.data), /CreatedBy|Notes|Email|file/i);
+});
+
+test("FBA Dispatch requires an open shipment, Amazon reference, and planned remaining quantity", () => {
+  const harness = createAppsScriptHarness(writeReadySheets());
+  const signedIn = login(harness).data;
+  const base = {
+    action: "createMovement",
+    sessionToken: signedIn.sessionToken,
+    movementType: "FBA Dispatch",
+    sourceLocationID: "MAIN_WH",
+    destinationLocationID: "FBA_TRANSIT",
+    referenceNumber: "AMZ-SHIP-TEST-001",
+    amazonShipmentID: "SHIP-TEST-001",
+    amazonDestinationFC: "TEST_FC",
+    lines: [{ productID: "TEST-P001", quantity: 4 }],
+  };
+
+  const missingShipment = post(harness, {
+    ...base,
+    requestId: "req-fba-dispatch-missing-0001",
+    amazonShipmentID: "",
+  });
+  assert.equal(missingShipment.success, false);
+  assert.match(missingShipment.error, /select an open FBA shipment/i);
+
+  const missingReference = post(harness, {
+    ...base,
+    requestId: "req-fba-dispatch-reference-0001",
+    referenceNumber: "",
+  });
+  assert.equal(missingReference.success, false);
+  assert.match(missingReference.error, /Amazon Shipment ID/i);
+
+  const first = post(harness, { ...base, requestId: "req-fba-dispatch-first-0001" });
+  const competing = post(harness, { ...base, requestId: "req-fba-dispatch-second-0001" });
+  assert.equal(first.success, true, JSON.stringify(first));
+  assert.equal(competing.success, true, JSON.stringify(competing));
+
+  const headers = harness.call("sheetToObjects", "Movement_Headers");
+  const created = headers.find(row => row.MovementID === first.data.movementID);
+  assert.equal(created.AmazonShipmentID, "SHIP-TEST-001");
+  assert.equal(created.AmazonDestinationFC, "TEST_FC");
+
+  const approved = post(harness, {
+    action: "approveMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-dispatch-approve-0001",
+    movementID: first.data.movementID,
+  });
+  assert.equal(approved.success, true, JSON.stringify(approved));
+
+  const staleApproval = post(harness, {
+    action: "approveMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-dispatch-approve-0002",
+    movementID: competing.data.movementID,
+  });
+  assert.equal(staleApproval.success, false);
+  assert.match(staleApproval.error, /exceeds the selected shipment plan/);
+
+  const options = post(harness, {
+    action: "getFbaDispatchShipmentOptions",
+    sessionToken: signedIn.sessionToken,
+  });
+  assert.equal(options.data[0].lines[0].remainingQty, 1);
+});
+
+test("FBA report import saves evidence for review without changing stock", () => {
+  const sheets = writeReadySheets();
+  sheets.Stock_Counts = objectsToRows([], [
+    "CountID", "CountDateTime", "LocationID", "ProductID", "SystemQty",
+    "PhysicalQty", "Difference", "CountedByEmail", "ApprovedByEmail",
+    "Status", "Reason", "AdjustmentMovementID", "Notes",
+  ]);
+  sheets.FBA_Ledger_Snapshots = objectsToRows([], [
+    "SnapshotID", "ReportDate", "ProductID", "FC", "Qty", "Sold",
+    "UploadedByEmail", "UploadedAt",
+  ]);
+  const harness = createAppsScriptHarness(sheets);
+  const signedIn = login(harness).data;
+  const movementRowsBefore = harness.spreadsheet.getSheetByName("Movement_Headers").values.length;
+  const payload = {
+    action: "createFbaReconciliation",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-report-0001",
+    reportDate: "2026-10-27",
+    fileText: "date,asin,disposition,ending warehouse balance\n2026-10-27,TEST-ASIN,SELLABLE,3",
+    fileName: "synthetic-fba-report.csv",
+    fileMime: "text/csv",
+    items: [{ productID: "TEST-P001", ledgerQty: 3 }],
+    fcSnapshot: [{ productID: "TEST-P001", fc: "TEST_FC", qty: 3, sold: 1 }],
+  };
+
+  const imported = post(harness, payload);
+  assert.equal(imported.success, true, JSON.stringify(imported));
+  assert.equal(imported.data.pendingReviewCount, 1);
+  assert.equal(imported.data.snapshotSaved, 1);
+  assert.equal(harness.spreadsheet.getSheetByName("Movement_Headers").values.length, movementRowsBefore);
+
+  const counts = harness.call("sheetToObjects", "Stock_Counts");
+  assert.equal(counts.length, 1);
+  assert.equal(counts[0].Status, "Pending");
+  assert.equal(counts[0].Reason, "FBA Report Variance Review");
+  assert.equal(counts[0].AdjustmentMovementID, "");
+
+  const classified = post(harness, {
+    action: "reviewFbaVariance",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-report-review-0001",
+    countID: counts[0].CountID,
+    classification: "receipt",
+    reviewNote: "Matched to synthetic shipment evidence.",
+  });
+  assert.equal(classified.success, true, JSON.stringify(classified));
+  assert.equal(classified.data.classification, "receipt");
+  const reviewedCount = harness.call("sheetToObjects", "Stock_Counts")[0];
+  assert.equal(reviewedCount.Status, "Pending");
+  assert.match(reviewedCount.Notes, /FBA_REVIEW:/);
+  assert.match(reviewedCount.Notes, /"classification":"receipt"/);
+  assert.equal(harness.spreadsheet.getSheetByName("Movement_Headers").values.length, movementRowsBefore);
+
+  const unsafeEdit = post(harness, {
+    action: "editStockCount",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-report-edit-0001",
+    countID: counts[0].CountID,
+    physicalQty: 4,
+  });
+  assert.equal(unsafeEdit.success, false);
+  assert.match(unsafeEdit.error, /Review FBA Variance/i);
+
+  const unsafeReject = post(harness, {
+    action: "rejectStockCount",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-report-reject-0001",
+    countID: counts[0].CountID,
+  });
+  assert.equal(unsafeReject.success, false);
+  assert.match(unsafeReject.error, /Review FBA Variance/i);
+
+  const unsafeApproval = post(harness, {
+    action: "approveStockCount",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-report-approve-0001",
+    countID: counts[0].CountID,
+  });
+  assert.equal(unsafeApproval.success, false);
+  assert.match(unsafeApproval.error, /cannot be approved as a normal stock count/i);
+
+  const duplicate = post(harness, { ...payload, requestId: "req-fba-report-0002" });
+  assert.equal(duplicate.success, false);
+  assert.match(duplicate.error, /already imported/i);
 });
 
 test("retrying a completed request returns its result without another business event", () => {

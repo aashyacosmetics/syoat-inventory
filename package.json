@@ -1,0 +1,20 @@
+{
+  "name": "syoat-erp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local verification harness for the Syoat ERP frontend and Apps Script backend",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check:syntax": "node scripts/check-syntax.mjs",
+    "check:catalog": "node scripts/generate-api-catalog.mjs --check",
+    "check:environment": "node scripts/check-environment-isolation.mjs config/environments.example.json",
+    "check:staging": "node scripts/check-environment-isolation.mjs config/environments.local.json --require-ready",
+    "staging:serve": "node scripts/serve-staging.mjs",
+    "catalog:print": "node scripts/generate-api-catalog.mjs",
+    "check": "node scripts/check-syntax.mjs && node --test && node scripts/generate-api-catalog.mjs --check && node scripts/check-environment-isolation.mjs config/environments.example.json"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

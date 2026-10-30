@@ -194,12 +194,25 @@ test("performance requirements retain PIN controls and prohibit credential telem
   assert.match(backend, /confirmPin/);
 });
 
+test("FBA variance UI uses dedicated review and newest report batch analytics", () => {
+  const frontend = readProjectFile("syoat-app.js");
+
+  assert.match(frontend, /function FbaVarianceReviewModal/);
+  assert.match(frontend, /hasCapability\(user, "amazon\.reconciliation\.review"\)/);
+  assert.match(frontend, /user\.canApprove && !isFbaVariance/);
+  assert.match(frontend, /var batch = fbaVarianceBatch\(c\)/);
+  assert.match(frontend, /var latestBatch = null/);
+  assert.match(frontend, /Latest report variance/);
+  assert.match(frontend, /sale_timing/);
+  assert.match(frontend, /removal/);
+});
+
 test("API responses expose safe server duration metadata", () => {
   const harness = createAppsScriptHarness({});
   const response = harness.callJson("doGet", { parameter: { action: "ping" } });
 
   assert.equal(response.success, true);
-  assert.equal(response.data.version, "3.1-phase2-wp1.6");
+  assert.equal(response.data.version, "3.2-phase2-access-policy.1");
   assert.equal(Number.isFinite(response.serverDurationMs), true);
   assert.ok(response.serverDurationMs >= 0);
   assert.equal(Object.hasOwn(response, "pin"), false);
