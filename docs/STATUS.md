@@ -2,6 +2,17 @@
 
 Last updated: 2026-10-30
 
+### 2026-10-30 — Pull-request CI verification added
+
+- Status: ready for review on `codex/source-sync-review` and PR #1.
+- Goal: make the repository's complete local verification command a visible pull-request check without adding deployment behavior.
+- Roadmap item: Phase 0 shared project foundation / ongoing verification maintenance.
+- Files changed: `.github/workflows/ci.yml`, `docs/STATUS.md`, and `docs/CHANGELOG.md`.
+- Checks and results: the workflow runs the canonical dependency-free `npm run check` command on pull requests and pushes to `main`. The equivalent complete local sequence passed: both JavaScript syntax checks, all 77 Node tests, the 50-action API catalogue check and environment-template safety.
+- Production actions: none. The workflow has read-only repository contents permission and contains no publish, deploy, secret, environment, workbook, Drive, or production step.
+- Risks or blockers: branch protection is a separate GitHub repository setting and is not changed by this task.
+- Next recommended action: review the CI result on PR #1, then configure branch protection separately if the owner wants this check to be mandatory before merge.
+
 ### 2026-10-30 — Clean-room source synchronization baseline committed locally
 
 - Status: owner-approved local baseline commit prepared and verified on isolated branch `codex/source-sync-review`; unpublished and not merged.

@@ -36,6 +36,7 @@ This log records meaningful project changes. It is not a substitute for Git hist
 
 ### Added
 
+- Added a read-only GitHub Actions CI workflow for pull requests and `main` pushes. It uses Node 20 and runs the repository's canonical dependency-free `npm run check` verification without deployment, publication, production configuration, secrets or live-data access.
 - Added local backend candidate `3.1-phase2-wp1.4` with the owner-only, non-routed `auditPhase2SystemHealth()` diagnostic. It safely categorizes and correlates unresolved recovery and operational-error records without returning identities, payloads, raw messages, stacks, URLs or configuration identifiers. Added regression coverage; all 69 tests pass.
 - Recorded the verified 2026-10-23 production access and asset baseline in the existing project documentation, including `Staff`/`App_Logins` alignment, effective staff access, role and movement gates, private Drive inventory, authoritative production versions, workbook metadata, and unresolved owner decisions. No credentials or private file links were recorded.
 - Safe manual `auditOperationalConfiguration()` diagnostic reporting only environment/configured/available/enabled booleans, with no Drive folder ID or notification address in its log.
