@@ -102,7 +102,7 @@ The detailed publication manifest is `RELEASE_MANIFEST.md`; production execution
 - Verification: `package.json`, `scripts/` and `tests/`.
 - Shared plans/decisions/status: all files under `docs/` and repository `AGENTS.md`.
 
-The local workspace is the canonical complete Phase 1 handoff. Production `runtime-config.js` remains environment-specific and should not contain PINs, tokens or Drive folder IDs. Git commit/push state must be checked separately; this completion record does not claim that every documentation/test file was pushed to GitHub.
+Historical completion checkpoint: the local workspace was the canonical complete Phase 1 handoff, and this record did not claim every documentation/test file had been pushed. That source-control qualification is superseded by the 2026-10-30 audited baseline merged through PR #1 as `02eaa2f`. Production `runtime-config.js` remains environment-specific, must not contain PINs, tokens or Drive folder IDs, and is now an owner-approved tracked Pages delivery file.
 
 ## Remaining limitations and process debt
 
@@ -124,5 +124,4 @@ Phase 2 — Inventory correctness:
 2. Re-fetch the current production workbook baseline before relying on historical audit numbers.
 3. Reconcile products, locations, movements, stock counts, batches, expiry, unit costs and configuration headers.
 4. Correct movement, count, return, damage, sample and combo workflows through the same local-test/owner-deployment process.
-5. Establish isolated staging and rehearse rollback before the next production migration.
-
+5. Historical Phase 1 recommendation: establish isolated staging and rehearse rollback before the next production migration. D-022 supersedes this as a current Phase 2 gate; production backup, dry-run, bounded execution, immediate verification and rollback/recovery planning remain mandatory.

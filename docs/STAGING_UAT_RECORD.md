@@ -81,4 +81,3 @@ Record at least the actual employee browser/device combination and one second br
 - Co-Founder/second reviewer approval: Pending.
 
 Production remains blocked until all release-critical rows pass, defects are resolved or explicitly accepted, rollback is rehearsed, and the deployment owner records approval here.
-

@@ -1,6 +1,6 @@
 # Phase 2 FBA Alignment
 
-Status: dispatch-picker, safe report import and dedicated Amazon-reference candidate implemented locally; owner authorized a controlled direct-live rollout on 2026-10-27, while historical migration still requires separate approval.
+Status: dispatch-picker, safe report import and dedicated Amazon-reference backend are implemented; frontend publication is pending protected PR merge, and historical migration still requires separate approval.
 
 ## Purpose
 
@@ -83,7 +83,7 @@ Rules:
 - Import creates Pending `FBA Report Variance Review` rows only. It creates no stock movement, performs no approval, and these review rows are blocked from the generic stock-count approval path until shipment/receipt/exception evidence is reviewed.
 - The 2026-10-28 local review candidate replaces generic approve/edit/reject controls with one Manager-level `Review FBA Variance` action. It records sale timing, receipt, damage/loss, removal order or unexplained plus an evidence note, while keeping the row Pending and leaving stock unchanged.
 - Amazon Analytics derives drift from the newest immutable report batch rather than all historical reconciliation counts. For the current 2026-10-26 upload, the correct absolute drift is 444 units.
-- The 2026-10-31 local reference candidate adds `FBA_Shipments.AmazonReferenceID` for the external Seller Central value while preserving internal `SHIP-...` IDs. New plans require a normalized unique reference; the Warehouse picker auto-fills it and the backend rejects a dispatch mismatch. Approved historical movement references are not edited.
+- The 2026-10-31 reference release adds `FBA_Shipments.AmazonReferenceID` for the external Seller Central value while preserving internal `SHIP-...` IDs. New plans require a normalized unique reference; the Warehouse picker auto-fills it and the backend rejects a dispatch mismatch. Approved historical movement references are not edited.
 - Automated verification passes locally. On 2026-10-27 the owner explicitly overrode the staging requirement for this package and authorized a controlled direct-live rollout. Backend must be released before frontend, and staff report uploads remain paused until immediate live verification passes.
 
 ## Owner access decision — confirmed 2026-10-27

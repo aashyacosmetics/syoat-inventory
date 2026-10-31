@@ -65,7 +65,7 @@ Before changing any sheet integration:
 | `Movement_Headers.AmazonShipmentID` | Link from a movement to the ERP shipment plan | Stores the internal `SHIP-...` value, never the external reference |
 | `Movement_Headers.ReferenceNumber` | Operator-entered source evidence on the movement | Preserved on approved historical records; new linked dispatches must match the plan's external reference |
 
-The live `FBA_Shipments` sheet must contain the exact `AmazonReferenceID` header before backend `3.2-phase2-fba-reference.1` is deployed. The backend fails safely rather than silently dropping this value when the column is missing.
+The live `FBA_Shipments` sheet contains the exact `AmazonReferenceID` header. Backend `3.2-phase2-fba-reference.1` fails safely rather than silently dropping this value if that column is absent.
 
 ## Integration principles
 
@@ -96,4 +96,3 @@ An integration is added only when its scope, permissions, data ownership, failur
 Environment URLs and IDs must be configuration values. The frontend must not hard-code a production endpoint into every build.
 
 Owner decision D-022 excludes staging from the current Phase 2 workflow. The staging definition remains documented for historical resources or a future owner decision; it is not a current release prerequisite.
-

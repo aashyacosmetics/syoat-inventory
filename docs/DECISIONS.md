@@ -137,12 +137,19 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 - Decision: The owner excludes staging from the current Phase 2 continuation, synchronization and release workflow. Existing staging resources and records are retained as historical evidence but are not an open gate, required execution environment or prerequisite for current Phase 2 work. This supersedes the narrower D-019 exception and the older Phase 2 plan language that required staging/UAT and a staging rollback rehearsal.
 - Consequence: Work remains local-first and the owner alone deploys, publishes or authorizes live-data changes. Before any owner-approved live release or migration, the project still requires local automated checks, an exact changed-file manifest, current backups, dry-run output for data changes, bounded/idempotent execution, backend-first release where applicable, immediate production smoke/reconciliation checks and a documented production rollback or recovery sequence. Excluding staging does not authorize Codex to deploy, publish, push, alter live configuration or mutate production data.
 
-### D-023 — External Amazon shipment reference has a dedicated field
+### D-023 — `main` is protected by pull-request CI
+
+- Date: 2026-10-30
+- Status: accepted owner decision
+- Decision: repository changes to `main` flow through a pull request and the required `Verify repository` GitHub Actions check. Active ruleset `Protect main` (`26201018`) requires the branch to be up to date, blocks branch deletion and force pushes, has no bypass actors, and requires zero approving reviews so the single owner is not deadlocked.
+- Consequence: D-007 remains the default prohibition on agents pushing or publishing without owner authority, but an explicit owner instruction may authorize branch push, pull-request creation and merge. Repository authorization never implies Apps Script deployment, GitHub Pages publication, production-configuration changes or live-data writes; those remain separately owner-controlled.
+
+### D-024 — External Amazon shipment reference has a dedicated field
 
 - Date: 2026-10-31
-- Status: accepted owner decision; local implementation prepared
+- Status: accepted owner decision; backend deployed
 - Decision: `FBA_Shipments.AmazonReferenceID` stores the external Seller Central shipment/reference value. `FBA_Shipments.ShipmentID` remains the ERP's immutable internal `SHIP-...` identifier, and `Movement_Headers.AmazonShipmentID` remains the internal link to that plan. New shipment references are trimmed, uppercased, validated and unique when created.
-- Consequence: Managers enter the external reference once on the shipment plan; Warehouse Operators receive it through the limited picker and do not re-key it for a linked dispatch. Existing approved `Movement_Headers.ReferenceNumber` values are not rewritten to correct historical typos. The three reviewed historical reference corrections belong in the new shipment field during a separately approved migration, preserving the original movement evidence and the dry-run manifest.
+- Consequence: Managers enter the external reference once on the shipment plan; Warehouse Operators receive it through the limited picker and do not re-key it for a linked dispatch. Existing approved `Movement_Headers.ReferenceNumber` values are not rewritten to correct historical typos. The three reviewed historical reference corrections belong in the new shipment field during a separately approved migration, preserving the original movement evidence and dry-run manifest.
 
 ## Open decisions
 
