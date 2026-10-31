@@ -6,16 +6,6 @@ Deployment date: 2026-08-19
 
 Status: deployed by the owner during an employee maintenance window; initial smoke tests passed.
 
-## Post-release repository closeout — 2026-10-30
-
-- This Phase 1 production record remains historical; no deployment or production-data action was performed during repository closeout.
-- The audited source baseline (`6861997`) and CI workflow (`276dabe`) were merged through PR #1 as `02eaa2f`.
-- CI passed on the pull request and merge commit; the merge-triggered Pages deployment succeeded.
-- A fresh read-only health check returned HTTP 200 for the Pages index and unchanged `runtime-config.js`, and the live application showed build `20261028-fba-review.1` with the four authorized identities.
-- The latest recorded deployed backend is `3.2-phase2-access-policy.1`.
-- Active `Protect main` ruleset `26201018` requires a pull request, up-to-date branch and `Verify repository` check, and blocks deletion and force pushes.
-- Earlier statements in this record about missing staging remain historical Phase 1 process evidence; D-022 now excludes staging from the current Phase 2 workflow without deleting that history.
-
 ## Important process note
 
 The owner deployed directly to production after informing employees not to use the application for the day. The planned isolated staging/UAT and rollback rehearsal were not performed. `STAGING_UAT_RECORD.md` therefore remains `NOT RUN`; this is retained as an explicit process gap rather than retroactively treating production evidence as staging evidence.
@@ -59,3 +49,4 @@ After the resumable migration change:
 - Preserve the pre-release backups and the execution logs from PIN/file migration.
 - Do not rerun the completed PIN migration or file-hardening migration.
 - Rehearse isolated staging and rollback before the next security/data migration; this Phase 1 process requirement remains unmet.
+

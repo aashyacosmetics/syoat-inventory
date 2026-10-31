@@ -17,7 +17,7 @@ Code.gs business logic
     +--> Google Drive (attachments and reports)
 ```
 
-The active frontend is `index.html` plus `syoat-app.js`. The redesign-named HTML/JS files are archived test artifacts and are excluded from the active architecture. `Code.gs` is the version-controlled canonical Apps Script backend source on `main`; the latest recorded production deployment is `3.2-phase2-access-policy.1`. Source control does not deploy Apps Script: deployment and production configuration remain explicit owner actions.
+The active frontend is `index.html` plus `syoat-app.js`. The redesign-named HTML/JS files are archived test artifacts and are excluded from the active architecture. A matching local copy of the supplied Apps Script backend is saved as `Code.gs`; it remains uncommitted and undeployed until the owner reviews and handles those actions. Keeping the backend under normal source control remains Phase 1 work.
 
 ## Target near-term system
 

@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20261028-fba-review.1";
+const BUILD_VERSION = "20261031-fba-reference.1";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -2182,8 +2182,9 @@ function MovModal({
   }, type === "FBA Dispatch" ? "Amazon Shipment ID / Reference *" : "Reference No."), /*#__PURE__*/React.createElement("input", {
     value: refNo,
     onChange: e => setRefNo(e.target.value),
+    readOnly: type === "FBA Dispatch" && !!(selectedFbaShipment && selectedFbaShipment.amazonReferenceID),
     placeholder: type === "FBA Dispatch" ? "Exact Amazon Shipment ID" : "Invoice / Order ID",
-    style: inp
+    style: { ...inp, background: type === "FBA Dispatch" && selectedFbaShipment && selectedFbaShipment.amazonReferenceID ? "#f5ecdc" : inp.background }
   }))), type === "FBA Dispatch" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
   }, "Open FBA Shipment *"), /*#__PURE__*/React.createElement("select", {
@@ -2193,11 +2194,12 @@ function MovModal({
       setFbaShipmentID(shipmentID);
       const shipment = (fbaShipmentOptions || []).find(row => row.shipmentID === shipmentID);
       setDestFC(shipment ? shipment.destinationFC : "");
+      setRefNo(shipment ? shipment.amazonReferenceID || "" : "");
     },
     disabled: fbaShipmentOptions === null,
     style: inp
   }, [/*#__PURE__*/React.createElement("option", { key: "", value: "" }, fbaShipmentOptions === null ? "Loading open shipments..." : "Select shipment...")].concat(
-    (fbaShipmentOptions || []).map(shipment => /*#__PURE__*/React.createElement("option", { key: shipment.shipmentID, value: shipment.shipmentID }, shipment.shipmentID + " · " + shipment.destinationFC + " · " + shipment.lines.reduce((sum, line) => sum + Number(line.remainingQty || 0), 0) + " units remaining"))
+    (fbaShipmentOptions || []).map(shipment => /*#__PURE__*/React.createElement("option", { key: shipment.shipmentID, value: shipment.shipmentID }, (shipment.amazonReferenceID || shipment.shipmentID) + " · " + shipment.destinationFC + " · " + shipment.lines.reduce((sum, line) => sum + Number(line.remainingQty || 0), 0) + " units remaining"))
   )), fbaShipmentError && /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 11, marginTop: -8, marginBottom: 10 } }, fbaShipmentError), fbaShipmentOptions !== null && fbaShipmentOptions.length === 0 && !fbaShipmentError && /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 11, marginTop: -8, marginBottom: 10 } }, "No open shipment plan is available. Ask the Warehouse Manager to create one in Amazon FBA first."), selectedFbaShipment && /*#__PURE__*/React.createElement("div", { style: { background: "#f5ecdc", borderRadius: 8, padding: "8px 10px", fontSize: 11, color: "#6f6152", marginTop: -6, marginBottom: 10 } }, selectedFbaShipment.lines.map(line => line.productID + ": " + line.remainingQty + " remaining").join(" · "))), (type === "FBA Dispatch" || type === "Website – WH Ship" || type === "Website – FBA Ship" || type === "Flipkart Dispatch" || type === "Firstcry Dispatch") && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
   }, "Carrier / AWB"), /*#__PURE__*/React.createElement("input", {
@@ -4023,6 +4025,7 @@ function FbaReconcileTab(props) {
   var _shpErr = React.useState(""), shpErr = _shpErr[0], setShpErr = _shpErr[1];
   var _shpBusy = React.useState(false), shpBusy = _shpBusy[0], setShpBusy = _shpBusy[1];
   var _shpForm = React.useState(false), shpFormOpen = _shpForm[0], setShpFormOpen = _shpForm[1];
+  var _shpAmazonRef = React.useState(""), shpAmazonRef = _shpAmazonRef[0], setShpAmazonRef = _shpAmazonRef[1];
   var _shpFC = React.useState(""), shpFC = _shpFC[0], setShpFC = _shpFC[1];
   var _shpEDD = React.useState(""), shpEDD = _shpEDD[0], setShpEDD = _shpEDD[1];
   var _shpLines = React.useState([{ productID: "", expectedQty: "" }]), shpLines = _shpLines[0], setShpLines = _shpLines[1];
@@ -4146,11 +4149,13 @@ function FbaReconcileTab(props) {
     setShpBusy(true);
     try {
       var lines = shpLines.filter(function (l) { return l.productID && l.expectedQty; }).map(function (l) { return { productID: l.productID, expectedQty: l.expectedQty }; });
+      var amazonReferenceID = String(shpAmazonRef || "").trim().toUpperCase();
+      if (!amazonReferenceID) throw new Error("Amazon Shipment ID / Reference is required.");
       if (!shpFC) throw new Error("Destination FC is required.");
       if (!lines.length) throw new Error("Add at least one product line with an expected quantity.");
-      await apiWrite("createFbaShipment", user.email, { destinationFC: shpFC, expectedDeliveryDate: shpEDD, lines: lines });
+      await apiWrite("createFbaShipment", user.email, { amazonReferenceID: amazonReferenceID, destinationFC: shpFC, expectedDeliveryDate: shpEDD, lines: lines });
       notify("✅ Shipment created");
-      setShpFormOpen(false); setShpFC(""); setShpEDD(""); setShpLines([{ productID: "", expectedQty: "" }]);
+      setShpFormOpen(false); setShpAmazonRef(""); setShpFC(""); setShpEDD(""); setShpLines([{ productID: "", expectedQty: "" }]);
       loadShipments();
     } catch (e) { notify("❌ " + e.message); }
     setShpBusy(false);
@@ -4538,6 +4543,8 @@ function FbaReconcileTab(props) {
       canManageShipments && !shpFormOpen && /*#__PURE__*/React.createElement("button", { onClick: function () { setShpFormOpen(true); }, style: { ...btnS(), width: "100%", marginBottom: 14 } }, "+ New Shipment"),
       shpFormOpen && /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 14 } },
         /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 13, marginBottom: 10 } }, "New FBA Shipment"),
+        /*#__PURE__*/React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: "#5a6b5b", display: "block", marginBottom: 3 } }, "Amazon Shipment ID / Reference"),
+        /*#__PURE__*/React.createElement("input", { value: shpAmazonRef, onChange: function (e) { setShpAmazonRef(e.target.value.toUpperCase()); }, placeholder: "e.g. FBA15M...", autoCapitalize: "characters", style: { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccd3c4", fontSize: 13, marginBottom: 10, boxSizing: "border-box" } }),
         /*#__PURE__*/React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: "#5a6b5b", display: "block", marginBottom: 3 } }, "Destination FC"),
         /*#__PURE__*/React.createElement("input", { value: shpFC, onChange: function (e) { setShpFC(e.target.value); }, placeholder: "e.g. HYD3", style: { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #ccd3c4", fontSize: 13, marginBottom: 10, boxSizing: "border-box" } }),
         /*#__PURE__*/React.createElement("label", { style: { fontSize: 11.5, fontWeight: 700, color: "#5a6b5b", display: "block", marginBottom: 3 } }, "Expected delivery date (optional)"),
@@ -4588,6 +4595,7 @@ function FbaReconcileTab(props) {
                   /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
                     /*#__PURE__*/React.createElement("div", null,
                       /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 13, color: "#2c211a" } }, s.ShipmentID + " · " + s.DestinationFC),
+                      s.AmazonReferenceID && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#5a6b5b", fontWeight: 700, marginTop: 2 } }, "Amazon reference " + s.AmazonReferenceID),
                       /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#a89680", marginTop: 2 } }, (s.ExpectedDeliveryDate ? "expected " + s.ExpectedDeliveryDate : "") + (s.CarrierTrackingNumber ? " · " + s.CarrierTrackingNumber : ""))),
                     /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#fff", background: FBA_SHIPMENT_STATUS_COLOR[s.Status] || "#a89680", padding: "3px 8px", borderRadius: 20 } }, s.Status)),
                   (s.lines || []).length > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, display: "grid", gap: 3 } },
