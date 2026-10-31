@@ -144,6 +144,13 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 - Decision: repository changes to `main` flow through a pull request and the required `Verify repository` GitHub Actions check. Active ruleset `Protect main` (`26201018`) requires the branch to be up to date, blocks branch deletion and force pushes, has no bypass actors, and requires zero approving reviews so the single owner is not deadlocked.
 - Consequence: D-007 remains the default prohibition on agents pushing or publishing without owner authority, but an explicit owner instruction may authorize branch push, pull-request creation and merge. Repository authorization never implies Apps Script deployment, GitHub Pages publication, production-configuration changes or live-data writes; those remain separately owner-controlled.
 
+### D-024 — External Amazon shipment reference has a dedicated field
+
+- Date: 2026-10-31
+- Status: accepted owner decision; backend deployed
+- Decision: `FBA_Shipments.AmazonReferenceID` stores the external Seller Central shipment/reference value. `FBA_Shipments.ShipmentID` remains the ERP's immutable internal `SHIP-...` identifier, and `Movement_Headers.AmazonShipmentID` remains the internal link to that plan. New shipment references are trimmed, uppercased, validated and unique when created.
+- Consequence: Managers enter the external reference once on the shipment plan; Warehouse Operators receive it through the limited picker and do not re-key it for a linked dispatch. Existing approved `Movement_Headers.ReferenceNumber` values are not rewritten to correct historical typos. The three reviewed historical reference corrections belong in the new shipment field during a separately approved migration, preserving the original movement evidence and dry-run manifest.
+
 ## Open decisions
 
 ### Access and production-baseline decisions captured 2026-10-23

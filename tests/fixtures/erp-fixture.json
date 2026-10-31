@@ -32,6 +32,7 @@
   "fbaShipments": [
     {
       "ShipmentID": "SHIP-TEST-001",
+      "AmazonReferenceID": "FBA15MTEST01",
       "DestinationFC": "TEST_FC",
       "Status": "In Transit",
       "lines": [

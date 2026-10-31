@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-access-policy.1",
+  VERSION:               "3.2-phase2-fba-reference.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -2752,6 +2752,7 @@ function closePurchaseOrder(body, staff) {
 
 const FBA_SHIPMENT_ROLES = ["Founder","Co-Founder","Admin","Manager","Warehouse Manager"];
 const FBA_SHIPMENT_STATUSES = ["Working","Shipped","In Transit","Received"];
+const FBA_SHIPMENT_AMAZON_REFERENCE_FIELD = "AmazonReferenceID";
 // Undoing a link is a correction to already-approved audit data, not a routine
 // action — deliberately a higher bar than linking itself (which Warehouse
 // Manager can do). Founder/Co-Founder only, matching how Reversal is gated.
@@ -2807,6 +2808,7 @@ function getFbaDispatchShipmentOptions(staff) {
         .filter(line => line.remainingQty > 0);
       return {
         shipmentID: shipment.ShipmentID,
+        amazonReferenceID: shipment[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD] || "",
         destinationFC: shipment.DestinationFC,
         status: shipment.Status,
         lines: lines,
@@ -2835,6 +2837,15 @@ function assertFbaDispatchShipmentPlan(header, lines) {
   if (!shipment) throw new Error("FBA shipment not found: " + shipmentID);
   if (!["Working","Shipped","In Transit"].includes(String(shipment.Status))) {
     throw new Error("Invalid FBA Dispatch: shipment " + shipmentID + " is not open. Current status: " + shipment.Status);
+  }
+
+  const plannedReference = normalizeAmazonReferenceID(shipment[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD], false);
+  const suppliedReference = normalizeAmazonReferenceID(referenceNumber, false);
+  if (plannedReference && suppliedReference !== plannedReference) {
+    throw new Error("Invalid FBA Dispatch: Amazon reference must match shipment " + shipmentID + ": " + plannedReference);
+  }
+  if (plannedReference && Object.prototype.hasOwnProperty.call(header, "referenceNumber")) {
+    header.referenceNumber = plannedReference;
   }
 
   const suppliedFC = String(header.AmazonDestinationFC || header.amazonDestinationFC || "").trim().toUpperCase();
@@ -2906,7 +2917,7 @@ function getFbaShipments(params) {
 }
 
 function createFbaShipment(body, staff) {
-  requireFields(body, ["destinationFC","lines"]);
+  requireFields(body, ["amazonReferenceID","destinationFC","lines"]);
   requireRole(staff, FBA_SHIPMENT_ROLES);
   if (!Array.isArray(body.lines) || body.lines.length === 0) throw new Error("A shipment needs at least one product line.");
   const destinationFC = String(body.destinationFC || "").trim().toUpperCase();
@@ -2914,6 +2925,14 @@ function createFbaShipment(body, staff) {
   // do not become stock locations until the reviewed Phase 3 FC migration.
   if (!/^[A-Z0-9]{3,10}$/.test(destinationFC)) throw new Error("Invalid Amazon destination FC: " + body.destinationFC);
   body.destinationFC = destinationFC;
+  const amazonReferenceID = normalizeAmazonReferenceID(body.amazonReferenceID, true);
+  requireSheetColumns(SHEETS.FBA_SHIPMENTS, [FBA_SHIPMENT_AMAZON_REFERENCE_FIELD]);
+  const duplicateReference = sheetToObjects(SHEETS.FBA_SHIPMENTS).find(shipment =>
+    String(shipment[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD] || "").trim().toUpperCase() === amazonReferenceID
+  );
+  if (duplicateReference) {
+    throw new Error("Invalid FBA shipment: Amazon reference is already linked to shipment " + duplicateReference.ShipmentID + ": " + amazonReferenceID);
+  }
   validateMovementLines(body.lines.map(line => ({ productID: line.productID, quantity: line.expectedQty })));
 
   const shipmentID = nextID("SHIP");
@@ -2932,6 +2951,7 @@ function createFbaShipment(body, staff) {
 
   appendRow(SHEETS.FBA_SHIPMENTS, {
     ShipmentID:            shipmentID,
+    AmazonReferenceID:     amazonReferenceID,
     ShipmentDateTime:      ts,
     DestinationFC:         body.destinationFC,
     Status:                "Working",
@@ -2942,9 +2962,21 @@ function createFbaShipment(body, staff) {
     Notes:                 body.notes || "",
   });
 
-  writeLog("createFbaShipment", shipmentID, staff, "Created FBA shipment — " + body.lines.length + " line(s), destination " + body.destinationFC, body.requestId);
-  writeAuditTrail("createFbaShipment", "FbaShipment", shipmentID, [], staff, body.requestId, "Destination " + body.destinationFC);
-  return { shipmentID: shipmentID };
+  writeLog("createFbaShipment", shipmentID, staff, "Created FBA shipment — Amazon reference " + amazonReferenceID + ", " + body.lines.length + " line(s), destination " + body.destinationFC, body.requestId);
+  writeAuditTrail("createFbaShipment", "FbaShipment", shipmentID, [], staff, body.requestId, "Amazon reference " + amazonReferenceID + "; destination " + body.destinationFC);
+  return { shipmentID: shipmentID, amazonReferenceID: amazonReferenceID };
+}
+
+function normalizeAmazonReferenceID(value, required) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) {
+    if (required) throw new Error("Missing required field: amazonReferenceID");
+    return "";
+  }
+  if (!/^[A-Z0-9]{6,40}$/.test(normalized)) {
+    throw new Error("Invalid Amazon reference ID: " + value);
+  }
+  return normalized;
 }
 
 // Manual forward-only status advance. Skipping a stage is allowed (e.g. going
@@ -3324,6 +3356,12 @@ function sheetHeaders(name, sheet) {
   const headers = target.getRange(1, 1, 1, target.getLastColumn()).getValues()[0].map(h => String(h).trim());
   if (REQUEST_SHEET_READ_CACHE) REQUEST_SHEET_READ_CACHE.headers[name] = headers;
   return headers;
+}
+
+function requireSheetColumns(name, requiredColumns) {
+  const headers = sheetHeaders(name);
+  const missing = requiredColumns.filter(column => !headers.includes(column));
+  if (missing.length) throw new Error("Column not found: " + missing.join(", ") + " in " + name);
 }
 
 function sheetToObjects(name) {

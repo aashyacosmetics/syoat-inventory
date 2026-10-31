@@ -207,12 +207,23 @@ test("FBA variance UI uses dedicated review and newest report batch analytics", 
   assert.match(frontend, /removal/);
 });
 
+test("FBA shipment UI keeps the external Amazon reference separate from the internal shipment ID", () => {
+  const backend = readProjectFile("Code.gs");
+  const frontend = readProjectFile("syoat-app.js");
+
+  assert.match(backend, /const FBA_SHIPMENT_AMAZON_REFERENCE_FIELD = "AmazonReferenceID"/);
+  assert.match(backend, /requireSheetColumns\(SHEETS\.FBA_SHIPMENTS, \[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD\]\)/);
+  assert.match(frontend, /amazonReferenceID: amazonReferenceID, destinationFC: shpFC/);
+  assert.match(frontend, /setRefNo\(shipment \? shipment\.amazonReferenceID \|\| "" : ""\)/);
+  assert.match(frontend, /s\.AmazonReferenceID/);
+});
+
 test("API responses expose safe server duration metadata", () => {
   const harness = createAppsScriptHarness({});
   const response = harness.callJson("doGet", { parameter: { action: "ping" } });
 
   assert.equal(response.success, true);
-  assert.equal(response.data.version, "3.2-phase2-access-policy.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-reference.1");
   assert.equal(Number.isFinite(response.serverDurationMs), true);
   assert.ok(response.serverDurationMs >= 0);
   assert.equal(Object.hasOwn(response, "pin"), false);

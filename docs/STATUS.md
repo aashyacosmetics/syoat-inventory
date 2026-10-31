@@ -1,6 +1,17 @@
 # Current Status and Handoff
 
-Last updated: 2026-10-30
+Last updated: 2026-10-31
+
+### 2026-10-31 — Dedicated Amazon shipment reference field released backend-first
+
+- Status: live Sheet schema and Apps Script backend complete; frontend/source pull request pending protected merge.
+- Goal: keep the ERP's internal `ShipmentID` (`SHIP-...`) separate from the external Seller Central shipment/reference value stored in `FBA_Shipments.AmazonReferenceID`.
+- Live schema: the owner added exact header `AmazonReferenceID` immediately after `ShipmentID` in `FBA_Shipments`.
+- Backend: `3.2-phase2-fba-reference.1` is deployed and returned status `ok` with 2 ms server duration on 2026-10-31 14:27:07 IST. New shipment creation requires a normalized, unique Amazon reference and fails safely if the column is absent. Dispatch creation/approval rejects a reference that does not match the selected shipment plan.
+- Frontend candidate: `20261031-fba-reference.1`. Managers enter the Amazon reference when creating a shipment; shipment cards display it; Warehouse Operators receive it automatically and read-only after selecting an open shipment.
+- Verification: 79 automated tests, both JavaScript syntax checks, the 50-action API catalogue and environment-template safety pass.
+- Historical safety: no historical shipment link, movement reference, receipt or inventory balance was changed. The reviewed historical manifest remains a dry run and requires separate migration approval.
+- Next action: merge the protected frontend/source pull request after CI, verify Pages build `20261031-fba-reference.1`, then run one non-historical shipment-plan/dispatch smoke test before considering the separate historical migration.
 
 ### 2026-10-30 — Source synchronization closed on protected `main`
 

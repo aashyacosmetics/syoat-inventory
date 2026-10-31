@@ -71,7 +71,7 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-access-policy.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-reference.1");
 });
 
 test("public staff picker exposes only name, email, and role", () => {
@@ -506,14 +506,59 @@ test("Warehouse receives only minimal open FBA shipment options", () => {
 
   assert.equal(response.success, true, JSON.stringify(response));
   assert.equal(response.data.length, 1);
-  assert.deepEqual(Object.keys(response.data[0]).sort(), ["destinationFC", "lines", "shipmentID", "status"]);
+  assert.deepEqual(Object.keys(response.data[0]).sort(), ["amazonReferenceID", "destinationFC", "lines", "shipmentID", "status"]);
   assert.deepEqual(Object.keys(response.data[0].lines[0]).sort(), ["dispatchedQty", "expectedQty", "productID", "remainingQty"]);
   assert.equal(response.data[0].shipmentID, "SHIP-TEST-001");
+  assert.equal(response.data[0].amazonReferenceID, "FBA15MTEST01");
   assert.equal(response.data[0].lines[0].remainingQty, 5);
   assert.doesNotMatch(JSON.stringify(response.data), /CreatedBy|Notes|Email|file/i);
 });
 
-test("FBA Dispatch requires an open shipment, Amazon reference, and planned remaining quantity", () => {
+test("FBA shipment creation stores a normalized, unique Amazon reference", () => {
+  const harness = createAppsScriptHarness(writeReadySheets());
+  const signedIn = login(harness).data;
+  const first = post(harness, {
+    action: "createFbaShipment",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-create-reference-0001",
+    amazonReferenceID: " fba15mnew001 ",
+    destinationFC: "hyd3",
+    lines: [{ productID: "TEST-P001", expectedQty: 3 }],
+  });
+
+  assert.equal(first.success, true, JSON.stringify(first));
+  assert.equal(first.data.amazonReferenceID, "FBA15MNEW001");
+  const created = harness.call("sheetToObjects", "FBA_Shipments")
+    .find(row => row.ShipmentID === first.data.shipmentID);
+  assert.equal(created.AmazonReferenceID, "FBA15MNEW001");
+  assert.equal(created.DestinationFC, "HYD3");
+
+  const duplicate = post(harness, {
+    action: "createFbaShipment",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-create-reference-0002",
+    amazonReferenceID: "FBA15MNEW001",
+    destinationFC: "DEL4",
+    lines: [{ productID: "TEST-P001", expectedQty: 1 }],
+  });
+  assert.equal(duplicate.success, false);
+  assert.match(duplicate.error, /already linked to shipment/i);
+
+  const legacySheets = writeReadySheets();
+  const referenceColumn = legacySheets.FBA_Shipments[0].indexOf("AmazonReferenceID");
+  legacySheets.FBA_Shipments = legacySheets.FBA_Shipments
+    .map(row => row.filter((value, index) => index !== referenceColumn));
+  const legacyHarness = createAppsScriptHarness(legacySheets);
+  const originalLineCount = legacyHarness.call("sheetToObjects", "FBA_Shipment_Lines").length;
+  assert.throws(() => legacyHarness.call("createFbaShipment", {
+    amazonReferenceID: "FBA15MSCHEMA1",
+    destinationFC: "HYD3",
+    lines: [{ productID: "TEST-P001", expectedQty: 2 }],
+  }, { Email: "founder@example.invalid", Role: "Founder" }), /Column not found: AmazonReferenceID/);
+  assert.equal(legacyHarness.call("sheetToObjects", "FBA_Shipment_Lines").length, originalLineCount);
+});
+
+test("FBA Dispatch requires an open shipment, matching Amazon reference, and planned remaining quantity", () => {
   const harness = createAppsScriptHarness(writeReadySheets());
   const signedIn = login(harness).data;
   const base = {
@@ -522,7 +567,7 @@ test("FBA Dispatch requires an open shipment, Amazon reference, and planned rema
     movementType: "FBA Dispatch",
     sourceLocationID: "MAIN_WH",
     destinationLocationID: "FBA_TRANSIT",
-    referenceNumber: "AMZ-SHIP-TEST-001",
+    referenceNumber: "FBA15MTEST01",
     amazonShipmentID: "SHIP-TEST-001",
     amazonDestinationFC: "TEST_FC",
     lines: [{ productID: "TEST-P001", quantity: 4 }],
@@ -543,6 +588,14 @@ test("FBA Dispatch requires an open shipment, Amazon reference, and planned rema
   });
   assert.equal(missingReference.success, false);
   assert.match(missingReference.error, /Amazon Shipment ID/i);
+
+  const mismatchedReference = post(harness, {
+    ...base,
+    requestId: "req-fba-dispatch-reference-0002",
+    referenceNumber: "FBA15MOTHER01",
+  });
+  assert.equal(mismatchedReference.success, false);
+  assert.match(mismatchedReference.error, /Amazon reference must match shipment/i);
 
   const first = post(harness, { ...base, requestId: "req-fba-dispatch-first-0001" });
   const competing = post(harness, { ...base, requestId: "req-fba-dispatch-second-0001" });
