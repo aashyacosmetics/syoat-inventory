@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-reference.1",
+  VERSION:               "3.2-phase2-fba-historical-linking.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -105,6 +105,7 @@ const ACTION_CAPABILITIES = {
   getFbaShipments:             "amazon.shipments.view",
   getFbaDispatchShipmentOptions: "inventory.movements.create",
   getFbaLedgerSnapshots:       "amazon.reconciliation.view",
+  getHistoricalFbaLinkingDryRun: "amazon.shipments.historicalMigration",
   getOperationalFile:          "inventory.files.view",
   getSystemHealth:             "system.health.view",
   createMovement:              "inventory.movements.create",
@@ -132,6 +133,7 @@ const ACTION_CAPABILITIES = {
   updateFbaShipmentStatus:     "amazon.shipments.update",
   linkMovementToShipment:      "amazon.shipments.linkMovement",
   unlinkMovementFromShipment:  "amazon.shipments.unlinkMovement",
+  applyHistoricalFbaShipmentLinks: "amazon.shipments.historicalMigration",
 };
 
 const COMMON_READ_CAPABILITIES = [
@@ -325,6 +327,7 @@ function handleAuthenticatedAction(action, body, email) {
   if (action === "getFbaShipments")    return ok(getFbaShipments(body));
   if (action === "getFbaDispatchShipmentOptions") return ok(getFbaDispatchShipmentOptions(staff));
   if (action === "getFbaLedgerSnapshots") return ok(getFbaLedgerSnapshots(body));
+  if (action === "getHistoricalFbaLinkingDryRun") return ok(getHistoricalFbaLinkingDryRun(body, staff));
   if (action === "getOperationalFile") return ok(getOperationalFile(body, staff));
   if (action === "getSystemHealth")    return ok(getSystemHealth(staff));
 
@@ -334,6 +337,7 @@ function handleAuthenticatedAction(action, body, email) {
 function handleWrite(action, body, staff) {
   requireFields(body, ["requestId"]);
   validateRequestId(body.requestId);
+  if (action === "applyHistoricalFbaShipmentLinks") assertHistoricalFbaApplyGate(body, staff);
   return withBusinessWriteLock(function () {
     return ok(runIdempotentWrite(action, body, staff));
   });
@@ -365,6 +369,7 @@ function dispatchBusinessWrite(action, body, staff) {
   if (action === "updateFbaShipmentStatus") return updateFbaShipmentStatus(body, staff);
   if (action === "linkMovementToShipment")  return linkMovementToShipment(body, staff);
   if (action === "unlinkMovementFromShipment") return unlinkMovementFromShipment(body, staff);
+  if (action === "applyHistoricalFbaShipmentLinks") return applyHistoricalFbaShipmentLinks(body, staff);
   throw new Error("Unknown action: " + action);
 }
 
@@ -2977,6 +2982,332 @@ function normalizeAmazonReferenceID(value, required) {
     throw new Error("Invalid Amazon reference ID: " + value);
   }
   return normalized;
+}
+
+// Reviewed historical shipment-linking manifest. This is intentionally fixed
+// source data rather than an arbitrary browser payload. It creates shipment
+// metadata and movement links only; it never creates a receipt, adjustment or
+// other stock-changing movement. The original approved ReferenceNumber values
+// remain untouched, including the three source typos documented below.
+const HISTORICAL_FBA_LINKING_CONFIG = {
+  MANIFEST_ID: "FBA-HISTORICAL-LINKING-2026-10-31-V1",
+  ENABLE_PROPERTY: "SYOAT_HISTORICAL_FBA_LINKING_APPROVED_FINGERPRINT",
+  MAX_APPLY_BATCH_SIZE: 5,
+};
+
+const HISTORICAL_FBA_LINKING_MANIFEST = [
+  [1,"SHIP-002","MOV-069","FBA15M13T314","FBA15M13T314","2026-07-13 00:00:00","PNQ3","Closed","2026-07-31 00:00:00",20,0,20,20,0,"No variance","Matched exactly",[["PRD-C001",10],["PRD-C002",10]]],
+  [2,"SHIP-003","MOV-073","FBA15M1B9Z8Y","FBA15M1B9Z8Y","2026-07-14 00:00:00","BLR8","Closed","2026-08-02 00:00:00",92,0,92,92,0,"No variance","Matched exactly",[["PRD-P001",72],["PRD-C001",10],["PRD-C002",10]]],
+  [3,"SHIP-004","MOV-076","FBA15M1F9NRC","FBA15M1F9NRC","2026-07-15 00:00:00","BLR7","Closed","2026-08-10 00:00:00",92,0,92,92,0,"No variance","Matched exactly",[["PRD-P001",72],["PRD-C001",10],["PRD-C002",10]]],
+  [4,"SHIP-005","MOV-080","FBA15M1QCB2P","FBA15M1QCB2P","2026-07-16 00:00:00","HYD8","Closed","2026-08-04 00:00:00",56,0,56,56,0,"No variance","Matched exactly",[["PRD-P003",36],["PRD-C001",10],["PRD-C002",10]]],
+  [5,"SHIP-006","MOV-088","FBA15M1Z6GTC","FBA15M1Z6GTC","2026-07-18 00:00:00","DEL4","Closed","2026-08-09 00:00:00",62,0,62,24,-38,"Receipt discrepancy: shortage 38 units","Owner-approved local classification; no automatic stock correction",[["PRD-P001",40],["PRD-C001",12],["PRD-C002",10]]],
+  [6,"SHIP-007","MOV-102","FBA15M23FXSW","FBA15M23FXSW","2026-07-20 00:00:00","DEL4","Closed","2026-10-08 00:00:00",165,0,165,205,40,"Receipt discrepancy: excess 40 units","Owner-approved local classification; no automatic stock correction",[["PRD-P001",80],["PRD-P002",36],["PRD-P004",49]]],
+  [7,"SHIP-008","MOV-108","FBA15M27SQ7H","FBA15M27SQ7H","2026-07-21 00:00:00","BOM5","Closed","2026-09-22 00:00:00",307,72,235,236,1,"Receipt discrepancy: excess 1 unit","Owner-approved local classification; 72 wooden comb units excluded",[["PRD-P001",80],["PRD-C001",24],["PRD-C002",10],["PRD-P002",72],["PRD-P004",49]]],
+  [8,"SHIP-009","MOV-109","FBA15M2F1Q18","FBA15M2F1Q18","2026-07-22 00:00:00","HYD3","Closed","2026-08-08 00:00:00",33,0,33,33,0,"No variance","Matched exactly",[["PRD-P003",4],["PRD-P004",29]]],
+  [9,"SHIP-010","MOV-125","FBA15M322THO","FBA15M322TH0","2026-07-29 00:00:00","HYD8","Closed","2026-08-25 00:00:00",231,36,195,195,0,"No variance","ERP final character O should be zero; 36 freebie units excluded",[["PRD-P001",80],["PRD-P002",36],["PRD-P004",49],["PRD-C004",10],["PRD-C005",10],["PRD-C003",10]]],
+  [10,"SHIP-011","MOV-144","FBA15M3THR38","FBA15M3THR38","2026-08-01 00:00:00","PNQ3","Closed","2026-09-18 00:00:00",200,36,164,164,0,"No variance","36 wooden comb units excluded",[["PRD-P001",98],["PRD-P002",36],["PRD-C004",10],["PRD-C005",10],["PRD-C003",10]]],
+  [11,"SHIP-012","MOV-161","FBA15M3QDFV1","FBA15M3QDFV1","2026-08-04 00:00:00","BLR7","Closed","2026-09-17 00:00:00",171,36,135,135,0,"No variance","36 wooden comb units excluded",[["PRD-P002",36],["PRD-P004",49],["PRD-C007",20],["PRD-C004",10],["PRD-C005",10],["PRD-C003",10]]],
+  [12,"SHIP-013","MOV-200","FBA15M76ZZ04","FBA15M76ZZ04","2026-08-21 00:00:00","HYD3","Closed","2026-09-12 00:00:00",159,0,159,159,0,"No variance","Matched exactly",[["PRD-P001",110],["PRD-P004",49]]],
+  [13,"SHIP-014","MOV-208","FBA15M72S6FH","FBA15M72S6FH","2026-08-24 00:00:00","HYD3","Closed","2026-09-12 00:00:00",63,0,63,63,0,"No variance","Matched exactly",[["PRD-P005",63]]],
+  [14,"SHIP-015","MOV-213","FBA15M7TSS2H","FBA15M7TSS2H","2026-08-24 00:00:00","DEL5","Closed","2026-09-16 00:00:00",98,0,98,98,0,"No variance","Matched exactly",[["PRD-P001",98]]],
+  [15,"SHIP-016","MOV-216","FBA15M73P19","FBA15M7J3P19","2026-08-25 00:00:00","DED4","Closed","2026-09-18 00:00:00",98,0,98,98,0,"No variance","ERP reference is missing J",[["PRD-P001",98]]],
+  [16,"SHIP-017","MOV-218","FBA15M83W07Q","FBA15M83W07Q","2026-08-26 00:00:00","DEL4","Closed","2026-10-11 00:00:00",514,152,362,362,0,"No variance","80 loofah and 72 wooden comb units excluded",[["PRD-P003",80],["PRD-P001",98],["PRD-P005",63],["PRD-P002",72],["PRD-P004",49]]],
+  [17,"SHIP-018","MOV-225","FBA15M8SZTON","FBA15M8SZT0N","2026-08-28 00:00:00","BLR8","Closed","2026-09-27 00:00:00",612,152,460,460,0,"No variance","ERP uses letter O instead of zero; 152 freebie units excluded",[["PRD-P001",147],["PRD-P004",98],["PRD-P005",63],["PRD-P003",80],["PRD-P002",72]]],
+  [18,"SHIP-019","MOV-231","FBA15M9RVFSQ","FBA15M9RVFSQ","2026-09-01 00:00:00","BLR7","Closed","2026-09-24 00:00:00",362,76,286,286,0,"No variance","40 loofah and 36 wooden comb units excluded",[["PRD-P001",98],["PRD-P002",36],["PRD-P003",40],["PRD-P004",49],["PRD-P005",63]]],
+  [19,"SHIP-020","MOV-239","FBA15MBD201D","FBA15MBD201D","2026-09-02 00:00:00","HYD8","Closed","2026-10-15 00:00:00",307,80,227,227,0,"No variance","40 loofah and 40 wooden comb units excluded",[["PRD-P001",98],["PRD-P004",49],["PRD-P003",40],["PRD-P002",40]]],
+  [20,"SHIP-021","MOV-258","FBA15MD4S73W","FBA15MD4S73W","2026-09-08 00:00:00","BOM5","Closed","2026-10-23 00:00:00",370,80,290,290,0,"No variance","80 loofah units excluded",[["PRD-P001",98],["PRD-P003",80],["PRD-P005",63],["PRD-P004",49]]],
+  [21,"SHIP-022","MOV-328","FBA15ML9B7SM","FBA15ML9B7SM","2026-09-30 00:00:00","DEL4","Receiving","2026-10-27 00:00:00",50,0,50,50,0,"Receiving; all expected units located","Status remains Receiving in Amazon",[["PRD-C001",30],["PRD-C006",20]]],
+  [22,"SHIP-023","MOV-350","FBA15MMTYWWB","FBA15MMTYWWB","2026-10-08 00:00:00","DEL5","Receiving","2026-10-26 00:00:00",98,0,98,98,0,"Receiving; all expected units located","Status remains Receiving in Amazon",[["PRD-P001",98]]],
+  [23,"SHIP-024","MOV-360","FBA15MPD5V4M","FBA15MPD5V4M","2026-10-14 00:00:00","BLR7","Receiving","2026-10-24 00:00:00",118,0,118,118,0,"Receiving; all expected units located","Status remains Receiving in Amazon",[["PRD-P001",98],["PRD-C001",20]]],
+].map(row => ({
+  seq: row[0], shipmentID: row[1], movementID: row[2], sourceReference: row[3],
+  amazonReferenceID: row[4], shipmentDateTime: row[5], destinationFC: row[6],
+  sourceAmazonStatus: row[7], sourceLastUpdated: row[8], movementLineUnits: row[9],
+  freebieComponentUnits: row[10], amazonExpected: row[11], amazonLocated: row[12],
+  variance: row[13], varianceTreatment: row[14], notes: row[15], lines: row[16],
+}));
+
+function historicalFbaLinkingManifestFingerprint() {
+  return sha256Base64Url(JSON.stringify(stableRequestValue({
+    manifestID: HISTORICAL_FBA_LINKING_CONFIG.MANIFEST_ID,
+    entries: HISTORICAL_FBA_LINKING_MANIFEST,
+  })));
+}
+
+function requireHistoricalFbaMigrationOwner(staff) {
+  if (!staff || String(staff.Role || "") !== "Founder") {
+    throw new Error("Forbidden: historical FBA migration is Founder-only.");
+  }
+}
+
+function historicalFbaExpectedLines(entry) {
+  return entry.lines.map((line, index) => ({
+    ShipmentLineID: entry.shipmentID + "-L" + String(index + 1).padStart(3, "0"),
+    ShipmentID: entry.shipmentID,
+    ProductID: line[0],
+    ExpectedQty: Number(line[1]),
+    Notes: "Historical manifest " + HISTORICAL_FBA_LINKING_CONFIG.MANIFEST_ID,
+  }));
+}
+
+function historicalFbaMigrationNote(entry) {
+  return [
+    "Historical manifest " + HISTORICAL_FBA_LINKING_CONFIG.MANIFEST_ID,
+    "Amazon source status " + entry.sourceAmazonStatus,
+    "source updated " + entry.sourceLastUpdated,
+    entry.varianceTreatment,
+    entry.notes,
+    "No receipt or stock adjustment created",
+  ].filter(Boolean).join(" | ");
+}
+
+function getHistoricalFbaLinkingDryRun(body, staff) {
+  requireHistoricalFbaMigrationOwner(staff);
+  return buildHistoricalFbaLinkingPlan();
+}
+
+function buildHistoricalFbaLinkingPlan(includeInternal) {
+  requireSheetColumns(SHEETS.FBA_SHIPMENTS, [
+    "ShipmentID", FBA_SHIPMENT_AMAZON_REFERENCE_FIELD, "ShipmentDateTime",
+    "DestinationFC", "Status", "CreatedByEmail", "Notes",
+  ]);
+  requireSheetColumns(SHEETS.FBA_SHIPMENT_LINES, ["ShipmentLineID", "ShipmentID", "ProductID", "ExpectedQty", "Notes"]);
+  requireSheetColumns(SHEETS.MOV_HEADERS, [
+    "MovementID", "MovementType", "SourceLocationID", "DestinationLocationID",
+    "ReferenceNumber", "AmazonShipmentID", "AmazonDestinationFC", "Status",
+  ]);
+  requireSheetColumns(SHEETS.MOV_LINES, ["MovementID", "ProductID", "Quantity"]);
+
+  const shipments = sheetToObjects(SHEETS.FBA_SHIPMENTS);
+  const shipmentLines = sheetToObjects(SHEETS.FBA_SHIPMENT_LINES);
+  const movements = sheetToObjects(SHEETS.MOV_HEADERS);
+  const movementLines = sheetToObjects(SHEETS.MOV_LINES);
+  const conflicts = [];
+  const entries = [];
+
+  const controlShipment = shipments.find(row => row.ShipmentID === "SHIP-001");
+  const controlMovement = movements.find(row => row.MovementID === "MOV-379");
+  if (!controlShipment || normalizeAmazonReferenceID(controlShipment[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD], false) !== "FBA15MRFBLH8") {
+    conflicts.push("Control shipment SHIP-001 / FBA15MRFBLH8 is missing or changed.");
+  }
+  if (!controlMovement || String(controlMovement.AmazonShipmentID || "") !== "SHIP-001") {
+    conflicts.push("Control movement MOV-379 is not linked to SHIP-001.");
+  }
+
+  HISTORICAL_FBA_LINKING_MANIFEST.forEach(entry => {
+    const entryConflicts = [];
+    const movementIndex = movements.findIndex(row => row.MovementID === entry.movementID);
+    const movement = movementIndex >= 0 ? movements[movementIndex] : null;
+    const movementProductQty = {};
+    const sourceLines = movementLines.filter(line => line.MovementID === entry.movementID);
+    sourceLines.forEach(line => {
+      const productID = String(line.ProductID || "");
+      movementProductQty[productID] = (movementProductQty[productID] || 0) + (parseFloat(line.Quantity) || 0);
+    });
+    const movementTotal = sourceLines.reduce((sum, line) => sum + (parseFloat(line.Quantity) || 0), 0);
+    const expectedLines = historicalFbaExpectedLines(entry);
+    const expectedTotal = expectedLines.reduce((sum, line) => sum + line.ExpectedQty, 0);
+
+    if (!movement) entryConflicts.push("Movement is missing.");
+    if (movement && movement.MovementType !== "FBA Dispatch") entryConflicts.push("Movement type is not FBA Dispatch.");
+    if (movement && movement.Status !== "Approved") entryConflicts.push("Movement is not Approved.");
+    if (movement && (movement.SourceLocationID !== "MAIN_WH" || movement.DestinationLocationID !== "FBA_TRANSIT")) {
+      entryConflicts.push("Movement route is not MAIN_WH to FBA_TRANSIT.");
+    }
+    if (movement && String(movement.ReferenceNumber || "").trim().toUpperCase() !== entry.sourceReference) {
+      entryConflicts.push("Approved ReferenceNumber no longer matches the preserved source value.");
+    }
+    if (movement && movement.AmazonDestinationFC && String(movement.AmazonDestinationFC).trim().toUpperCase() !== entry.destinationFC) {
+      entryConflicts.push("Movement destination FC differs from the reviewed manifest.");
+    }
+    if (movementTotal !== entry.movementLineUnits) entryConflicts.push("Movement-line total differs from the reviewed manifest.");
+    if (expectedTotal !== entry.amazonExpected) entryConflicts.push("Shipment-line total differs from Amazon expected units.");
+    if (movementTotal - expectedTotal !== entry.freebieComponentUnits) entryConflicts.push("Excluded freebie total differs from the reviewed manifest.");
+    expectedLines.forEach(line => {
+      if (Number(movementProductQty[line.ProductID] || 0) !== line.ExpectedQty) {
+        entryConflicts.push("Movement quantity differs for " + line.ProductID + ".");
+      }
+    });
+
+    const byID = shipments.find(row => row.ShipmentID === entry.shipmentID);
+    const byReference = shipments.find(row => normalizeAmazonReferenceID(row[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD], false) === entry.amazonReferenceID);
+    if (byID && byReference && byID !== byReference) entryConflicts.push("Shipment ID and Amazon reference point to different rows.");
+    if (byID && normalizeAmazonReferenceID(byID[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD], false) !== entry.amazonReferenceID) {
+      entryConflicts.push("Shipment ID is already used by another Amazon reference.");
+    }
+    if (byReference && byReference.ShipmentID !== entry.shipmentID) entryConflicts.push("Amazon reference is already used by another shipment ID.");
+    const existingShipment = byID || byReference || null;
+    if (existingShipment) {
+      if (String(existingShipment.ShipmentDateTime || "") !== entry.shipmentDateTime) entryConflicts.push("Existing shipment date differs.");
+      if (String(existingShipment.DestinationFC || "").trim().toUpperCase() !== entry.destinationFC) entryConflicts.push("Existing shipment destination differs.");
+      if (String(existingShipment.Status || "") !== "In Transit") entryConflicts.push("Existing shipment status is not In Transit.");
+    }
+
+    const existingLines = shipmentLines.filter(line => line.ShipmentID === entry.shipmentID);
+    const expectedIDs = expectedLines.map(line => line.ShipmentLineID);
+    const missingLines = [];
+    expectedLines.forEach(expected => {
+      const matches = existingLines.filter(line => line.ShipmentLineID === expected.ShipmentLineID);
+      if (matches.length > 1) entryConflicts.push("Duplicate shipment line " + expected.ShipmentLineID + ".");
+      if (!matches.length) missingLines.push(expected);
+      if (matches.length === 1 && (matches[0].ProductID !== expected.ProductID || Number(matches[0].ExpectedQty) !== expected.ExpectedQty)) {
+        entryConflicts.push("Existing shipment line differs: " + expected.ShipmentLineID + ".");
+      }
+    });
+    existingLines.filter(line => !expectedIDs.includes(String(line.ShipmentLineID || ""))).forEach(line => {
+      entryConflicts.push("Unexpected shipment line exists: " + String(line.ShipmentLineID || "(blank)") + ".");
+    });
+    if (existingShipment && missingLines.length) entryConflicts.push("Committed shipment header has missing lines.");
+
+    let updateLink = false;
+    if (movement) {
+      const currentLink = String(movement.AmazonShipmentID || "");
+      if (!currentLink) updateLink = true;
+      else if (currentLink !== entry.shipmentID) entryConflicts.push("Movement is linked to another shipment: " + currentLink + ".");
+    }
+
+    const result = {
+      seq: entry.seq,
+      shipmentID: entry.shipmentID,
+      movementID: entry.movementID,
+      sourceReference: entry.sourceReference,
+      amazonReferenceID: entry.amazonReferenceID,
+      referenceCorrection: entry.sourceReference !== entry.amazonReferenceID,
+      closedShipmentVariance: entry.sourceAmazonStatus === "Closed" && entry.variance !== 0,
+      insertHeader: !existingShipment,
+      missingLines: missingLines,
+      updateLink: updateLink,
+      movementRowNumber: movementIndex >= 0 ? movementIndex + 2 : 0,
+      conflicts: entryConflicts,
+    };
+    entries.push(result);
+    entryConflicts.forEach(problem => conflicts.push(entry.movementID + ": " + problem));
+  });
+
+  const summary = entries.reduce((totals, entry) => {
+    totals.insertHeaders += entry.insertHeader ? 1 : 0;
+    totals.insertLines += entry.missingLines.length;
+    totals.updateLinks += entry.updateLink ? 1 : 0;
+    totals.referenceCorrections += entry.referenceCorrection ? 1 : 0;
+    totals.closedShipmentVariances += entry.closedShipmentVariance ? 1 : 0;
+    return totals;
+  }, { insertHeaders: 0, insertLines: 0, updateLinks: 0, referenceCorrections: 0, closedShipmentVariances: 0 });
+  summary.businessMutations = summary.insertHeaders + summary.insertLines + summary.updateLinks;
+  summary.stockDelta = 0;
+  summary.referenceNumberEdits = 0;
+  summary.movementStatusEdits = 0;
+  summary.receiptMovementsCreated = 0;
+  summary.adjustmentMovementsCreated = 0;
+
+  return {
+    manifestID: HISTORICAL_FBA_LINKING_CONFIG.MANIFEST_ID,
+    manifestFingerprint: historicalFbaLinkingManifestFingerprint(),
+    applyEnabled: authProperties().getProperty(HISTORICAL_FBA_LINKING_CONFIG.ENABLE_PROPERTY) === historicalFbaLinkingManifestFingerprint(),
+    dryRun: true,
+    ready: conflicts.length === 0,
+    control: { shipmentID: "SHIP-001", movementID: "MOV-379", verified: conflicts.filter(value => value.startsWith("Control ")).length === 0 },
+    summary: summary,
+    conflicts: conflicts,
+    entries: includeInternal === true ? entries : entries.map(entry => ({
+      seq: entry.seq,
+      shipmentID: entry.shipmentID,
+      movementID: entry.movementID,
+      sourceReference: entry.sourceReference,
+      amazonReferenceID: entry.amazonReferenceID,
+      referenceCorrection: entry.referenceCorrection,
+      closedShipmentVariance: entry.closedShipmentVariance,
+      insertHeader: entry.insertHeader,
+      insertLineCount: entry.missingLines.length,
+      updateLink: entry.updateLink,
+      conflicts: entry.conflicts,
+    })),
+  };
+}
+
+function assertHistoricalFbaApplyGate(body, staff) {
+  requireHistoricalFbaMigrationOwner(staff);
+  const fingerprint = historicalFbaLinkingManifestFingerprint();
+  const batchStartSequence = Number(body.batchStartSequence);
+  const batchSize = Number(body.batchSize);
+  if (!Number.isInteger(batchStartSequence) || batchStartSequence < 1 || batchStartSequence > HISTORICAL_FBA_LINKING_MANIFEST.length) {
+    throw new Error("batchStartSequence must be an integer from 1 to " + HISTORICAL_FBA_LINKING_MANIFEST.length + ".");
+  }
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > HISTORICAL_FBA_LINKING_CONFIG.MAX_APPLY_BATCH_SIZE) {
+    throw new Error("batchSize must be an integer from 1 to " + HISTORICAL_FBA_LINKING_CONFIG.MAX_APPLY_BATCH_SIZE + ".");
+  }
+  if (String(body.manifestFingerprint || "") !== fingerprint) throw new Error("Historical FBA manifest fingerprint mismatch.");
+  if (String(body.confirmation || "") !== "APPLY:" + fingerprint) throw new Error("Historical FBA apply confirmation is missing or invalid.");
+  if (authProperties().getProperty(HISTORICAL_FBA_LINKING_CONFIG.ENABLE_PROPERTY) !== fingerprint) {
+    throw new Error("Historical FBA apply is disabled. A separate owner approval must set the reviewed manifest fingerprint.");
+  }
+}
+
+function applyHistoricalFbaShipmentLinks(body, staff) {
+  assertHistoricalFbaApplyGate(body, staff);
+  const before = buildHistoricalFbaLinkingPlan(true);
+  if (!before.ready) throw new Error("Historical FBA migration preflight failed: " + before.conflicts.join(" | "));
+  const start = Number(body.batchStartSequence);
+  const endExclusive = Math.min(start - 1 + Number(body.batchSize), HISTORICAL_FBA_LINKING_MANIFEST.length);
+  const selected = HISTORICAL_FBA_LINKING_MANIFEST.slice(start - 1, endExclusive);
+  const applied = { insertedHeaders: 0, insertedLines: 0, updatedLinks: 0 };
+
+  selected.forEach(entry => {
+    const planned = before.entries.find(item => item.seq === entry.seq);
+    if (!planned) throw new Error("Historical FBA manifest entry missing from preflight: " + entry.seq);
+    planned.missingLines.forEach(line => {
+      appendRow(SHEETS.FBA_SHIPMENT_LINES, line);
+      applied.insertedLines += 1;
+    });
+    if (planned.missingLines.length) recordWriteCheckpoint("FBA_SHIPMENT_LINES", entry.shipmentID, "LINES_READY");
+
+    if (planned.insertHeader) {
+      appendRow(SHEETS.FBA_SHIPMENTS, {
+        ShipmentID: entry.shipmentID,
+        AmazonReferenceID: entry.amazonReferenceID,
+        ShipmentDateTime: entry.shipmentDateTime,
+        DestinationFC: entry.destinationFC,
+        Status: "In Transit",
+        CarrierTrackingNumber: "",
+        ExpectedDeliveryDate: "",
+        CreatedByEmail: staff.Email,
+        ClosedAt: "",
+        Notes: historicalFbaMigrationNote(entry),
+      });
+      recordWriteCheckpoint("FBA_SHIPMENTS", entry.shipmentID, "HEADER_COMMITTED");
+      writeAuditTrail("applyHistoricalFbaShipmentLinks", "FbaShipment", entry.shipmentID, [], staff, body.requestId,
+        HISTORICAL_FBA_LINKING_CONFIG.MANIFEST_ID + "; source movement " + entry.movementID);
+      applied.insertedHeaders += 1;
+    }
+
+    if (planned.updateLink) {
+      updateRow(SHEETS.MOV_HEADERS, planned.movementRowNumber, { AmazonShipmentID: entry.shipmentID });
+      recordWriteCheckpoint("MOVEMENT_LINK", entry.movementID, "LINK_COMMITTED");
+      writeAuditTrail("applyHistoricalFbaShipmentLinks", "Movement", entry.movementID, [
+        { field: "AmazonShipmentID", oldValue: "", newValue: entry.shipmentID },
+      ], staff, body.requestId, HISTORICAL_FBA_LINKING_CONFIG.MANIFEST_ID + "; ReferenceNumber preserved as " + entry.sourceReference);
+      applied.updatedLinks += 1;
+    }
+    if (planned.insertHeader || planned.updateLink) {
+      writeLog("applyHistoricalFbaShipmentLinks", entry.movementID, staff,
+        "Historical shipment " + entry.shipmentID + " linked; approved reference preserved", body.requestId);
+    }
+  });
+
+  const after = buildHistoricalFbaLinkingPlan();
+  if (!after.ready) throw new Error("Historical FBA migration post-check failed: " + after.conflicts.join(" | "));
+  const nextSequence = endExclusive < HISTORICAL_FBA_LINKING_MANIFEST.length ? endExclusive + 1 : 0;
+  return {
+    manifestID: HISTORICAL_FBA_LINKING_CONFIG.MANIFEST_ID,
+    manifestFingerprint: historicalFbaLinkingManifestFingerprint(),
+    batchStartSequence: start,
+    batchEndSequence: endExclusive,
+    nextSequence: nextSequence,
+    applied: applied,
+    remainingBusinessMutations: after.summary.businessMutations,
+    stockDelta: 0,
+    referenceNumberEdits: 0,
+    movementStatusEdits: 0,
+  };
 }
 
 // Manual forward-only status advance. Skipping a stage is allowed (e.g. going

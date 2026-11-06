@@ -4,7 +4,7 @@
 
 The Phase 2 staging candidate adds `serverDurationMs` to both success and error envelopes. It is a non-negative execution duration only; it contains no request body, identity, PIN, PIN hash/salt, session token, file reference or business data. The active frontend combines this with browser round-trip duration in memory for Founder/Co-Founder System Health review. Refresh/logout clears the browser aggregate, and no performance record is written to the workbook or Drive.
 
-Generated/verified from local sources on 2026-10-28.
+Generated/verified from local sources on 2026-11-03.
 
 ## Purpose
 
@@ -14,13 +14,13 @@ This catalogue is the Phase 1 baseline for the Apps Script API. It records every
 
 ## Summary
 
-- 50 unique backend actions.
+- 52 unique backend actions.
 - Only `ping` and `getAppLogins` are routed by public `doGet`.
 - 4 session actions are handled directly by `doPost` (`login`, `logout`, `confirmPin`, and `verifySession`).
-- 19 business reads pass through the authenticated POST router.
-- 25 writes pass through the authenticated POST router.
+- 20 business reads pass through the authenticated POST router.
+- 26 writes pass through the authenticated POST router.
 - No business-data read or write is routed through GET.
-- 13 backend actions have no caller in the current frontend.
+- 15 backend actions have no caller in the current frontend.
 
 Only `ping`, a strictly minimal staff picker, and the PIN-login entry are reachable without an authenticated session. Login-attempt logging is an internal effect of the login service rather than a public command.
 
@@ -52,6 +52,7 @@ Only `ping`, a strictly minimal staff picker, and the PIN-login entry are reacha
 | `getFbaShipments` | POST | Valid session + central capability amazon.shipments.view | current | `amazon.shipments.view` |
 | `getFbaDispatchShipmentOptions` | POST | Valid session + central capability inventory.movements.create; returns minimal open-shipment fields only | current | `inventory.movements.create` |
 | `getFbaLedgerSnapshots` | POST | Valid session + central capability amazon.reconciliation.view | current | `amazon.reconciliation.view` |
+| `getHistoricalFbaLinkingDryRun` | POST | Valid Founder session + central capability amazon.shipments.historicalMigration; read-only reviewed manifest preflight | none | `amazon.shipments.historicalMigration` |
 | `getOperationalFile` | POST | Valid session + central capability inventory.files.view; movement ownership/scope and stored file reference are revalidated | current | `inventory.files.view` |
 | `getSystemHealth` | POST | Valid Founder/Co-Founder session + central capability system.health.view | current | `system.health.view` |
 | `createMovement` | POST | Valid session + central capability inventory.movements.create; existing handler domain rules also apply | current | `inventory.movements.create` |
@@ -79,6 +80,7 @@ Only `ping`, a strictly minimal staff picker, and the PIN-login entry are reacha
 | `updateFbaShipmentStatus` | POST | Valid session + central capability amazon.shipments.update; existing handler domain rules also apply | current | `amazon.shipments.update` |
 | `linkMovementToShipment` | POST | Valid session + central capability amazon.shipments.linkMovement; existing handler domain rules also apply | current | `amazon.shipments.linkMovement` |
 | `unlinkMovementFromShipment` | POST | Valid session + central capability amazon.shipments.unlinkMovement; existing handler domain rules also apply | current | `amazon.shipments.unlinkMovement` |
+| `applyHistoricalFbaShipmentLinks` | POST | Valid Founder session + exact manifest fingerprint/confirmation + separately enabled Script Property; locked idempotent batch of at most five shipments | none | `amazon.shipments.historicalMigration` |
 <!-- END GENERATED ACTION TABLE -->
 
 ## Backend-only actions in the current frontend
@@ -98,6 +100,8 @@ The following actions have no literal caller in `syoat-app.js`:
 - `editStockCount`
 - `logChange`
 - `verifySession`
+- `getHistoricalFbaLinkingDryRun`
+- `applyHistoricalFbaShipmentLinks`
 
 These require an explicit retain, migrate, or remove decision during the secured router work. `createSalesOrder` contains financial-looking fields such as payment status and unit price; it must not be expanded into daily sales accounting under the agreed project scope.
 

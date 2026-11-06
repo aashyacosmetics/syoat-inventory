@@ -186,6 +186,14 @@
       "targetCapability": "amazon.reconciliation.view"
     },
     {
+      "action": "getHistoricalFbaLinkingDryRun",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid Founder session + central capability amazon.shipments.historicalMigration; read-only reviewed manifest preflight",
+      "targetCapability": "amazon.shipments.historicalMigration"
+    },
+    {
       "action": "getOperationalFile",
       "routes": [
         "POST"
@@ -400,6 +408,14 @@
       ],
       "currentGate": "Valid session + central capability amazon.shipments.unlinkMovement; existing handler domain rules also apply",
       "targetCapability": "amazon.shipments.unlinkMovement"
+    },
+    {
+      "action": "applyHistoricalFbaShipmentLinks",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid Founder session + exact manifest fingerprint/confirmation + separately enabled Script Property; locked idempotent batch of at most five shipments",
+      "targetCapability": "amazon.shipments.historicalMigration"
     }
   ]
 }

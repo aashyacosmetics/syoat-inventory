@@ -11,6 +11,7 @@
     "check:environment": "node scripts/check-environment-isolation.mjs config/environments.example.json",
     "check:staging": "node scripts/check-environment-isolation.mjs config/environments.local.json --require-ready",
     "staging:serve": "node scripts/serve-staging.mjs",
+    "rehearse:fba-history": "node scripts/rehearse-historical-fba-linking.mjs",
     "catalog:print": "node scripts/generate-api-catalog.mjs",
     "check": "node scripts/check-syntax.mjs && node --test && node scripts/generate-api-catalog.mjs --check && node scripts/check-environment-isolation.mjs config/environments.example.json"
   },

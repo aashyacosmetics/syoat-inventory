@@ -1,6 +1,6 @@
 # Phase 2 FBA Alignment
 
-Status: dispatch-picker, safe report import and dedicated Amazon-reference backend are implemented; frontend publication is pending protected PR merge, and historical migration still requires separate approval.
+Status: dispatch-picker, safe report import and dedicated Amazon-reference release are implemented. The historical linking command and full sanitized rehearsal are ready locally; production apply remains disabled and requires separate approval.
 
 ## Purpose
 
@@ -93,3 +93,5 @@ Warehouse Operators may see a minimal open-shipment picker while recording an FB
 ## Historical remediation boundary
 
 The 24 approved historical dispatches, 4,516 transit units and 29 report adjustments require a separate exception-by-exception dry run. They must not be bulk-linked, received, reversed or adjusted based only on dates or matching totals. Amazon shipment references, receipts and report evidence must be reviewed first.
+
+The reviewed exception-by-exception manifest and local command are now recorded in `PHASE_2_FBA_HISTORICAL_LINKING.md`. The complete sanitized rehearsal proposed 23 headers, 74 lines and 23 links, then reached zero remaining mutations on a second pass with zero stock delta. Apply is Founder-only, limited to five shipments per locked/idempotent request and disabled unless a future owner approval enables the exact manifest fingerprint. No production migration is authorized by this preparation.

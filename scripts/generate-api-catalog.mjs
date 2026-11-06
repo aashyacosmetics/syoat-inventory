@@ -36,7 +36,8 @@ const generated = [
 if (process.argv.includes("--check")) {
   const doc = fs.readFileSync(path.join(repoRoot, "docs", "API_CATALOG.md"), "utf8");
   const match = doc.match(/<!-- BEGIN GENERATED ACTION TABLE -->[\s\S]*?<!-- END GENERATED ACTION TABLE -->/);
-  if (!match || match[0].trim() !== generated.trim()) {
+  const documented = match ? match[0].replaceAll("\r\n", "\n").trim() : "";
+  if (!match || documented !== generated.trim()) {
     console.error("docs/API_CATALOG.md is out of date. Run `npm run catalog:print` and update the generated table.");
     process.exitCode = 1;
   } else {

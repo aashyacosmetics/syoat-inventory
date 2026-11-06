@@ -71,7 +71,7 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-fba-reference.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-historical-linking.1");
 });
 
 test("public staff picker exposes only name, email, and role", () => {

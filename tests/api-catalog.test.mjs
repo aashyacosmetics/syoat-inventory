@@ -38,10 +38,12 @@ test("active frontend backend-only actions remain explicitly visible", () => {
   const called = new Set(uniqueActions(extractFrontendCalls("syoat-app.js")));
   const backendOnly = backendActions.filter(action => !called.has(action));
   assert.deepEqual(backendOnly, [
+    "applyHistoricalFbaShipmentLinks",
     "createSalesOrder",
     "dispatchSalesOrder",
     "editStockCount",
     "getFeatureSettings",
+    "getHistoricalFbaLinkingDryRun",
     "getLists",
     "getLocations",
     "getProducts",
@@ -93,7 +95,7 @@ test("only health and safe staff picker remain reachable through GET", () => {
 });
 
 test("every business write is POST-only", () => {
-  assert.equal(backend.writeActions.length, 25);
+  assert.equal(backend.writeActions.length, 26);
   assert.ok(backend.writeActions.every(action =>
     JSON.stringify(catalog.actions.find(item => item.action === action).routes) === JSON.stringify(["POST"])
   ));
