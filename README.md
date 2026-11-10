@@ -42,6 +42,7 @@ The present application is a static React frontend backed by Google Apps Script 
 - [Production release record](docs/PRODUCTION_RELEASE_RECORD.md)
 - [Phase 1 completion record](docs/PHASE_1_COMPLETION.md)
 - [Phase 2 execution plan](docs/PHASE_2_PLAN.md)
+- [Phase 2 historical FBA shipment linking](docs/PHASE_2_FBA_HISTORICAL_LINKING.md)
 - [Phase 2 WP1 stabilization and staging foundation](docs/PHASE_2_WP1_STABILIZATION.md)
 - [Phase 2 staging and rollback evidence record](docs/PHASE_2_STAGING_RECORD.md)
 - [Roadmap](docs/ROADMAP.md)

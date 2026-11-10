@@ -151,6 +151,13 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 - Decision: `FBA_Shipments.AmazonReferenceID` stores the external Seller Central shipment/reference value. `FBA_Shipments.ShipmentID` remains the ERP's immutable internal `SHIP-...` identifier, and `Movement_Headers.AmazonShipmentID` remains the internal link to that plan. New shipment references are trimmed, uppercased, validated and unique when created.
 - Consequence: Managers enter the external reference once on the shipment plan; Warehouse Operators receive it through the limited picker and do not re-key it for a linked dispatch. Existing approved `Movement_Headers.ReferenceNumber` values are not rewritten to correct historical typos. The three reviewed historical reference corrections belong in the new shipment field during a separately approved migration, preserving the original movement evidence and dry-run manifest.
 
+### D-025 — Historical FBA linking is Founder-only, fixed-manifest and disabled by default
+
+- Date: 2026-11-03
+- Status: accepted for local preparation and rehearsal; production apply not authorized
+- Decision: The reviewed historical FBA shipment-linking migration uses one fixed, fingerprinted manifest. Founder alone may run its read-only preflight or apply command. Apply is limited to five shipments per existing locked/idempotent request and additionally requires an exact confirmation plus a separately configured enable property.
+- Consequence: The migration can create shipment headers/lines and populate empty `Movement_Headers.AmazonShipmentID` links only. It preserves approved `ReferenceNumber`, movement status and movement lines; creates no receipt or adjustment; and must have zero stock delta. A successful local rehearsal or code deployment does not authorize setting the enable property or applying production data. That requires a separate owner decision, current backup and immediate reconciliation/recovery plan.
+
 ## Open decisions
 
 ### Access and production-baseline decisions captured 2026-10-23

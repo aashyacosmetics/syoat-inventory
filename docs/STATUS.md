@@ -1,6 +1,19 @@
 # Current Status and Handoff
 
-Last updated: 2026-10-31
+Last updated: 2026-11-03
+
+### 2026-11-03 — Historical FBA linking command and complete local rehearsal
+
+- Status: ready for owner review locally; production apply remains disabled and is not authorized.
+- Goal: prepare one Founder-only, idempotent, bounded command for the reviewed 23 historical FBA links and rerun the complete dry run without touching production.
+- Roadmap item: Phase 2 Work Package 9 historical remediation preparation.
+- Files changed: `Code.gs`, API/role/FBA/decision/status/changelog records, package command, sanitized fixture helper, focused tests and local rehearsal script.
+- Behavior: `getHistoricalFbaLinkingDryRun` performs a pure Founder-only preflight. `applyHistoricalFbaShipmentLinks` requires the exact fixed-manifest fingerprint, explicit confirmation and a separately enabled Script Property, then processes at most five shipments inside the existing lock/request-ID/checkpoint/recovery boundary. Apply is disabled by default.
+- Manifest: `FBA-HISTORICAL-LINKING-2026-10-31-V1`; 23 headers, 74 lines and 23 links. Three corrected external references are stored only on new shipment records; all approved movement references and statuses remain unchanged. Three closed-shipment variances remain classifications only.
+- Rehearsal result: initial dry run reported 120 business mutations and zero conflicts; five simulated in-memory batches applied 23/74/23; the post-apply dry run and a second apply pass both reported zero mutations. Movement-line hash, approved references and statuses were unchanged; stock delta was zero; production was not contacted or mutated.
+- Verification: 83/83 tests passed, both active JavaScript files passed syntax checks, the 52-action API catalogue is current, environment isolation passed, and `git diff --check` passed. The localhost isolation test was run with local-loopback permission after the normal Windows sandbox correctly blocked its temporary server.
+- Safety: all historical headers remain `In Transit`; no receipt, stock adjustment, movement-line edit or ReferenceNumber correction is created. Any changed source evidence or conflicting ID/line/link fails the preflight.
+- Next recommended action: owner review of this local candidate and its diff. Do not set the enable property, deploy or run the production apply command without a separate owner approval, current backup and immediate reconciliation/recovery sequence.
 
 ### 2026-10-31 — Dedicated Amazon shipment reference field released backend-first
 
