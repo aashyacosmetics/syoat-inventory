@@ -1,6 +1,6 @@
 # Phase 2 FBA Alignment
 
-Status: dispatch-picker, safe report import and dedicated Amazon-reference release are implemented. The historical linking command and full sanitized rehearsal are ready locally; production apply remains disabled and requires separate approval.
+Status: dispatch-picker, safe report import and dedicated Amazon-reference release are implemented. Historical Manifest V2 and its complete sanitized rehearsal are ready locally after resolving the read-only V1 conflicts; production apply remains disabled and requires separate approval.
 
 ## Purpose
 
