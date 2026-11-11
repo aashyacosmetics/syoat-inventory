@@ -1,6 +1,16 @@
 # Current Status and Handoff
 
-Last updated: 2026-11-03
+Last updated: 2026-11-11
+
+### 2026-11-11 — Historical FBA Manifest V2 prepared and rehearsed locally
+
+- Status: V2 is ready for protected-source review. Production apply remains disabled and is not authorized.
+- Live evidence: the Founder V1 dry run was read-only and returned 28 conflicts. New legitimate `SHIP-002` to `SHIP-004` records occupied V1's proposed numeric IDs; `SHIP-001` had a blank dedicated Amazon reference; three FC differences were punctuation/spacing only. No live write was attempted.
+- V2 design: `FBA-HISTORICAL-LINKING-2026-11-11-V2` uses reserved IDs `HSHIP-001` to `HSHIP-023`, safely outside the normal `SHIP-` allocator. It normalizes FC formatting for comparison and permits only the verified blank `SHIP-001.AmazonReferenceID` backfill supported by linked approved movement `MOV-379`. A different non-empty control reference fails closed.
+- Rehearsal: initial dry run reported 121 mutations (23 headers, 74 lines, 23 links and one control-reference backfill), five bounded batches completed, and the post-apply dry run plus second pass reported zero mutations. Current `SHIP-002` to `SHIP-004` headers and lines were unchanged.
+- Inventory safety: movement lines, approved references and movement statuses were unchanged; no receipt or adjustment was created; stock delta was zero. Historical linking will not itself reduce the current Transit balance.
+- Verification: 84/84 tests passed after the localhost isolation case was rerun with loopback permission; both active JavaScript files passed syntax checks; the 52-action catalogue and environment-template safety checks passed.
+- Production: not contacted or mutated by the V2 rehearsal. Do not deploy, set the enable property or apply live data without a separate owner approval and a fresh zero-conflict Founder dry run matching fingerprint `CkmH6DlbbI5QRNdSFKZsFfLsJN0ZLGt3dcqD-_Ti9aw`.
 
 ### 2026-11-03 — Historical FBA linking command and complete local rehearsal
 

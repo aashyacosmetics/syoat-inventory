@@ -23,6 +23,8 @@ const movementEvidenceBefore = harness.call("sheetToObjects", "Movement_Headers"
   referenceNumber: row.ReferenceNumber,
   status: row.Status,
 }));
+const currentShipmentsBefore = harness.call("sheetToObjects", "FBA_Shipments").filter(row => /^SHIP-00[2-4]$/.test(row.ShipmentID));
+const currentShipmentLinesBefore = harness.call("sheetToObjects", "FBA_Shipment_Lines").filter(row => /^SHIP-00[2-4]$/.test(row.ShipmentID));
 const firstDryRun = dryRun(harness, founder.sessionToken);
 const repeatedDryRun = dryRun(harness, founder.sessionToken);
 assert.deepEqual(repeatedDryRun, firstDryRun);
@@ -59,18 +61,20 @@ const noOpSecondPass = post(harness, {
 });
 assert.equal(noOpSecondPass.success, true, JSON.stringify(noOpSecondPass));
 assert.equal(afterDryRun.summary.businessMutations, 0);
-assert.deepEqual(noOpSecondPass.data.applied, { insertedHeaders: 0, insertedLines: 0, updatedLinks: 0 });
+assert.deepEqual(noOpSecondPass.data.applied, { insertedHeaders: 0, insertedLines: 0, updatedLinks: 0, updatedControlReferences: 0 });
 assert.equal(hash(harness.call("sheetToObjects", "Movement_Lines")), hash(movementLinesBefore));
 assert.deepEqual(harness.call("sheetToObjects", "Movement_Headers").map(row => ({
   movementID: row.MovementID,
   referenceNumber: row.ReferenceNumber,
   status: row.Status,
 })), movementEvidenceBefore);
+assert.deepEqual(harness.call("sheetToObjects", "FBA_Shipments").filter(row => /^SHIP-00[2-4]$/.test(row.ShipmentID)), currentShipmentsBefore);
+assert.deepEqual(harness.call("sheetToObjects", "FBA_Shipment_Lines").filter(row => /^SHIP-00[2-4]$/.test(row.ShipmentID)), currentShipmentLinesBefore);
 
 const totals = batchResults.reduce((sum, batch) => {
   Object.keys(sum).forEach(key => { sum[key] += batch.applied[key]; });
   return sum;
-}, { insertedHeaders: 0, insertedLines: 0, updatedLinks: 0 });
+}, { insertedHeaders: 0, insertedLines: 0, updatedLinks: 0, updatedControlReferences: 0 });
 
 const report = {
   generatedAt: new Date().toISOString(),
@@ -91,6 +95,8 @@ const report = {
   movementLinesHashUnchanged: true,
   approvedReferenceNumbersUnchanged: true,
   movementStatusesUnchanged: true,
+  currentShipments002To004Unchanged: true,
+  currentShipmentLines002To004Unchanged: true,
   productionContacted: false,
   productionMutated: false,
 };

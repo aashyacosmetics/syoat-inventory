@@ -37,9 +37,10 @@ test("historical FBA dry run is Founder-only, exact, and read-only", () => {
     insertHeaders: 23,
     insertLines: 74,
     updateLinks: 23,
+    updateControlReferences: 1,
     referenceCorrections: 3,
     closedShipmentVariances: 3,
-    businessMutations: 120,
+    businessMutations: 121,
     stockDelta: 0,
     referenceNumberEdits: 0,
     movementStatusEdits: 0,
@@ -47,6 +48,7 @@ test("historical FBA dry run is Founder-only, exact, and read-only", () => {
     adjustmentMovementsCreated: 0,
   });
   assert.equal(first.data.control.verified, true);
+  assert.equal(first.data.control.referenceBackfillRequired, true);
   assert.equal(first.data.applyEnabled, false);
   assert.deepEqual(second.data, first.data);
   assert.equal(businessSnapshot(harness), before);
@@ -91,7 +93,9 @@ test("sanitized local apply rehearsal is bounded, idempotent, and has zero stock
     referenceNumber: row.ReferenceNumber,
     status: row.Status,
   }));
-  const applied = { insertedHeaders: 0, insertedLines: 0, updatedLinks: 0 };
+  const currentShipmentRowsBefore = JSON.stringify(harness.call("sheetToObjects", "FBA_Shipments").filter(row => /^SHIP-00[2-4]$/.test(row.ShipmentID)));
+  const currentShipmentLinesBefore = JSON.stringify(harness.call("sheetToObjects", "FBA_Shipment_Lines").filter(row => /^SHIP-00[2-4]$/.test(row.ShipmentID)));
+  const applied = { insertedHeaders: 0, insertedLines: 0, updatedLinks: 0, updatedControlReferences: 0 };
   let start = 1;
   let firstRequest = null;
   let firstResponse = null;
@@ -112,21 +116,25 @@ test("sanitized local apply rehearsal is bounded, idempotent, and has zero stock
     start = response.data.nextSequence;
   }
 
-  assert.deepEqual(applied, { insertedHeaders: 23, insertedLines: 74, updatedLinks: 23 });
+  assert.deepEqual(applied, { insertedHeaders: 23, insertedLines: 74, updatedLinks: 23, updatedControlReferences: 1 });
   assert.equal(JSON.stringify(harness.call("sheetToObjects", "Movement_Lines")), movementLinesBefore);
   assert.deepEqual(harness.call("sheetToObjects", "Movement_Headers").map(row => ({
     movementID: row.MovementID,
     referenceNumber: row.ReferenceNumber,
     status: row.Status,
   })), preservedBefore);
-  assert.equal(harness.call("sheetToObjects", "FBA_Shipments").filter(row => row.ShipmentID !== "SHIP-001").every(row => row.Status === "In Transit"), true);
-  assert.equal(harness.call("sheetToObjects", "FBA_Shipments").find(row => row.ShipmentID === "SHIP-010").AmazonReferenceID, "FBA15M322TH0");
-  assert.equal(harness.call("sheetToObjects", "FBA_Shipments").find(row => row.ShipmentID === "SHIP-016").AmazonReferenceID, "FBA15M7J3P19");
-  assert.equal(harness.call("sheetToObjects", "FBA_Shipments").find(row => row.ShipmentID === "SHIP-018").AmazonReferenceID, "FBA15M8SZT0N");
+  assert.equal(harness.call("sheetToObjects", "FBA_Shipments").filter(row => row.ShipmentID.startsWith("HSHIP-")).every(row => row.Status === "In Transit"), true);
+  assert.equal(harness.call("sheetToObjects", "FBA_Shipments").find(row => row.ShipmentID === "SHIP-001").AmazonReferenceID, "FBA15MRFBLH8");
+  assert.equal(harness.call("sheetToObjects", "FBA_Shipments").find(row => row.ShipmentID === "HSHIP-009").AmazonReferenceID, "FBA15M322TH0");
+  assert.equal(harness.call("sheetToObjects", "FBA_Shipments").find(row => row.ShipmentID === "HSHIP-015").AmazonReferenceID, "FBA15M7J3P19");
+  assert.equal(harness.call("sheetToObjects", "FBA_Shipments").find(row => row.ShipmentID === "HSHIP-017").AmazonReferenceID, "FBA15M8SZT0N");
+  assert.equal(JSON.stringify(harness.call("sheetToObjects", "FBA_Shipments").filter(row => /^SHIP-00[2-4]$/.test(row.ShipmentID))), currentShipmentRowsBefore);
+  assert.equal(JSON.stringify(harness.call("sheetToObjects", "FBA_Shipment_Lines").filter(row => /^SHIP-00[2-4]$/.test(row.ShipmentID))), currentShipmentLinesBefore);
 
   const after = dryRun(harness, founder.sessionToken).data;
   assert.equal(after.ready, true, JSON.stringify(after.conflicts));
   assert.equal(after.summary.businessMutations, 0);
+  assert.equal(after.control.referenceBackfillRequired, false);
   assert.equal(after.summary.stockDelta, 0);
 
   const replay = post(harness, firstRequest);
@@ -139,8 +147,23 @@ test("sanitized local apply rehearsal is bounded, idempotent, and has zero stock
     requestId: "local-fba-history-noop-0001",
   });
   assert.equal(noOp.success, true, JSON.stringify(noOp));
-  assert.deepEqual(noOp.data.applied, { insertedHeaders: 0, insertedLines: 0, updatedLinks: 0 });
+  assert.deepEqual(noOp.data.applied, { insertedHeaders: 0, insertedLines: 0, updatedLinks: 0, updatedControlReferences: 0 });
   assert.equal(noOp.data.remainingBusinessMutations, 0);
+});
+
+test("historical FBA preflight refuses to overwrite a different control reference", () => {
+  const sheets = historicalFbaSheets();
+  const referenceColumn = sheets.FBA_Shipments[0].indexOf("AmazonReferenceID");
+  const shipmentIDColumn = sheets.FBA_Shipments[0].indexOf("ShipmentID");
+  const control = sheets.FBA_Shipments.find(row => row[shipmentIDColumn] === "SHIP-001");
+  control[referenceColumn] = "FBA15DIFFERENT";
+  const harness = createAppsScriptHarness(sheets);
+  const founder = loginHistoricalFounder(harness);
+  const response = dryRun(harness, founder.sessionToken);
+
+  assert.equal(response.success, true);
+  assert.equal(response.data.ready, false);
+  assert.match(response.data.conflicts.join(" | "), /SHIP-001.*different value/i);
 });
 
 test("historical FBA preflight stops on a changed approved movement", () => {

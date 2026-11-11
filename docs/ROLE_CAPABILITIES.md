@@ -1,6 +1,6 @@
 # Role and Capability Matrix
 
-Status: production access policy remains unchanged; local candidate `3.2-phase2-fba-historical-linking.1` adds a Founder-only historical FBA migration capability that is disabled for live apply by default.
+Status: production access policy remains unchanged; local candidate `3.2-phase2-fba-historical-linking.2` retains the Founder-only historical FBA migration capability and keeps live apply disabled by default.
 
 ## Enforcement model
 

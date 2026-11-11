@@ -16,6 +16,11 @@ function testPinHash() {
 
 export function historicalFbaSheets() {
   const manifest = historicalManifest();
+  const sourceFcFormatting = {
+    "MOV-144": "PNQ-3",
+    "MOV-200": "HYD- 3",
+    "MOV-350": "DEL-5",
+  };
   const founder = {
     StaffID: "STF001",
     FullName: "Local Founder",
@@ -39,7 +44,7 @@ export function historicalFbaSheets() {
     ReferenceType: "Amazon Shipment",
     ReferenceNumber: entry.sourceReference,
     AmazonShipmentID: "",
-    AmazonDestinationFC: entry.destinationFC,
+    AmazonDestinationFC: sourceFcFormatting[entry.movementID] || entry.destinationFC,
     CarrierTrackingNumber: "",
     DocumentFile: "",
     Status: "Approved",
@@ -123,18 +128,35 @@ export function historicalFbaSheets() {
       "MovementLineID", "MovementID", "ProductID", "Quantity", "UnitCost",
       "BatchLot", "ExpiryDate", "Notes",
     ]),
-    FBA_Shipments: objectsToRows([{
-      ShipmentID: "SHIP-001",
-      AmazonReferenceID: "FBA15MRFBLH8",
-      ShipmentDateTime: "2026-10-23 00:00:00",
-      DestinationFC: "BOM5",
-      Status: "In Transit",
-      CarrierTrackingNumber: "",
-      ExpectedDeliveryDate: "",
-      CreatedByEmail: founder.Email,
-      ClosedAt: "",
-      Notes: "Existing verified control",
-    }], [
+    FBA_Shipments: objectsToRows([
+      {
+        ShipmentID: "SHIP-001",
+        AmazonReferenceID: "",
+        ShipmentDateTime: "2026-10-23 00:00:00",
+        DestinationFC: "BOM5",
+        Status: "In Transit",
+        CarrierTrackingNumber: "",
+        ExpectedDeliveryDate: "",
+        CreatedByEmail: founder.Email,
+        ClosedAt: "",
+        Notes: "Existing verified control with reference pending backfill",
+      },
+      {
+        ShipmentID: "SHIP-002", AmazonReferenceID: "FBA15MV3JWHZ",
+        ShipmentDateTime: "2026-11-10 00:00:00", DestinationFC: "DEL4", Status: "Working",
+        CarrierTrackingNumber: "", ExpectedDeliveryDate: "", CreatedByEmail: founder.Email, ClosedAt: "", Notes: "Current live shipment",
+      },
+      {
+        ShipmentID: "SHIP-003", AmazonReferenceID: "FBA15MVVJWB2",
+        ShipmentDateTime: "2026-11-10 00:00:00", DestinationFC: "MAA4", Status: "Working",
+        CarrierTrackingNumber: "", ExpectedDeliveryDate: "", CreatedByEmail: founder.Email, ClosedAt: "", Notes: "Current live shipment",
+      },
+      {
+        ShipmentID: "SHIP-004", AmazonReferenceID: "FBA15MW115K6",
+        ShipmentDateTime: "2026-11-10 00:00:00", DestinationFC: "CJB1", Status: "Working",
+        CarrierTrackingNumber: "", ExpectedDeliveryDate: "", CreatedByEmail: founder.Email, ClosedAt: "", Notes: "Current live shipment",
+      },
+    ], [
       "ShipmentID", "AmazonReferenceID", "ShipmentDateTime", "DestinationFC",
       "Status", "CarrierTrackingNumber", "ExpectedDeliveryDate",
       "CreatedByEmail", "ClosedAt", "Notes",
@@ -142,6 +164,9 @@ export function historicalFbaSheets() {
     FBA_Shipment_Lines: objectsToRows([
       { ShipmentLineID: "SHIP-001-L001", ShipmentID: "SHIP-001", ProductID: "PRD-P001", ExpectedQty: 98, Notes: "" },
       { ShipmentLineID: "SHIP-001-L002", ShipmentID: "SHIP-001", ProductID: "PRD-P005", ExpectedQty: 140, Notes: "" },
+      { ShipmentLineID: "SHIP-002-L001", ShipmentID: "SHIP-002", ProductID: "PRD-P001", ExpectedQty: 10, Notes: "Current live shipment" },
+      { ShipmentLineID: "SHIP-003-L001", ShipmentID: "SHIP-003", ProductID: "PRD-P002", ExpectedQty: 10, Notes: "Current live shipment" },
+      { ShipmentLineID: "SHIP-004-L001", ShipmentID: "SHIP-004", ProductID: "PRD-P003", ExpectedQty: 10, Notes: "Current live shipment" },
     ], ["ShipmentLineID", "ShipmentID", "ProductID", "ExpectedQty", "Notes"]),
     Feature_Settings: objectsToRows([], ["FeatureKey", "Enabled", "AllowedRoles"]),
     Change_Log: objectsToRows([], [
