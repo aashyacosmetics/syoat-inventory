@@ -154,16 +154,16 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 ### D-025 — Historical FBA linking is Founder-only, fixed-manifest and disabled by default
 
 - Date: 2026-11-03
-- Status: accepted for local preparation and rehearsal; production apply not authorized
+- Status: completed and closed in production on 2026-11-12; the temporary apply gate is removed
 - Decision: The reviewed historical FBA shipment-linking migration uses one fixed, fingerprinted manifest. Founder alone may run its read-only preflight or apply command. Apply is limited to five shipments per existing locked/idempotent request and additionally requires an exact confirmation plus a separately configured enable property.
-- Consequence: The migration can create shipment headers/lines and populate empty `Movement_Headers.AmazonShipmentID` links only. It preserves approved `ReferenceNumber`, movement status and movement lines; creates no receipt or adjustment; and must have zero stock delta. A successful local rehearsal or code deployment does not authorize setting the enable property or applying production data. That requires a separate owner decision, current backup and immediate reconciliation/recovery plan.
+- Consequence: The migration created only the reviewed shipment headers/lines and empty `Movement_Headers.AmazonShipmentID` links. It preserved approved `ReferenceNumber`, movement status and movement lines, created no receipt or adjustment, and had zero stock delta. The final dry run reports zero remaining mutations, the enable property is removed, and the fixed migration must not be rerun with new request IDs.
 
 ### D-026 — Historical shipment IDs use a reserved namespace and formatting-only FC differences normalize
 
 - Date: 2026-11-11
-- Status: accepted for local V2 preparation and rehearsal; production apply not authorized
+- Status: completed and verified in production on 2026-11-12
 - Decision: Historical Manifest V2 uses `HSHIP-001` through `HSHIP-023`, not normal live `SHIP-###` identifiers. FC comparison removes case, whitespace and punctuation differences. `SHIP-001.AmazonReferenceID` may be filled only when blank and only with reviewed value `FBA15MRFBLH8` while approved `MOV-379` remains linked to `SHIP-001`; a different non-empty value is a blocking conflict.
-- Consequence: the historical migration cannot collide with or advance normal live shipment numbering, and current `SHIP-002` to `SHIP-004` remain untouched. Formatting variants such as `PNQ-3`/`PNQ3`, `HYD- 3`/`HYD3` and `DEL-5`/`DEL5` do not create false conflicts. This metadata-only migration still has zero stock delta and does not reconcile Transit inventory.
+- Consequence: the completed historical migration did not collide with or advance normal live shipment numbering, and current `SHIP-002` to `SHIP-004` remained untouched. Formatting variants such as `PNQ-3`/`PNQ3`, `HYD- 3`/`HYD3` and `DEL-5`/`DEL5` did not create false conflicts. This metadata-only migration had zero stock delta and did not reconcile Transit inventory; Transit-to-FC receipt and balance reconciliation remain open work.
 
 ## Open decisions
 

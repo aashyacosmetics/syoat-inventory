@@ -1,6 +1,6 @@
 # Phase 2 Execution Plan — Inventory Correctness
 
-Status: in progress. Work Package 1 stabilization evidence is retained, and owner decision D-022 closes staging as a current gate. Phase 2 continues local-first with owner-controlled live verification and rollback/recovery safeguards.
+Status: in progress. Work Package 1 stabilization evidence is retained, and owner decision D-022 closes staging as a current gate. The bounded historical FBA shipment-linking migration is complete and closed, but it did not change stock or satisfy the remaining inventory-reconciliation exit criteria. Phase 2 continues local-first with owner-controlled live verification and rollback/recovery safeguards.
 
 ## Objective
 

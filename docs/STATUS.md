@@ -2,6 +2,22 @@
 
 Last updated: 2026-11-12
 
+### 2026-11-12 — Day closeout and pending-work handoff
+
+- Today's work is concluded. Historical FBA shipment linking is complete, its gate is disabled, and PR #7 merged the durable closeout record into protected `main` as `8a957dc`; the required repository check passed.
+- The previously stale original checkout at `Documents/Syoat ERP Software/syoat-inventory-audit` is synchronized exactly to `origin/main` at `8a957dc` with a clean working tree and `0/0` ahead/behind. Its former tracked and untracked contents remain recoverable as `stash@{0}: pre-sync-preservation-2026-11-12`. The matching runtime configuration, private local environment file and `node_modules` were retained.
+- Verification after synchronization: both active JavaScript files passed syntax checks, all 85 tests passed, the 52-action API catalogue is current, and the environment template remains structurally safe.
+- Production actions still required from today's work: none. Preserve the workbook backup and migration evidence. Do not recreate `SYOAT_HISTORICAL_FBA_LINKING_APPROVED_FINGERPRINT`, rerun the fixed migration, or pop the preservation stash into `main` without a reviewed comparison.
+- Phase 2 remains active. The historical shipment metadata repair did not change Transit, FBA or warehouse stock and does not replace the remaining canonical inventory reconciliation.
+- Pending work, in recommended order:
+  1. Work Package 2: take a fresh read-only inventory baseline; finish the data dictionary and exception register for products, locations, movements, counts, batches, expiry, costs and configuration.
+  2. Include current FBA dispatch, Transit, receipt, shipment-link, snapshot and FC evidence in that baseline. Explain every open Transit quantity before any stock correction; full Transit-to-specific-FC lifecycle work remains Phase 3.
+  3. Work Packages 3-4: enforce master-data/configuration contracts and prove one canonical movement-ledger calculation by product and location, with negative/orphan/duplicate and display-mismatch drill-downs.
+  4. Work Packages 5-8: finish movement lifecycle, maker-checker/reversal rules, counts and adjustments, returns/damage/samples/combos, and then the guided movement and inventory analytics experience.
+  5. Work Packages 9-10: remediate or explicitly accept the remaining non-FBA historical exceptions through reviewed dry runs, then complete employee verification, production handoff and the Phase 2 completion record.
+- Owner decisions still open before their dependent work: Sravanthi archive permanence; workbook timezone; default Record Movement opening workflow; legacy Drive-record retention and trailing-space folder rename; final PIN/session policy; non-founder capability refinements; document retention; and objective thresholds for leaving Sheets/Apps Script.
+- Next recommended task for the next session: begin Phase 2 Work Package 2 with read-only current-schema and movement-ledger diagnostics. Make no production correction during that diagnostic package.
+
 ### 2026-11-12 — Historical FBA shipment linking completed in production
 
 - Status: complete and closed. The reviewed Manifest V2 migration is fully applied, its temporary apply gate is disabled, and the final Founder dry run is `ready: true` with zero conflicts and zero remaining business mutations.
@@ -128,7 +144,7 @@ Last updated: 2026-11-12
 
 ## Active phase
 
-Phase 1 is complete and stored in `PHASE_1_COMPLETION.md`. Current records identify backend `3.2-phase2-access-policy.1` and frontend `20261028-fba-review.1`. Keerthana and Sai Ram's no-access task is closed under D-021; the four effective ERP users remain Lalith Kiran, Dharani, Pushpanjali and Zubedha.
+Phase 1 is complete and stored in `PHASE_1_COMPLETION.md`. Current records identify backend `3.2-phase2-fba-historical-linking.3` and frontend build `20261031-fba-reference.1`. Keerthana and Sai Ram's no-access task is closed under D-021; the four effective ERP users remain Lalith Kiran, Dharani, Pushpanjali and Zubedha.
 
 Backend `3.2-phase2-fba-review.1` and frontend `20261028-fba-review.1` replace generic stock-count buttons on imported Amazon variances with `Review FBA Variance`. Manager-level Amazon roles classify each difference and save an evidence note without changing stock. Backend guards also block direct generic approve/edit/reject calls. Analytics uses the newest report import batch and shows 444 units of absolute drift for the current 2026-10-26 upload instead of the stale 1,042-unit historical total. Owner screenshots confirm the live build and workflow.
 
@@ -152,8 +168,8 @@ Backend `3.1-phase2-wp1.6` retains request-scoped Sheet read reuse and adds a 30
 - Local audit checkout contains `index.html`, `syoat-app.js`, styling, images, and older redesign artifacts.
 - Current backend: bound Google Apps Script connected to the live workbook.
 - The original supplied 2,145-line backend source was saved locally as `Code.gs`; that local file now contains the reviewed Work Package 2–7 changes and is no longer a byte-for-byte copy of the attachment.
-- GitHub `main` is closed out at merge commit `02eaa2f`; PR #1 contains the audited source baseline and CI workflow commit `276dabe`.
-- The current recorded production backend is `3.2-phase2-access-policy.1`; the current live frontend is build `20261028-fba-review.1`. Source-control publication does not imply a new production deployment.
+- Protected GitHub `main` is current through PR #7 merge commit `8a957dc`; PR #1 remains the audited source/CI baseline and later protected PRs contain the reviewed Phase 2 FBA changes and closeout records.
+- The current recorded production backend is `3.2-phase2-fba-historical-linking.3`; the current live frontend is build `20261031-fba-reference.1`. Source-control publication does not imply a new production deployment.
 - Historical audit baseline: no package manifest, automated test suite, CI workflow, deployment guide, or staging configuration was present. The repository now contains the project foundation and required CI workflow.
 - Both committed JavaScript artifacts passed a basic Node syntax check during the audit.
 
@@ -201,16 +217,16 @@ This list records the original audit baseline for history. Later releases deploy
 
 ## Next recommended task
 
-Continue Phase 2 Work Package 2 as read-only inventory baseline/data-dictionary work. The clean-room source synchronization is complete; do not perform a production correction or historical rewrite without separate owner approval and the required safeguards.
+Continue Phase 2 Work Package 2 as read-only inventory baseline/data-dictionary work. Repository and original-checkout synchronization are complete; do not perform a production correction or historical rewrite without separate owner approval and the required safeguards.
 
 ## Production state
 
-- Source-control record: protected GitHub `main` includes the audited baseline through PR #1 merge commit `02eaa2f`; the preserved original working directory was not overwritten.
-- Apps Script record: backend `3.2-phase2-access-policy.1` is the latest recorded deployed access-policy version.
-- Frontend record: build `20261028-fba-review.1` is the latest recorded frontend build and the current local build marker.
+- Source-control record: protected GitHub `main` includes the historical FBA closeout through PR #7 merge commit `8a957dc`. The original checkout is synchronized to that commit; its former local contents remain recoverable in stash `pre-sync-preservation-2026-11-12`.
+- Apps Script record: backend `3.2-phase2-fba-historical-linking.3` is the latest recorded deployed version. The one-time historical apply gate is removed.
+- Frontend record: build `20261031-fba-reference.1` is the latest recorded live frontend build.
 - Live Google Sheet: PIN hashes/salts populated, readable PIN cells cleared, and 85 movement file references normalized.
 - Live Drive: the earlier migration audit reported 187 checked and private; the later read-only folder inventory observed at least 359 owner-only/not-shared files.
-- Deployment/health: the recorded owner-run backend deployment is healthy; merge-CI and Pages deployment succeeded, and a fresh live load confirmed frontend build `20261028-fba-review.1` with four authorized identities.
+- Deployment/health: the recorded owner-run backend deployment is healthy; PR #7 CI passed, the final migration dry run had zero mutations/conflicts, the Phase 2 health audit had zero recovery/unresolved errors, and the effective login allowlist remains four authorized identities.
 
 ## Handoff log
 
