@@ -1,6 +1,6 @@
 # Phase 2 Historical FBA Shipment Linking
 
-Status: Manifest V2 local implementation and complete sanitized rehearsal passed on 2026-11-11. Production apply remains disabled and is not authorized.
+Status: complete and closed. Manifest V2 was fully applied in production on 2026-11-12 through the owner-approved bounded recovery sequence. Final live preflight reports zero remaining mutations and zero conflicts, the temporary apply gate is disabled, and the final Phase 2 health audit is clean.
 
 ## Why V2 was required
 
@@ -94,7 +94,36 @@ The 2026-11-11 sanitized in-memory rehearsal produced:
 
 Repository-wide verification passed on 2026-11-11: 84/84 tests (the localhost isolation test passed when rerun with loopback permission), both active JavaScript syntax checks, the 52-action API catalogue and environment isolation. These checks must pass again immediately before any future owner-authorized deployment or live migration.
 
-## Production remains blocked
+## Production application result
+
+The owner merged protected PR #6 as `033e7ec`, deployed only the merged `Code.gs`, and confirmed live backend `3.2-phase2-fba-historical-linking.3`. The corrected Founder dry run accepted the five already committed Batch 1 records and reported 18 headers, 60 lines and 18 links remaining.
+
+The original failed request `hist-fba-v2-20261112-b01` was cleared only after that review and retried with the same payload and request ID. It completed with zero writes. The remaining approved batches produced:
+
+| Request | Sequences | Headers | Lines | Links | Remaining mutations | Stock delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `hist-fba-v2-20261112-b01` retry | 1-5 | 0 | 0 | 0 | 96 | 0 |
+| `hist-fba-v2-20261112-b02` | 6-10 | 5 | 21 | 5 | 65 | 0 |
+| `hist-fba-v2-20261112-b03` | 11-15 | 5 | 11 | 5 | 44 | 0 |
+| `hist-fba-v2-20261112-b04` | 16-20 | 5 | 23 | 5 | 11 | 0 |
+| `hist-fba-v2-20261112-b05` | 21-23 | 3 | 5 | 3 | 0 | 0 |
+
+Including the first five records committed before the original post-check failure, production now contains all 23 reviewed historical headers, 74 shipment lines and 23 movement links, plus the verified control-reference backfill. The final Founder dry run returned `ready: true`, `conflicts: []`, and zero headers, lines, links, control updates or business mutations remaining. It also confirmed zero receipts, adjustments, approved-reference edits, movement-status edits and stock delta.
+
+## Final production closeout
+
+The current workbook backup is `[BACKUP] Syoat Inventory Before Historical FBA Linking - 2026-11-10`. Preserve it with the migration evidence.
+
+The owner completed the closeout actions:
+
+1. removed Script Property `SYOAT_HISTORICAL_FBA_LINKING_APPROVED_FINGERPRINT`;
+2. confirmed the Founder dry run still had zero mutations and reported `applyEnabled: false`;
+3. ran `auditPhase2SystemHealth()` at 2026-11-12 18:43:26 IST and received `recoveryRequired: []` and `unresolvedErrors: []`;
+4. retained the exact request IDs and final outputs in this record.
+
+Historical shipment linking requires no further production action. Do not recreate the enable property or rerun the migration with new request IDs.
+
+## Historical pre-apply gate record
 
 The current workbook backup is `[BACKUP] Syoat Inventory Before Historical FBA Linking - 2026-11-10`. It was verified against the five migration-sensitive tabs before the V1 live dry run. The backup and this local rehearsal do not authorize a live apply.
 

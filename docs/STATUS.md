@@ -2,6 +2,21 @@
 
 Last updated: 2026-11-12
 
+### 2026-11-12 — Historical FBA shipment linking completed in production
+
+- Status: complete and closed. The reviewed Manifest V2 migration is fully applied, its temporary apply gate is disabled, and the final Founder dry run is `ready: true` with zero conflicts and zero remaining business mutations.
+- Protected release: PR #6 merged the date-normalization recovery into `main` as `033e7ec`; required CI passed. The owner deployed only the merged `Code.gs`, and live ping confirmed backend `3.2-phase2-fba-historical-linking.3`.
+- Batch 1 recovery: request `hist-fba-v2-20261112-b01` initially committed its first five records and then entered recovery because Sheet Date objects failed the old text comparison. After the `.3` deployment, the owner reviewed a clean dry run, cleared that original marker for retry and retried the same request ID. The retry completed with zero writes and no replacement request ID was invented.
+- Remaining batches: `hist-fba-v2-20261112-b02` through `hist-fba-v2-20261112-b05` completed in bounded groups. Their applied counts were `5/21/5`, `5/11/5`, `5/23/5` and `3/5/3` for headers/lines/links respectively.
+- Final production outcome: all 23 `HSHIP-...` headers, 74 shipment lines and 23 approved-movement links now match Manifest V2; the verified `SHIP-001.AmazonReferenceID` backfill is present. The three reviewed external-reference corrections remain shipment metadata only, and the three closed-shipment variances remain classifications only.
+- Inventory safety: every batch and the final post-check reported stock delta `0`; no FBA Receipt or Stock Adjustment was created; approved movement `ReferenceNumber`, status and movement lines were not changed.
+- Final evidence: `insertHeaders: 0`, `insertLines: 0`, `updateLinks: 0`, `updateControlReferences: 0`, `businessMutations: 0`, `ready: true`, `conflicts: []`.
+- Gate and health closeout: the owner removed Script Property `SYOAT_HISTORICAL_FBA_LINKING_APPROVED_FINGERPRINT`; the next Founder dry run reported `applyEnabled: false` and remained at zero mutations. `auditPhase2SystemHealth()` at 2026-11-12 18:43:26 IST returned `recoveryRequired: []` and `unresolvedErrors: []`.
+- Files changed in this closeout: `docs/STATUS.md`, `docs/CHANGELOG.md` and `docs/PHASE_2_FBA_HISTORICAL_LINKING.md`. Application code is unchanged from merge commit `033e7ec`.
+- Closeout verification: both active JavaScript files passed syntax checks; all 85 tests passed after the localhost-only staging-server test was rerun with loopback permission; the 52-action API catalogue and environment-template safety checks passed; `git diff --check` passed.
+- Production actions still required: none for historical shipment linking. Preserve the verified backup and this closeout evidence; do not recreate the enable property or rerun the migration with new request IDs.
+- Next recommended task: after the production gate and health closeout, synchronize the preserved stale original checkout by comparing and preserving its local modifications before replacing its tracked baseline. Do not blindly clean or reset it.
+
 ### 2026-11-12 — Historical FBA Batch 1 date-normalization recovery
 
 - Status: local recovery candidate ready for protected-source review; do not run another live historical batch yet.
