@@ -1,6 +1,16 @@
 # Current Status and Handoff
 
-Last updated: 2026-11-11
+Last updated: 2026-11-12
+
+### 2026-11-12 — Historical FBA Batch 1 date-normalization recovery
+
+- Status: local recovery candidate ready for protected-source review; do not run another live historical batch yet.
+- Live incident: owner-approved request `hist-fba-v2-20261112-b01` wrote its bounded first five historical shipment records/lines/links, then stopped at the post-check because Google Sheets returned `ShipmentDateTime` cells as Date objects while the verifier compared them with manifest text. The recovery marker must remain unresolved until the corrected backend is deployed and a fresh Founder dry run is clean.
+- Safety outcome: batches 2-5 were not attempted. The failure involved shipment metadata verification only; the migration design still creates no receipt or adjustment movement, edits no approved `ReferenceNumber` or movement status, and has zero stock delta.
+- Local fix: backend candidate `3.2-phase2-fba-historical-linking.3` normalizes Sheet Date objects in the workbook timezone before comparing the fixed manifest timestamp. The comparison remains exact to the second and still fails closed for a genuinely different date.
+- Verification: the new regression reproduces the committed first batch with five real Date objects and confirms a clean plan with exactly 18 headers, 60 lines, 18 links, zero control backfills, 96 remaining business mutations and zero stock delta. All 85 tests passed after the localhost-only test was rerun with loopback permission; syntax, the 52-action API catalogue and environment-template safety checks passed.
+- Required production sequence: protected PR and CI; owner deploys only the merged `Code.gs`; confirm backend `.3`; run a read-only Founder dry run; compare the five committed first-batch records; resolve `hist-fba-v2-20261112-b01` for retry with reviewed notes; retry that same request ID so it records a zero-write completion; then continue later batches one at a time with verification after each. Do not invent a replacement request ID.
+- Local workspace: the preserved original checkout remains untouched. This fix is isolated in the managed `fba-linking-date-recovery` worktree. Synchronizing the stale original checkout is a separate controlled task after its current modified/untracked contents are preserved and compared.
 
 ### 2026-11-11 — Historical FBA Manifest V2 prepared and rehearsed locally
 

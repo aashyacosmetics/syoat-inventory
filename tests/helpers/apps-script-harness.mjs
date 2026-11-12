@@ -116,6 +116,10 @@ class MemorySpreadsheet {
   getSheetByName(name) {
     return this.sheets.get(name) || null;
   }
+
+  getSpreadsheetTimeZone() {
+    return "America/Los_Angeles";
+  }
 }
 
 function contentService() {
@@ -181,6 +185,20 @@ export function createAppsScriptHarness(sheetValues = {}) {
         return "00000000-0000-4000-8000-" + String(uuidCounter).padStart(12, "0");
       },
       computeDigest: (algorithm, value) => [...crypto.createHash("sha256").update(String(value), "utf8").digest()],
+      formatDate: (value, timeZone, pattern) => {
+        const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+          timeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hourCycle: "h23",
+        }).formatToParts(value).filter(part => part.type !== "literal").map(part => [part.type, part.value]));
+        const date = `${parts.year}-${parts.month}-${parts.day}`;
+        return pattern === "yyyy-MM-dd" ? date : `${date} ${parts.hour}:${parts.minute}:${parts.second}`;
+      },
       base64EncodeWebSafe: bytes => Buffer.from(bytes).toString("base64url"),
       base64Encode: bytes => Buffer.from(bytes).toString("base64"),
       base64Decode: value => Buffer.from(value, "base64"),
