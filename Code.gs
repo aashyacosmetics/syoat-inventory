@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-historical-linking.2",
+  VERSION:               "3.2-phase2-fba-historical-linking.3",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -2988,6 +2988,19 @@ function normalizeFbaDestinationFC(value) {
   return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+function normalizeFbaShipmentDateTime(value) {
+  if (value && typeof value.getTime === "function" && !isNaN(value.getTime())) {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const timeZone = spreadsheet && typeof spreadsheet.getSpreadsheetTimeZone === "function"
+      ? spreadsheet.getSpreadsheetTimeZone()
+      : Session.getScriptTimeZone();
+    return Utilities.formatDate(value, timeZone || "Asia/Kolkata", "yyyy-MM-dd HH:mm:ss");
+  }
+  const text = String(value || "").trim();
+  const direct = text.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+  return direct ? direct[1] + " " + direct[2] + ":" + direct[3] + ":" + (direct[4] || "00") : text;
+}
+
 // Reviewed historical shipment-linking manifest. This is intentionally fixed
 // source data rather than an arbitrary browser payload. It creates shipment
 // metadata and movement links only; it never creates a receipt, adjustment or
@@ -3147,7 +3160,9 @@ function buildHistoricalFbaLinkingPlan(includeInternal) {
     if (byReference && byReference.ShipmentID !== entry.shipmentID) entryConflicts.push("Amazon reference is already used by another shipment ID.");
     const existingShipment = byID || byReference || null;
     if (existingShipment) {
-      if (String(existingShipment.ShipmentDateTime || "") !== entry.shipmentDateTime) entryConflicts.push("Existing shipment date differs.");
+      if (normalizeFbaShipmentDateTime(existingShipment.ShipmentDateTime) !== normalizeFbaShipmentDateTime(entry.shipmentDateTime)) {
+        entryConflicts.push("Existing shipment date differs.");
+      }
       if (normalizeFbaDestinationFC(existingShipment.DestinationFC) !== normalizeFbaDestinationFC(entry.destinationFC)) entryConflicts.push("Existing shipment destination differs.");
       if (String(existingShipment.Status || "") !== "In Transit") entryConflicts.push("Existing shipment status is not In Transit.");
     }

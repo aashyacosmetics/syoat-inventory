@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAppsScriptHarness } from "./helpers/apps-script-harness.mjs";
 import {
+  historicalManifest,
   historicalFbaSheets,
   loginHistoricalCoFounder,
   loginHistoricalFounder,
@@ -179,4 +180,52 @@ test("historical FBA preflight stops on a changed approved movement", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.ready, false);
   assert.match(response.data.conflicts.join(" | "), /MOV-125.*ReferenceNumber/i);
+});
+
+test("historical FBA preflight accepts committed shipment dates returned as Sheet Date objects", () => {
+  const sheets = historicalFbaSheets();
+  const manifest = historicalManifest().slice(0, 5);
+  const shipmentHeaders = sheets.FBA_Shipments[0];
+  const lineHeaders = sheets.FBA_Shipment_Lines[0];
+  const movementHeaders = sheets.Movement_Headers[0];
+  const movementIDColumn = movementHeaders.indexOf("MovementID");
+  const movementLinkColumn = movementHeaders.indexOf("AmazonShipmentID");
+  const control = sheets.FBA_Shipments.find(row => row[shipmentHeaders.indexOf("ShipmentID")] === "SHIP-001");
+  control[shipmentHeaders.indexOf("AmazonReferenceID")] = "FBA15MRFBLH8";
+
+  manifest.forEach(entry => {
+    const [date] = entry.shipmentDateTime.split(" ");
+    sheets.FBA_Shipments.push(shipmentHeaders.map(header => ({
+      ShipmentID: entry.shipmentID,
+      AmazonReferenceID: entry.amazonReferenceID,
+      ShipmentDateTime: new Date(date + "T07:00:00.000Z"),
+      DestinationFC: entry.destinationFC,
+      Status: "In Transit",
+      CreatedByEmail: "founder@example.invalid",
+      Notes: "Committed historical batch fixture",
+    })[header] ?? ""));
+    entry.lines.forEach((line, index) => sheets.FBA_Shipment_Lines.push(lineHeaders.map(header => ({
+      ShipmentLineID: entry.shipmentID + "-L" + String(index + 1).padStart(3, "0"),
+      ShipmentID: entry.shipmentID,
+      ProductID: line[0],
+      ExpectedQty: line[1],
+      Notes: "Committed historical batch fixture",
+    })[header] ?? "")));
+    const movement = sheets.Movement_Headers.find(row => row[movementIDColumn] === entry.movementID);
+    movement[movementLinkColumn] = entry.shipmentID;
+  });
+
+  const harness = createAppsScriptHarness(sheets);
+  const founder = loginHistoricalFounder(harness);
+  const response = dryRun(harness, founder.sessionToken);
+
+  assert.equal(response.success, true, JSON.stringify(response));
+  assert.equal(response.data.ready, true, JSON.stringify(response.data.conflicts));
+  assert.equal(response.data.conflicts.some(value => /shipment date differs/i.test(value)), false);
+  assert.equal(response.data.summary.insertHeaders, 18);
+  assert.equal(response.data.summary.insertLines, 60);
+  assert.equal(response.data.summary.updateLinks, 18);
+  assert.equal(response.data.summary.updateControlReferences, 0);
+  assert.equal(response.data.summary.businessMutations, 96);
+  assert.equal(response.data.summary.stockDelta, 0);
 });
