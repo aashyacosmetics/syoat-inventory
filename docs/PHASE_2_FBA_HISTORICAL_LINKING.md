@@ -44,7 +44,7 @@ The three closed-shipment differences remain classifications only:
 
 | Movement | Expected | Located | Difference | Treatment |
 | --- | ---: | ---: | ---: | --- |
-| `MOV-088` | 62 | 24 | -38 | Receipt shortage; no automatic correction |
+| `MOV-088` | 62 | 24 | -38 | Aggregate historical variance only. Later product-level evidence splits this into legacy Avee -40 and Syoat Hair Care Combo +2; D-028 blocks treating the Avee line as active Syoat stock. No automatic correction. |
 | `MOV-102` | 165 | 205 | +40 | Receipt excess; no automatic correction |
 | `MOV-108` | 235 | 236 | +1 | Receipt excess; no automatic correction |
 

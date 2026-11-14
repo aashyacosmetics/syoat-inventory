@@ -1,6 +1,174 @@
 # Current Status and Handoff
 
-Last updated: 2026-11-12
+Last updated: 2026-11-13
+
+### 2026-11-13 — Optional manual FBA freebie workflow implemented locally
+
+- Status: implementation complete and locally verified; owner deployment/publication remains pending. Historical correction remains separate and blocked.
+- Goal: implement D-031 without allowing Wooden Combs, Bath Loofahs or future freebies to become sellable FBA transit stock.
+- Frontend: FBA Dispatch now has an optional **Manual Freebies** section. Warehouse staff choose only active `ItemType=Freebie` products and enter the whole-number quantity physically packed; leaving it empty records zero. Freebie products are excluded from the sellable dispatch-product picker.
+- Backend: `createMovement` validates freebie type/status, positive whole-number quantity, duplicates and current `MAIN_WH` availability. One idempotent submission returns the normal FBA Dispatch draft plus, when needed, a linked `Samples` draft from `MAIN_WH` to `SAMPLES`. The freebie draft retains the ERP shipment ID, Amazon reference and linked dispatch ID, and cannot be approved until its FBA Dispatch is Approved.
+- Stock boundary: only the Approved sellable dispatch enters `FBA_TRANSIT`; only the separately Approved freebie draft consumes warehouse promotional/sample stock. No freebie enters an FBA Receipt or Amazon FC stock, and no quantity is inferred from a product, BOM, shipment plan or ratio.
+- Historical boundary: FBA-009's existing 720 units (400 Wooden Combs and 320 Bath Loofahs) remain unchanged in Transit pending a separately reviewed non-posting correction. This implementation does not reinterpret or rewrite historical Approved records.
+- Files changed for this implementation: `Code.gs`, `syoat-app.js`, `index.html`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `docs/DECISIONS.md`, `docs/ROLE_CAPABILITIES.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks and results: active backend/frontend syntax passed; 86 non-socket tests plus 2 localhost staging tests passed (88/88 total); the 52-action API catalogue and environment-template safety check passed; `git diff --check` passed. New executable coverage proves paired-draft creation, dispatch-first approval, correct warehouse/transit effects, exact retry replay, and rejection of sellable, duplicate and unrelated freebie input.
+- Production actions still required: owner reviews the diff, publishes backend `3.2-phase2-fba-freebies.1`, publishes frontend `20261113-fba-freebies.1`, confirms active freebie product rows use exact `ItemType=Freebie`, then performs one no-freebie and one linked-freebie live smoke test without approving test drafts unless they represent real stock activity.
+- Risks or blockers: a linked submission is recovery-controlled but Google Sheets is not transactional; any interrupted partial write must be reviewed through the existing recovery tools before retry. The historical 720-unit correction still requires a backup, reviewed dry run, owner approval and immediate reconciliation.
+- Next recommended action: owner review and controlled deployment of this local candidate, followed by the non-posting historical freebie correction design.
+
+### 2026-11-13 — Non-posting FBA receipt and variance manifest prepared
+
+- Status: complete for owner review; no receipt, shortage, excess or stock movement was posted.
+- Goal: convert the completed shipment/product evidence into an exact control manifest while keeping the 140 Receiving lip balms open and excluding all Avee products from Syoat inventory.
+- Result: `FBA-RECEIPT-RECON-2026-11-13-V1` explains all 4,516 Transit units as 3,616 matched Syoat receipt candidates, 140 open lip balms, 40 units in the legacy Avee-to-Syoat mapping exception and 720 unresolved freebies. Amazon's 3,659 located Syoat units reconcile as 3,616 matched plus 43 excess; there are zero final Syoat shortages in the reviewed evidence.
+- Avee boundary: D-028 is reconfirmed. Avee products and quantities remain historical/external evidence only and cannot be created, mapped, received, shorted, excessed, adjusted, valued or netted in Syoat inventory.
+- Safety: apply authorization is false, proposed movements are zero and stock delta is zero. Canonical receipt posting remains blocked because the current 1,701-unit FBA balance is already formed by 29 report-driven snapshot adjustments; posting receipts now would double count stock.
+- Files changed: added `docs/PHASE_2_FBA_RECEIPT_MANIFEST.md`; updated `README.md`, `docs/DECISIONS.md`, `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks and results: all 24 shipment rows and 12 product rows reconcile exactly to 3,616 matched, 140 open, 43 excess, 40 Avee-excluded, 720 freebie-excluded and zero posting units. Active JavaScript syntax passed; 84 non-socket tests passed in the normal sandbox and the localhost-only test passed 2/2 with loopback permission, giving 85/85 total; the 52-action API catalogue, environment-template safety, Markdown links and `git diff --check` passed.
+- Live/production changes: none. No Sheet, movement, shipment, report, Apps Script, frontend, GitHub remote or stock value changed.
+- Risks or blockers: D-031 now defines the manual freebie rule, but FBA-009's historical correction and FBA-011's legacy mapping remain unresolved; the 29 snapshot adjustments require a same-date, owner-reviewed replacement design before canonical receipts can post.
+- Next recommended action: implement the optional manual-freebie workflow and prepare its non-posting historical correction, then prepare a snapshot-replacement design that proves per-product before/after balances without touching the 140 open lip balms or any Avee quantity.
+
+### 2026-11-13 — Historical Approved Stock Adjustments classified read-only
+
+- Status: all 40 Approved Stock Adjustment movements classified; no historical row or stock value changed.
+- Result: 11 are count-generated corrections with exact count/movement product, direction and quantity links. They total 53 absolute units and net -37. Five have specific supporting context, while six (`CNT-004`, `CNT-013`, `CNT-027`–`CNT-030`) are mechanically valid but weakly explained and are recorded as INV-004.
+- FBA result: 29 are legacy report-driven snapshot synchronizations across six report dates. They add 1,994 units and remove 293, net +1,701 with 2,287 absolute drift. That net is the entire current ERP `AMAZON_FBA` balance; the retained 2026-07-26, 2026-08-02 and 2026-10-21 snapshot totals exactly match the cumulative adjustment balance of 671, 871 and 1,701.
+- Safety conclusion: do not reverse, net or relabel these movements. Preserve the current FBA baseline while prohibiting new report-driven self-adjustments. Replacement requires dispatch/receipt/sale/removal/damage evidence, same-date reconciliation and reviewed idempotent correction.
+- Files changed: `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks and results: live metadata was re-read; exact bounded reads covered the 40 headers, 40 linked lines, 11 linked counts, product names and retained FBA snapshots. All classifications reconcile to the recorded 2,340 absolute Stock Adjustment units; `git diff --check` passed.
+- Live/production changes: none. No movement, count, snapshot, Sheet row, stock quantity, Apps Script or frontend state changed.
+- Next recommended action: prepare a non-posting FBA receipt/shortage/excess manifest from the completed shipment product evidence, keeping the 140 Receiving lip balms open and the Avee mismatch separate from Syoat inventory.
+
+### 2026-11-13 — Inventory field dictionary completed read-only
+
+- Status: Phase 2 Work Package 2 field-contract deliverable complete; no schema or production data changed.
+- Goal: document the exact live inventory fields, data types, allowed blank behavior, source-of-truth boundaries, status vocabulary and stock effects before designing any correction.
+- Result: added `docs/INVENTORY_DATA_DICTIONARY.md` covering Products, Locations, Combo BOM, Movement headers/lines, Stock Counts, FBA Shipments/lines, FBA ledger snapshots and inventory configuration. It separates current historical tolerance from the stricter contract for new entries.
+- Stock boundary: only Approved non-Reversal movements directly participate in the current quantity ledger. Counts, shipment states, plans, BOM rows and FBA snapshots are evidence/workflow records and never silently change stock.
+- Contract drift recorded: the live `Products` header contains `MPN ` with a trailing space; workbook timezone remains inconsistent with India operations; the live `Lists` tab still contains `Submitted` but omits the currently used `Rejected`; batch/expiry enforcement date, UnitCost exception policy and a non-stock-changing FBA evidence closure state remain unresolved.
+- Files changed: added `docs/INVENTORY_DATA_DICTIONARY.md`; updated `README.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks and results: exact live headers and the bounded `Lists!A1:C30` range were read without writes; dictionary fields were compared with active backend/test contracts; Markdown links and `git diff --check` passed.
+- Live/production changes: none. No Sheet row/header/configuration, Apps Script, website, GitHub remote or stock value changed.
+- Risks or blockers: the recorded drift must be handled only through reviewed schema/configuration work. Historical blanks and stale list values are not permission for bulk repair.
+- Next recommended action: classify the 40 historical Approved Stock Adjustment movements read-only and separate legitimate traced adjustments from opening/reconciliation/legacy exceptions.
+
+### 2026-11-13 — Marketplace inventory reconciliation added to Phase 2 scope
+
+- Status: decision and plan recorded; implementation has not started.
+- Goal: make warehouse-fulfilled FirstCry, Flipkart, Myntra, JioMart, website/Shopify and future marketplace quantities reconcile through one canonical inventory lifecycle rather than platform-specific stock rules.
+- Roadmap item: Phase 2 inventory correctness, after the Work Package 2 read-only baseline and Work Package 4 canonical ledger foundation.
+- Recorded design: reservation -> warehouse dispatch to channel transit -> delivery completion, pre-dispatch cancellation release, or return to inspection and reviewed disposition. Report upload is the first reconciliation path; platform APIs follow only where access and behavior are documented. FirstCry is the first planned implementation.
+- Scope boundary: operational order/shipment references, quantities, fulfilment, dispatch, cancellation, returns and exceptions only. Broader marketplace activities remain Phase 4; revenue, settlements, fees, collections, taxation and accounting remain excluded.
+- Files changed: `docs/ROADMAP.md`, `docs/PHASE_2_PLAN.md`, `docs/DECISIONS.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks and results: the Phase 2 plan, roadmap, decision record, integration boundary, status and changelog use the same scope/order; `git diff --check` passed.
+- Live/production changes: none. No application code, Sheet data, Apps Script, GitHub or production configuration was changed.
+- Risks or blockers: platform report/API availability and exact status vocabulary must be discovered read-only; unknown statuses and unmapped SKUs must fail visibly. The current inventory baseline remains the immediate next task.
+- Next recommended action: complete Phase 2 Work Package 2 read-only inventory baseline, including a channel-by-channel inventory-evidence inventory, before designing or implementing the shared marketplace bridge.
+
+### 2026-11-13 — Work Package 2 live inventory baseline first pass
+
+- Status: read-only schema/ledger baseline captured; field dictionary, pending-count classification, Transit evidence reconciliation and sanitized analyzer remain in progress.
+- Goal: replace historical audit assumptions with current live structure and movement-derived inventory totals without changing production.
+- Roadmap item: Phase 2 Work Package 2.
+- Evidence: 24 visible tabs; 14 products, 11 locations, 434 movement headers, 753 lines, 70 counts, 27 FBA shipments, 87 shipment lines and 233 FBA snapshot rows. No duplicate primary/business identifier was found in the checked domains.
+- Ledger replay: `MAIN_WH` 16,384; `AMAZON_FBA` 1,701; `FBA_TRANSIT` 4,516; `RETURNS` 4; zero negative balances. These totals match the current ERP display.
+- Key exceptions: Transit remains uncleared by receipts; 24 counts are Pending; two Rejected historical lines reference absent products but have no stock effect; 611 Approved lines conflict with current batch/expiry flags; 262 Approved lines lack positive UnitCost.
+- Marketplace evidence: Sales Order tables are empty while Approved movements include 187 website, 20 Flipkart and 42 FirstCry dispatches, confirming the need for D-027 after the canonical-ledger foundation.
+- Files changed: added `docs/PHASE_2_INVENTORY_BASELINE.md`; updated `docs/INVENTORY_EXCEPTION_REGISTER.md`, `README.md`, `docs/STATUS.md` and `docs/CHANGELOG.md` in addition to the D-027 planning records.
+- Checks and results: bounded connector reads stayed below the 50,000-cell safety cap and no live write was called. Both active JavaScript syntax checks passed; 84 non-socket tests passed in the normal sandbox and the localhost-only test passed 2/2 with loopback permission, giving 85/85 total; the 52-action API catalogue and environment-template safety checks passed; `git diff --check` passed.
+- Live/production changes: none. The Google Sheet was read only; no record was approved, rejected, edited, linked or adjusted.
+- Risks or blockers: current product tracking flags do not show when enforcement began; historical shipment expected quantity cannot be compared directly with all-time dispatch without shipment-level date/status analysis; platform status/report availability is not yet documented.
+- Next recommended action: finish the Work Package 2 field dictionary and classify the 24 Pending counts and FBA Transit evidence read-only, then add the sanitized analyzer fixture before starting Work Packages 3-4.
+
+### 2026-11-13 — Pending stock-count queue classified read-only
+
+- Status: complete for Work Package 2 diagnosis; no count state or stock changed.
+- Goal: determine whether the 24 Pending rows are current physical counts, stale counts or imported FBA evidence before any remediation design.
+- Result: all 24 are FBA Report Variance Review rows at `AMAZON_FBA`, all retain a saved SystemQty equal to the current movement ledger, and none is a routine warehouse cycle count. Four 2026-10-26 rows already have receipt classifications; 20 rows remain unclassified.
+- Report batches: 2026-10-26 has 8 rows/absolute drift 444; 2026-11-01 has 8/403; 2026-11-08 has 8/432. The first two reports are older evidence; the latest eight (`CNT-063`–`CNT-070`) are the only current report evidence for the next reconciliation step.
+- Safety conclusion: do not sum the three snapshots, do not use generic count approval/rejection, and do not create an adjustment from these rows. Older evidence needs an explicit superseded/resolved state; latest rows need detailed FBA evidence classification.
+- Files changed: `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks and results: metadata was re-read first; bounded reads covered only the five required tabs and remained below the connector safety cap. Current ledger quantities were recomputed using the live backend movement-effect rules; `git diff --check` passed.
+- Live/production changes: none. No count was approved, rejected, edited or linked and no stock movement was created.
+- Risks or blockers: the current model has classification but no explicit non-stock-changing closure for superseded FBA report evidence. The latest report still requires shipment/receipt/removal/loss evidence.
+- Next recommended action: reconcile the 4,516-unit FBA Transit balance against the 24 linked Approved dispatches, shipment plans and available Amazon receipt/status evidence, read-only.
+
+### 2026-11-13 — FBA Transit shipment-line reconciliation
+
+- Status: linked ERP dispatch/plan comparison complete read-only; current Seller Central receipt/status evidence remains required.
+- Goal: explain the 4,516 movement-derived Transit units before proposing any FBA Receipt or compensating movement.
+- Result: 24 Approved FBA dispatches are linked. Fifteen match their shipment lines exactly. Linked plans contain 3,796 units; nine historical movements contain another 720 units absent from Amazon shipment lines.
+- Freebie exception: all 720 unmatched units are freebies—400 Wooden Combs and 320 Bath Loofahs—on `HSHIP-007`, `HSHIP-009`–`HSHIP-011` and `HSHIP-016`–`HSHIP-020`. This likely reflects warehouse packing/consumption rather than independently received FBA inventory, but the owner must confirm the real process before remediation.
+- Initial Sheet state: `SHIP-002`–`SHIP-004` contained 571 planned units, showed Working and had no Approved dispatch, so they did not contribute to ERP Transit. The later Amazon export supersedes the external-status assumption and shows all three In transit; FBA-010 records the resulting current-process exception.
+- Historical receipt evidence: the preserved three closed-shipment variances remain -38, +40 and +1 classifications only. All historical headers remain In Transit because no approved receipt exists.
+- Files changed: `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks and results: product-level dispatch and shipment-plan quantities were recomputed from bounded live ranges; 15 exact matches and 9 freebie-only differences sum exactly to 4,516 = 3,796 + 720; `git diff --check` passed.
+- Live/production changes: none. No shipment status, movement line, receipt, adjustment or inventory quantity changed.
+- Risks or blockers: current Amazon received quantities/statuses for all 24 linked shipments are not present as authoritative receipt events in the ERP. Freebie stock treatment requires an owner-confirmed packing rule.
+- Next recommended action: obtain/read current Seller Central shipment status and received quantities for the 24 linked references, then produce a receipt/shortage/excess/freebie exception manifest without applying it.
+
+### 2026-11-13 — Seller Central inventory cross-check
+
+- Status: current inventory summary compared read-only; shipment-level receipt evidence remains unavailable through the connected interface.
+- Result: all 12 active sellable Syoat ASINs matched. Seller Central reported 1,592 fulfillable, 378 inbound Working, 761 inbound Shipped and 140 inbound Receiving units.
+- Comparison boundary: ERP `AMAZON_FBA` is 1,701, or 109 units above the later live fulfillable view. This is a date/scope gap, not an inventory correction; a same-date controlled report is required before classification.
+- Connector limitation: the read-only Seller interface does not expose shipment-level expected/received quantities or status history, so it cannot close the 24 historical Transit records.
+- Files changed: `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Live/production changes: none. Amazon and the Google Sheet were read only; no quantity, shipment, movement or configuration changed.
+- Follow-up: the requested shipment export was supplied and reconciled in the next status section; product-level Contents evidence is now the remaining receipt-data requirement.
+
+### 2026-11-13 — Current FBA shipment export reconciled
+
+- Status: list-level shipment evidence is complete read-only; product-level evidence is required only for four non-zero variances.
+- Coverage: the export contains 250 Amazon shipments through 2026-11-12. All 24 ERP-linked references were found, with no expected-quantity mismatch: ERP and Amazon both total 3,796 expected units.
+- Receipt result: Amazon shows 3,659 located units. Twenty shipments are exact. The four variances are -140 on the Receiving control shipment and the preserved Closed differences -38, +40 and +1. The 22 Closed shipments total 3,460 expected / 3,463 located; the two Receiving shipments total 336 / 196.
+- Current-process exception: ERP `SHIP-002`–`SHIP-004` remain Working while Amazon shows an In transit workflow event for 571 units, with no Approved movement reference. Amazon also has one additional 200-unit In-transit shipment and three Working plans totalling 388 units absent from ERP shipments and movements.
+- Safety conclusion: do not create a net +3 adjustment, do not treat a Receiving shortage as final and do not infer dispatch from Amazon status alone. Obtain product-level Contents and physical pickup/AWB evidence first.
+- Files changed: `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Live/production changes: none. The CSV, Amazon account and Google Sheet were read only.
+- Next recommended action: capture current Contents evidence for the four non-zero linked shipments, then verify warehouse dispatch/AWB evidence for the 571 units whose Amazon status advanced without an ERP dispatch.
+
+### 2026-11-13 — Product-level FBA variance evidence classified
+
+- Status: product-level Contents evidence is complete for all four non-zero linked shipments; no receipt or adjustment was created.
+- Receiving control shipment: Syoat shampoo is 98 expected / 98 located. Syoat lip balm is 140 / 0 and remains open while the shipment is Receiving.
+- Closed variances: the historical -38 splits into legacy Avee shampoo -40 and Syoat Hair Care Combo +2; the +40 belongs entirely to Syoat shampoo; the +1 belongs entirely to the Syoat shampoo pack of 2.
+- Legacy mapping exception: `MOV-088-L001` records 40 active Syoat shampoo units while Amazon identifies that expected line as Avee. D-028 records the owner's existing Avee-removal boundary: Avee evidence cannot create a Syoat receipt, shortage or adjustment.
+- Files changed: `docs/DECISIONS.md`, `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/PHASE_2_FBA_HISTORICAL_LINKING.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Live/production changes: none. The screenshots and Sheet were reviewed read-only.
+- Follow-up: Amazon event screenshots were obtained for ERP `SHIP-002`–`SHIP-004`, but they contain no pickup/AWB evidence. Physical handoff remains an owner/warehouse confirmation; the later status section records the safe interpretation.
+
+### 2026-11-13 — Carrier evidence received for variance shipments
+
+- Status: courier handoff is evidenced for the four quantity-variance shipments; evidence for the three current unposted ERP plans is still required.
+- Result: all four variance shipments show courier pickup events. The three historical variances later became Closed. The current control shipment remains Receiving and its three-box timeline contains delayed and/or return-routing events, so the 140 unlocated lip balms remain open rather than final shortage.
+- Safety conclusion: carrier pickup proves warehouse handoff but not Amazon product acceptance. It cannot by itself create an FBA Receipt or adjustment.
+- Evidence gap at this step: the supplied carrier screenshots covered only the variance shipments. Later event screenshots for `SHIP-002` / `FBA15MV3JWHZ`, `SHIP-003` / `FBA15MVVJWB2`, and `SHIP-004` / `FBA15MW115K6` showed no carrier/pickup proof, so the 571-unit dispatch remains unverified.
+- Files changed: `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Live/production changes: none. Screenshots were reviewed read-only.
+- Follow-up: Amazon shipment-event screenshots for the three current references were supplied but contain no carrier, tracking or pickup evidence. Warehouse handoff still requires explicit confirmation.
+
+### 2026-11-13 — Current 571-unit pickup schedule confirmed; no dispatch is due yet
+
+- Status: owner confirmed the goods have not been handed to the courier. ERP `Working` and the absence of dispatch movements are correct.
+- Planned pickup: `FBA15MV3JWHZ` on 2026-11-19; `FBA15MVVJWB2` and `FBA15MW115K6` on 2026-11-28.
+- Control recorded: D-029 requires stock to move from `MAIN_WH` to `FBA_TRANSIT` only at actual physical handover, through one linked FBA Dispatch under normal approval controls. Amazon `In transit`, a booking or the planned date alone has no ERP stock effect.
+- Files changed: `docs/DECISIONS.md`, `docs/PHASE_2_FBA_ALIGNMENT.md`, `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks: documentation consistency and `git diff --check`.
+- Live/production changes: none. No movement, plan status, stock quantity, Sheet row or deployment was changed.
+- Next action: on each actual pickup date, the Warehouse Operator selects the existing open shipment, verifies the Amazon reference, destination, quantities and available AWB/pickup evidence, then records the linked FBA Dispatch. If pickup is delayed, keep the plan Working and update the schedule only; do not post early.
+- Amazon-only disposition: under D-030, staff will create only `FBA15MW9M3TG` (HYD8, 200 units) as an ERP shipment plan on 2026-11-14. `FBA15MV7CDHJ`, `FBA15MRCH332` and `FBA15MP17F6M` are owner-excluded and require no ERP entry or stock movement unless explicitly reactivated.
+- Safety boundary for tomorrow's entry: creating the `FBA15MW9M3TG` shipment plan must not create or imply a dispatch. Staff records the linked FBA Dispatch only at actual physical courier handover under D-029.
+
+### 2026-11-13 — Current 571-unit dispatch evidence review
+
+- Status: Amazon workflow status confirmed; physical warehouse dispatch is not confirmed.
+- Result: all three plans show Created followed by In transit about 10–11 minutes later. Each remains at zero located/Prime-eligible units and has no Delivered, Checked In, Receiving, carrier, tracking or pickup event in the supplied evidence.
+- Interpretation: Amazon In transit can be a workflow state and is not proof that stock left the warehouse. ERP Working/no-dispatch is correct if the goods remain at the warehouse; an Approved ERP dispatch is missing only if physical handoff occurred.
+- Files changed: `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Live/production changes: none. Screenshots were reviewed read-only.
+- Resolution: superseded by the owner's confirmation above. The goods were not handed over; the plans remain Working until their scheduled physical pickups.
 
 ### 2026-11-12 — Day closeout and pending-work handoff
 

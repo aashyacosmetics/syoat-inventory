@@ -53,6 +53,7 @@ FBA shipment plan
 Rules:
 
 - Every new FBA Dispatch must reference one open shipment.
+- An FBA Dispatch is recorded only when the packed goods are physically handed to the courier. Amazon workflow status, a planned pickup or a booking does not move ERP stock; a changed pickup date has no stock effect.
 - A shipment cannot be marked Received merely by changing its status; accepted quantity must be supported by one or more approved FBA Receipt movements.
 - Receipt quantity cannot exceed the linked approved dispatch quantity for the product.
 - Partial receipt remains in transit. Short, lost, damaged or excess quantity is an explicit exception with reason and evidence.

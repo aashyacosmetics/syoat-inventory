@@ -73,6 +73,7 @@ These feature settings are an additional gate. They do not replace the server-si
 - Purchase-order creation is Founder/Co-Founder/Warehouse Manager only.
 - FBA shipment unlink is Founder/Co-Founder only.
 - Warehouse and Warehouse Operator may read the minimal open-FBA-shipment picker only while recording an authorized FBA Dispatch. This does not grant `amazon.shipments.view` or the Amazon module.
+- During an authorized FBA Dispatch, the same operator may optionally enter active `ItemType=Freebie` products and actual whole-number packed quantities. The backend creates a separate linked `Samples` draft; this does not grant approval rights and never places the freebie in FBA Transit. Approvers must approve the FBA Dispatch before its linked freebie draft.
 - Support-ticket management is Founder/Co-Founder/Operations Manager only.
 - Amazon management is Founder/Co-Founder/Admin/Manager/Warehouse Manager only.
 - Imported FBA report variances use the dedicated `amazon.reconciliation.review` capability for Founder/Co-Founder/Admin/Manager/Warehouse Manager. Review records one classification and evidence note only; it does not approve a count or change stock. Generic count approve, edit and reject actions are blocked for these rows.

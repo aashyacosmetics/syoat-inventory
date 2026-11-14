@@ -165,6 +165,41 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 - Decision: Historical Manifest V2 uses `HSHIP-001` through `HSHIP-023`, not normal live `SHIP-###` identifiers. FC comparison removes case, whitespace and punctuation differences. `SHIP-001.AmazonReferenceID` may be filled only when blank and only with reviewed value `FBA15MRFBLH8` while approved `MOV-379` remains linked to `SHIP-001`; a different non-empty value is a blocking conflict.
 - Consequence: the completed historical migration did not collide with or advance normal live shipment numbering, and current `SHIP-002` to `SHIP-004` remained untouched. Formatting variants such as `PNQ-3`/`PNQ3`, `HYD- 3`/`HYD3` and `DEL-5`/`DEL5` did not create false conflicts. This metadata-only migration had zero stock delta and did not reconcile Transit inventory; Transit-to-FC receipt and balance reconciliation remain open work.
 
+### D-027 — Phase 2 includes a shared marketplace inventory-reconciliation bridge
+
+- Date: 2026-11-13
+- Status: accepted owner decision; implementation follows the current inventory baseline and canonical-ledger work
+- Decision: Phase 2 will establish one channel-neutral inventory lifecycle for products fulfilled from the main warehouse through FirstCry, Flipkart, Myntra, JioMart, the website/Shopify and future marketplaces. The lifecycle records reservation, warehouse dispatch to channel transit, delivery completion, pre-dispatch cancellation release, returns to inspection/disposition and reviewed loss/damage or unexplained exceptions. Controlled report upload is the initial reconciliation method; official APIs may replace or supplement it only after each platform's access, status mapping, idempotency and failure behavior are documented.
+- Consequence: marketplaces do not receive separate stock-calculation rules. The canonical movement ledger remains authoritative, external order/shipment data remains evidence, duplicate events cannot change stock twice, and unknown statuses or unmapped SKUs fail visibly. Phase 2 remains limited to operational inventory quantities and references. Broader marketplace operations stay in Phase 4, while revenue, settlements, fees, receipts/collections, taxation and accounting remain out of scope. Work begins only after the read-only Work Package 2 baseline and the Work Package 4 canonical ledger are established; FirstCry is the first planned channel implementation.
+
+### D-028 — Avee inventory is legacy evidence and must not map to active Syoat products
+
+- Date: 2026-11-13
+- Status: accepted owner decision; historical/product-level evidence confirmed and exclusion reconfirmed
+- Decision: Avee ASINs are no longer active products in the Syoat ERP. Any remaining Avee FBA stock is handled separately through the owner-directed removal-order process. Historical Amazon evidence must retain the Avee identity and must not be mapped, received or adjusted as an active Syoat SKU. The owner reconfirmed that no Avee product or quantity may be included in Syoat inventory.
+- Consequence: the 40-unit Avee line in historical shipment `FBA15M1Z6GTC` cannot resolve or adjust the `PRD-P001` Syoat shampoo line recorded on `MOV-088`. That legacy mismatch remains a separate exception requiring reviewed historical treatment; it cannot create a Syoat receipt, shortage, excess, report adjustment, product-master row, available-stock quantity, valuation or netting entry.
+
+### D-029 — FBA dispatch posts only at physical courier handover
+
+- Date: 2026-11-13
+- Status: accepted owner decision; current pickup schedule confirmed
+- Decision: An Amazon shipment status, planned pickup date or booking does not move ERP stock. Warehouse stock moves to `FBA_TRANSIT` only when the packed shipment is physically handed to the courier and the Warehouse Operator records the linked FBA Dispatch with the available pickup/AWB evidence. The current plans remain `Working` until handover: `FBA15MV3JWHZ` is planned for 2026-11-19, while `FBA15MVVJWB2` and `FBA15MW115K6` are planned for 2026-11-28.
+- Consequence: no dispatch movement is created in advance and a changed or missed pickup date has no stock effect. At actual handover, staff select the existing open shipment, verify the reference, destination and quantities, record the dispatch once, and follow the normal approval controls. Amazon `In transit` remains external workflow evidence and cannot independently trigger or backdate an ERP movement.
+
+### D-030 — Only one current Amazon-only shipment is added to ERP
+
+- Date: 2026-11-13
+- Status: accepted owner decision; staff entry planned for 2026-11-14
+- Decision: Staff will create an ERP shipment plan for Amazon reference `FBA15MW9M3TG` on 2026-11-14. Amazon-only Working references `FBA15MV7CDHJ`, `FBA15MRCH332` and `FBA15MP17F6M` are owner-directed exclusions and must not be created or linked in ERP unless the owner explicitly reactivates them.
+- Consequence: the three excluded records remain preserved as external audit evidence but have no ERP stock effect. Creating the `FBA15MW9M3TG` shipment plan also has no stock effect. Its linked FBA Dispatch is recorded separately only at physical courier handover under D-029, with quantities and available pickup/AWB evidence verified by staff.
+
+### D-031 — FBA freebies are optional manual warehouse consumption
+
+- Date: 2026-11-13
+- Status: accepted owner decision; local implementation complete, owner deployment and historical correction pending
+- Decision: Wooden Combs, Bath Loofahs and any future freebie are optional packing choices made physically by the warehouse team. Staff must enter the actual freebie product and quantity manually for each shipment when packing/handover occurs. The ERP must not infer, auto-add or calculate freebies from the sellable product, combo, shipment quantity, Amazon plan or a default ratio. Omitting a freebie means zero was packed.
+- Consequence: a freebie is warehouse promotional/sample consumption, not an Amazon sellable shipment line. Active freebie products use exact `ItemType=Freebie`. New freebie quantities reduce `MAIN_WH` only after approval of a separately traceable `Samples` movement linked to the ERP shipment, Amazon reference and Approved FBA Dispatch; they are not included in the sellable `FBA Dispatch`, `FBA_TRANSIT`, an FBA Receipt or Amazon FC stock. The local workflow enforces whole-number quantities, no duplicates, current warehouse availability and dispatch-first approval. The preserved historical 720 units require a separately reviewed non-posting correction design from their erroneous Transit position to the appropriate promotional/sample sink without editing Approved history.
+
 ## Open decisions
 
 ### Access and production-baseline decisions captured 2026-10-23
