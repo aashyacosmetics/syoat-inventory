@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-historical-linking.3",
+  VERSION:               "3.2-phase2-fba-freebies.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -1178,6 +1178,57 @@ function assertMovementStockAvailable(header, lines) {
   if (shortages.length) throw new Error("Approval would create negative stock: " + shortages.join("; "));
 }
 
+function validateManualFbaFreebieLines(body, staff) {
+  const raw = body.freebieLines;
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new Error("freebieLines must be an array.");
+  if (body.movementType !== "FBA Dispatch") {
+    if (raw.length) throw new Error("Manual FBA freebies are allowed only with an FBA Dispatch.");
+    return [];
+  }
+  if (!raw.length) return [];
+
+  // D-031: optional freebies are entered explicitly by warehouse staff and are
+  // recorded as a separate Samples/promotional-consumption movement. Never infer
+  // them from the shipment plan, sellable product, combo or quantity.
+  checkFeatureGate("Samples", staff.Role);
+  const products = sheetToObjects(SHEETS.PRODUCTS);
+  const seen = {};
+  const normalized = raw.map(function (line) {
+    const productID = String(line && (line.productID || line.ProductID) || "").trim();
+    const quantity = parseFloat(line && (line.quantity !== undefined ? line.quantity : line.Quantity));
+    if (!productID || !(quantity > 0) || !isFinite(quantity) || Math.floor(quantity) !== quantity) {
+      throw new Error("Every manual freebie line needs an active freebie product and a whole-number quantity greater than 0.");
+    }
+    const product = products.find(function (row) { return String(row.ProductID) === productID; });
+    if (!product || String(product.Status) !== "Active" || String(product.ItemType) !== "Freebie") {
+      throw new Error("Manual FBA freebie product is not an active Freebie: " + productID);
+    }
+    if (seen[productID]) throw new Error("Manual FBA freebie product is duplicated: " + productID);
+    seen[productID] = true;
+    return {
+      productID: productID,
+      quantity: quantity,
+      unitCost: parseFloat(product.UnitCost) || "",
+      lineNotes: "Manually packed FBA freebie",
+    };
+  });
+
+  const stockRows = getStock({});
+  const shortages = normalized.filter(function (line) {
+    const available = stockRows
+      .filter(function (row) { return String(row.ProductID) === line.productID && String(row.LocationID) === "MAIN_WH"; })
+      .reduce(function (sum, row) { return sum + (parseFloat(row.Quantity) || 0); }, 0);
+    line.available = available;
+    return line.quantity > available;
+  }).map(function (line) {
+    return line.productID + " (need " + line.quantity + ", have " + line.available + " at MAIN_WH)";
+  });
+  if (shortages.length) throw new Error("Not enough warehouse stock for manual FBA freebies: " + shortages.join("; "));
+  normalized.forEach(function (line) { delete line.available; });
+  return normalized;
+}
+
 function createMovement(body, staff) {
   requireFields(body, ["movementType","sourceLocationID","destinationLocationID","lines"]);
   if (!Array.isArray(body.lines) || body.lines.length === 0) throw new Error("lines must have at least one entry");
@@ -1206,6 +1257,10 @@ function createMovement(body, staff) {
   }
 
   checkFeatureGate(body.movementType, staff.Role);
+
+  // Validate the optional manual freebie aggregate before writing either Draft,
+  // so invalid/non-freebie/insufficient-stock input cannot leave a partial pair.
+  const manualFreebieLines = validateManualFbaFreebieLines(body, staff);
 
   // Every new warehouse-to-FBA dispatch belongs to one open shipment plan.
   // The server validates the selected plan and remaining quantities; the
@@ -1286,9 +1341,49 @@ function createMovement(body, staff) {
     Notes:                 body.notes || "",
   });
 
+  let freebieResult = null;
+  if (manualFreebieLines.length) {
+    const shipmentID = String(body.amazonShipmentID || "").trim();
+    const amazonReference = String(body.referenceNumber || "").trim();
+    freebieResult = createMovement({
+      movementType: "Samples",
+      sourceLocationID: "MAIN_WH",
+      destinationLocationID: "SAMPLES",
+      referenceType: "FBA Freebie",
+      referenceNumber: amazonReference,
+      amazonShipmentID: shipmentID,
+      amazonDestinationFC: body.amazonDestinationFC || "",
+      carrierTrackingNumber: body.carrierTrackingNumber || "",
+      notes: "Manual FBA freebies for " + shipmentID + "; Linked FBA Dispatch: " + movementID,
+      lines: manualFreebieLines,
+      requestId: body.requestId ? String(body.requestId) + ":freebie" : "",
+    }, staff);
+  }
+
   writeLog("createMovement", movementID, staff, `Created ${body.movementType} — ${body.lines.length} line(s)`, body.requestId);
   writeAuditTrail("createMovement", "Movement", movementID, [], staff, body.requestId, body.movementType);
-  return { movementID, lineIDs };
+  return {
+    movementID,
+    lineIDs,
+    freebieMovementID: freebieResult ? freebieResult.movementID : "",
+    freebieLineIDs: freebieResult ? freebieResult.lineIDs : [],
+  };
+}
+
+function assertLinkedFbaFreebieApproval(header) {
+  if (String(header.MovementType) !== "Samples" || String(header.ReferenceType) !== "FBA Freebie") return;
+  if (String(header.SourceLocationID) !== "MAIN_WH" || String(header.DestinationLocationID) !== "SAMPLES") {
+    throw new Error("Invalid FBA freebie movement route.");
+  }
+  const shipmentID = String(header.AmazonShipmentID || "").trim();
+  const match = String(header.Notes || "").match(/Linked FBA Dispatch:\s*(MOV-[A-Za-z0-9-]+)/);
+  const dispatchID = match ? match[1] : "";
+  if (!shipmentID || !dispatchID) throw new Error("FBA freebie movement is missing its linked dispatch evidence.");
+  const dispatch = sheetToObjects(SHEETS.MOV_HEADERS).find(function (row) { return String(row.MovementID) === dispatchID; });
+  if (!dispatch || String(dispatch.MovementType) !== "FBA Dispatch" ||
+      String(dispatch.AmazonShipmentID) !== shipmentID || String(dispatch.Status) !== "Approved") {
+    throw new Error("Approve the linked FBA Dispatch before approving its manual freebie consumption: " + dispatchID);
+  }
 }
 
 function approveMovement(body, staff) {
@@ -1323,6 +1418,7 @@ function approveMovement(body, staff) {
   // created against the same remaining quantity, but only the first valid
   // approval may consume it.
   assertFbaDispatchShipmentPlan(header, movementLines);
+  assertLinkedFbaFreebieApproval(header);
   // This check runs while the global business-write lock is held. It evaluates
   // the latest Approved stock, not the earlier quantity seen when the Draft was
   // created, so two competing drafts cannot both consume the same units.
@@ -3946,7 +4042,7 @@ function resolveOperationalError(errorId, resolutionNotes) {
 }
 
 function isExpectedClientError(message) {
-  return /^(Unauthorised|Unauthorized|Forbidden|Missing fields|Invalid |Unknown |Not enough stock|Approval would create negative stock|Stock changed|Already |Only |Cannot |Maker-checker|Feature disabled|Role |Request ID collision|Recovery required|Cancelled|PIN confirmation|Temporarily locked|This file is too large|Operational file not found)/i.test(String(message || ""));
+  return /^(Unauthorised|Unauthorized|Forbidden|Missing fields|Invalid |Unknown |Not enough stock|Not enough warehouse stock|Approval would create negative stock|Approve the linked FBA Dispatch|Stock changed|Already |Only |Cannot |Maker-checker|Feature disabled|Role |Request ID collision|Recovery required|Cancelled|PIN confirmation|Temporarily locked|This file is too large|Operational file not found|freebieLines must|Manual FBA freebie|Every manual freebie)/i.test(String(message || ""));
 }
 
 function safeClientErrorMessage(error) {
