@@ -175,9 +175,9 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 ### D-028 — Avee inventory is legacy evidence and must not map to active Syoat products
 
 - Date: 2026-11-13
-- Status: accepted owner decision; historical/product-level evidence confirmed and exclusion reconfirmed
-- Decision: Avee ASINs are no longer active products in the Syoat ERP. Any remaining Avee FBA stock is handled separately through the owner-directed removal-order process. Historical Amazon evidence must retain the Avee identity and must not be mapped, received or adjusted as an active Syoat SKU. The owner reconfirmed that no Avee product or quantity may be included in Syoat inventory.
-- Consequence: the 40-unit Avee line in historical shipment `FBA15M1Z6GTC` cannot resolve or adjust the `PRD-P001` Syoat shampoo line recorded on `MOV-088`. That legacy mismatch remains a separate exception requiring reviewed historical treatment; it cannot create a Syoat receipt, shortage, excess, report adjustment, product-master row, available-stock quantity, valuation or netting entry.
+- Status: accepted owner decision; historical/product-level evidence confirmed and upload exclusion reconfirmed on 2026-11-14
+- Decision: Avee ASINs are no longer active products in the Syoat ERP. Any remaining Avee FBA stock is handled separately through the owner-directed removal-order process. Historical Amazon evidence retains the Avee identity, but FBA uploads must ignore Avee rows before product mapping and exclude them from Syoat reconciliation counts, FC snapshots, analytics and stock totals. Avee must never be mapped to a Syoat product; no Avee-to-Syoat mapping treatment is required.
+- Consequence: the 40-unit Avee line in historical shipment `FBA15M1Z6GTC` cannot resolve or adjust the `PRD-P001` Syoat shampoo line recorded on `MOV-088`. The preserved Approved row remains immutable historical evidence and is excluded from Syoat receipt/shortage/excess proof. Avee cannot create a Syoat receipt, shortage, excess, report adjustment, product-master row, available-stock quantity, valuation or netting entry. Upload processing may report only a safe ignored-row/ASIN count for audit clarity.
 
 ### D-029 — FBA dispatch posts only at physical courier handover
 

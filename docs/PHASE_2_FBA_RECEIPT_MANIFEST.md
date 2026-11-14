@@ -111,7 +111,7 @@ Product IDs are the authoritative ERP identifiers. â€œMatched receipt candidateâ
 | `FBA15M1Z6GTC` | `PRD-C002`, 10 expected / 12 located | `EXCESS_2` | Preserve as Syoat excess evidence; no Transit debit and no adjustment now. |
 | `FBA15M23FXSW` | `PRD-P001`, 80 expected / 120 located | `EXCESS_40` | Preserve as Syoat excess evidence; no Transit debit and no adjustment now. |
 | `FBA15M27SQ7H` | `PRD-C001`, 24 expected / 25 located | `EXCESS_1` | Preserve as Syoat excess evidence; no Transit debit and no adjustment now. |
-| `MOV-088-L001` | 40 units recorded as `PRD-P001`, but Amazon identifies the expected product as Avee | `LEGACY_MAPPING_EXCEPTION` | Keep FBA-011 open. Do not use this row to prove Syoat receipt, shortage or excess and do not edit the Approved row. |
+| `MOV-088-L001` | 40 units recorded as `PRD-P001`, but Amazon identifies the expected product as Avee | `EXCLUDED_LEGACY_EVIDENCE` | FBA-011 is concluded under D-028 without a mapping treatment. Do not use this row to prove Syoat receipt, shortage or excess and do not edit the Approved row. |
 
 ## Avee exclusion rule
 
@@ -123,12 +123,14 @@ No Avee item is part of the active Syoat product master or Syoat inventory calcu
 - netted against a Syoat variance;
 - included in Syoat available, Transit, FBA or valuation totals.
 
+Active upload processing enforces this boundary twice: the frontend removes Avee rows before ASIN mapping, preview and FC aggregation, and the backend reparses the original report evidence and removes any Avee-linked submitted product before creating a variance count or FC snapshot. Avee does not appear as an unmapped Syoat action item; only a safe ignored count may be retained in the import response/audit log.
+
 ## Conditions before any later posting design
 
 1. Obtain a current backup and a same-date Amazon inventory/receipt report.
 2. Resolve the 29 snapshot adjustments so canonical receipts do not double count current FBA stock.
 3. Design the FBA-009 historical correction for the 720 manually packed freebies under D-031. The correction must clear their erroneous Transit position to the promotional/sample sink without creating FBA stock or editing Approved history.
-4. Resolve FBA-011 without changing the preserved Approved movement.
+4. Preserve the concluded FBA-011 exclusion without changing the Approved movement or reintroducing Avee through any upload/mapping path.
 5. Recheck the 140 lip balms; keep them open until Amazon reports a final accepted/short/damaged/removal outcome.
 6. Prepare a bounded, idempotent dry run that reports per-product before/after balances and zero unexplained residuals.
 7. Obtain separate owner approval before enabling any write.
