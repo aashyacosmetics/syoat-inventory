@@ -71,7 +71,17 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-fba-historical-linking.3");
+  assert.equal(response.data.version, "3.2-phase2-fba-freebies.1");
+});
+
+test("FBA Dispatch frontend exposes an optional manual-freebie section without mixing transit stock", () => {
+  const source = readProjectFile("syoat-app.js");
+  assert.match(source, /Optional Manual Freebies/);
+  assert.match(source, /Add only freebies physically packed with this shipment/);
+  assert.match(source, /saved as a separate Samples draft from Main Warehouse and never enter FBA Transit/);
+  assert.match(source, /freebieLines: type === "FBA Dispatch"/);
+  assert.match(source, /product\.ItemType === "Freebie"/);
+  assert.match(source, /type !== "FBA Dispatch" \|\| p\.ItemType !== "Freebie"/);
 });
 
 test("public staff picker exposes only name, email, and role", () => {
@@ -629,6 +639,175 @@ test("FBA Dispatch requires an open shipment, matching Amazon reference, and pla
     sessionToken: signedIn.sessionToken,
   });
   assert.equal(options.data[0].lines[0].remainingQty, 1);
+});
+
+test("FBA Dispatch records optional manual freebies as a separate Samples draft", () => {
+  const sheets = writeReadySheets();
+  sheets.Products = objectsToRows([
+    ...fixture.products,
+    {
+      ProductID: "TEST-F001",
+      SKU: "TEST-FREEBIE-001",
+      ProductName: "Test Wooden Comb",
+      VariantName: "Manual freebie",
+      Status: "Active",
+      ReorderLevel: 0,
+      ItemType: "Freebie",
+      UnitCost: 2,
+    },
+  ], ["ProductID", "SKU", "ProductName", "VariantName", "Status", "ReorderLevel", "ItemType", "UnitCost"]);
+  const appendObjectRow = (rows, object) => rows.push(rows[0].map(header => object[header] ?? ""));
+  appendObjectRow(sheets.Movement_Headers, {
+    MovementID: "MOV-FREEBIE-OPENING",
+    MovementDateTime: "2026-11-13 09:00:00",
+    MovementType: "Stock In",
+    SourceLocationID: "SUPPLIER",
+    DestinationLocationID: "MAIN_WH",
+    Status: "Approved",
+    EnteredByEmail: "founder@example.invalid",
+    ApprovedByEmail: "founder@example.invalid",
+  });
+  appendObjectRow(sheets.Movement_Lines, {
+    MovementLineID: "MOV-FREEBIE-OPENING-L001",
+    MovementID: "MOV-FREEBIE-OPENING",
+    ProductID: "TEST-F001",
+    Quantity: 10,
+  });
+
+  const harness = createAppsScriptHarness(sheets);
+  const signedIn = login(harness).data;
+  const request = {
+    action: "createMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-freebie-create-0001",
+    movementType: "FBA Dispatch",
+    sourceLocationID: "MAIN_WH",
+    destinationLocationID: "FBA_TRANSIT",
+    referenceNumber: "FBA15MTEST01",
+    amazonShipmentID: "SHIP-TEST-001",
+    amazonDestinationFC: "TEST_FC",
+    lines: [{ productID: "TEST-P001", quantity: 4 }],
+    freebieLines: [{ productID: "TEST-F001", quantity: 2 }],
+  };
+
+  const duplicateFreebie = post(harness, {
+    ...request,
+    requestId: "req-fba-freebie-duplicate-0001",
+    freebieLines: [
+      { productID: "TEST-F001", quantity: 1 },
+      { productID: "TEST-F001", quantity: 1 },
+    ],
+  });
+  assert.equal(duplicateFreebie.success, false);
+  assert.match(duplicateFreebie.error, /duplicated/);
+
+  const created = post(harness, request);
+  assert.equal(created.success, true, JSON.stringify(created));
+  assert.ok(created.data.freebieMovementID);
+  assert.notEqual(created.data.freebieMovementID, created.data.movementID);
+
+  const headers = harness.call("sheetToObjects", "Movement_Headers");
+  const dispatch = headers.find(row => row.MovementID === created.data.movementID);
+  const freebie = headers.find(row => row.MovementID === created.data.freebieMovementID);
+  assert.equal(dispatch.MovementType, "FBA Dispatch");
+  assert.equal(dispatch.DestinationLocationID, "FBA_TRANSIT");
+  assert.equal(freebie.MovementType, "Samples");
+  assert.equal(freebie.SourceLocationID, "MAIN_WH");
+  assert.equal(freebie.DestinationLocationID, "SAMPLES");
+  assert.equal(freebie.ReferenceType, "FBA Freebie");
+  assert.equal(freebie.AmazonShipmentID, "SHIP-TEST-001");
+  assert.match(freebie.Notes, new RegExp("Linked FBA Dispatch: " + created.data.movementID));
+
+  const lines = harness.call("sheetToObjects", "Movement_Lines");
+  assert.deepEqual(
+    lines.filter(line => line.MovementID === created.data.freebieMovementID).map(line => [line.ProductID, line.Quantity]),
+    [["TEST-F001", 2]]
+  );
+  assert.equal(
+    lines.some(line => line.MovementID === created.data.movementID && line.ProductID === "TEST-F001"),
+    false
+  );
+
+  const premature = post(harness, {
+    action: "approveMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-freebie-premature-0001",
+    movementID: created.data.freebieMovementID,
+  });
+  assert.equal(premature.success, false);
+  assert.match(premature.error, /Approve the linked FBA Dispatch/);
+
+  const approvedDispatch = post(harness, {
+    action: "approveMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-freebie-dispatch-approve-0001",
+    movementID: created.data.movementID,
+  });
+  assert.equal(approvedDispatch.success, true, JSON.stringify(approvedDispatch));
+  const approvedFreebie = post(harness, {
+    action: "approveMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-freebie-samples-approve-0001",
+    movementID: created.data.freebieMovementID,
+  });
+  assert.equal(approvedFreebie.success, true, JSON.stringify(approvedFreebie));
+
+  const stock = post(harness, { action: "getStock", sessionToken: signedIn.sessionToken });
+  assert.equal(stock.success, true);
+  assert.equal(stock.data.find(row => row.ProductID === "TEST-P001" && row.LocationID === "FBA_TRANSIT").Quantity, 4);
+  assert.equal(stock.data.find(row => row.ProductID === "TEST-F001" && row.LocationID === "MAIN_WH").Quantity, 8);
+  assert.equal(stock.data.some(row => row.ProductID === "TEST-F001" && row.LocationID === "FBA_TRANSIT"), false);
+
+  const retry = post(harness, request);
+  assert.equal(retry.success, true);
+  assert.equal(retry.data.movementID, created.data.movementID);
+  assert.equal(retry.data.freebieMovementID, created.data.freebieMovementID);
+  assert.equal(
+    harness.call("sheetToObjects", "Movement_Headers").filter(row =>
+      row.MovementID === created.data.movementID || row.MovementID === created.data.freebieMovementID
+    ).length,
+    2
+  );
+});
+
+test("manual FBA freebie input rejects sellable, duplicate, and unrelated movement lines", () => {
+  const sheets = writeReadySheets();
+  sheets.Products = objectsToRows(fixture.products.map(product => ({ ...product, ItemType: "Sellable" })), [
+    "ProductID", "SKU", "ProductName", "Status", "ReorderLevel", "ItemType",
+  ]);
+  const harness = createAppsScriptHarness(sheets);
+  const signedIn = login(harness).data;
+  const base = {
+    action: "createMovement",
+    sessionToken: signedIn.sessionToken,
+    movementType: "FBA Dispatch",
+    sourceLocationID: "MAIN_WH",
+    destinationLocationID: "FBA_TRANSIT",
+    referenceNumber: "FBA15MTEST01",
+    amazonShipmentID: "SHIP-TEST-001",
+    amazonDestinationFC: "TEST_FC",
+    lines: [{ productID: "TEST-P001", quantity: 1 }],
+  };
+  const sellable = post(harness, {
+    ...base,
+    requestId: "req-fba-freebie-invalid-0001",
+    freebieLines: [{ productID: "TEST-P001", quantity: 1 }],
+  });
+  assert.equal(sellable.success, false);
+  assert.match(sellable.error, /not an active Freebie/);
+
+  const unrelated = post(harness, {
+    action: "createMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-freebie-invalid-0002",
+    movementType: "Samples",
+    sourceLocationID: "MAIN_WH",
+    destinationLocationID: "SAMPLES",
+    lines: [{ productID: "TEST-P001", quantity: 1 }],
+    freebieLines: [{ productID: "TEST-P001", quantity: 1 }],
+  });
+  assert.equal(unrelated.success, false);
+  assert.match(unrelated.error, /allowed only with an FBA Dispatch/);
 });
 
 test("FBA report import saves evidence for review without changing stock", () => {

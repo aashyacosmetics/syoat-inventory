@@ -47,6 +47,8 @@ Before changing any sheet integration:
 
 ## Data rules
 
+The exact Phase 2 inventory field, blank-value, status and stock-effect contract is maintained in [INVENTORY_DATA_DICTIONARY.md](INVENTORY_DATA_DICTIONARY.md). That dictionary records the live headers and the stricter rule for new entries without rewriting historical rows.
+
 - IDs are immutable and generated atomically.
 - Timestamps use an unambiguous stored format and display in the business timezone.
 - Quantities and identifiers are validated server-side.
@@ -67,6 +69,8 @@ Before changing any sheet integration:
 
 The live `FBA_Shipments` sheet contains the exact `AmazonReferenceID` header. Backend `3.2-phase2-fba-reference.1` fails safely rather than silently dropping this value if that column is absent.
 
+Optional physical freebies are not Amazon shipment-plan lines. For a new FBA Dispatch, staff may manually enter active `ItemType=Freebie` products and the exact whole-number quantities packed. The backend stores them in a separate linked `Samples` movement from `MAIN_WH` to `SAMPLES`, carrying the internal shipment ID, external Amazon reference and linked FBA Dispatch ID. The linked freebie movement must remain Draft until the FBA Dispatch is Approved. It never contributes to `FBA_TRANSIT`, FBA Receipt or Amazon FC quantities.
+
 ## Integration principles
 
 - Prefer official APIs or controlled report imports.
@@ -80,12 +84,14 @@ The live `FBA_Shipments` sheet contains the exact `AmazonReferenceID` header. Ba
 ## Planned integrations
 
 - Amazon Seller/FBA for inventory, shipments, listings, and operational exceptions.
-- FirstCry and additional marketplaces as access/API availability permits.
+- FirstCry, Flipkart, Myntra, JioMart, website/Shopify and additional marketplaces through the shared Phase 2 inventory-reconciliation contract. Controlled order/shipment report upload comes first; official API automation is added only where reliable access, status mapping and retry behavior are documented.
 - Website platform for catalog, content, promotion, and operational issues.
 - Social channels or scheduling tools for content operations.
 - Google Drive for private evidence and approved report imports.
 
 An integration is added only when its scope, permissions, data ownership, failure handling, and reconciliation process have been documented.
+
+Marketplace integrations may provide order ID, seller SKU, quantity, fulfilment status, dispatch/delivery dates, cancellation/return state and tracking/shipment reference for operational inventory. They must not import or create revenue books, settlements, fees, collections, cash-flow or tax records. External data reconciles to the movement ledger and never silently replaces it.
 
 ## Environment separation
 

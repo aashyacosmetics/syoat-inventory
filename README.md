@@ -21,7 +21,7 @@ The present application is a static React frontend backed by Google Apps Script 
 - `syoat-theme.css` — application styling.
 - `index-redesign.html` and `syoat-app-redesign.js` — archived test artifacts from before the live-version edits; ignore and never publish them.
 - `images/` — product and brand images.
-- `Code.gs` — version-controlled canonical Apps Script backend source. The latest recorded production deployment is `3.2-phase2-access-policy.1`; future deployment remains an explicit owner action.
+- `Code.gs` — version-controlled canonical Apps Script backend source. The latest recorded production deployment is `3.2-phase2-fba-historical-linking.3`; future deployment remains an explicit owner action.
 - `docs/` — product, architecture, security, roadmap, decisions, status, and working procedures.
 
 ## Documentation map
@@ -32,6 +32,7 @@ The present application is a static React frontend backed by Google Apps Script 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Modules and scope](docs/MODULES.md)
 - [Data and integrations](docs/DATA_AND_INTEGRATIONS.md)
+- [Inventory data dictionary](docs/INVENTORY_DATA_DICTIONARY.md)
 - [API and permission catalogue](docs/API_CATALOG.md)
 - [Role and capability matrix](docs/ROLE_CAPABILITIES.md)
 - [Write integrity and recovery](docs/WRITE_INTEGRITY.md)
@@ -42,6 +43,8 @@ The present application is a static React frontend backed by Google Apps Script 
 - [Production release record](docs/PRODUCTION_RELEASE_RECORD.md)
 - [Phase 1 completion record](docs/PHASE_1_COMPLETION.md)
 - [Phase 2 execution plan](docs/PHASE_2_PLAN.md)
+- [Phase 2 inventory baseline](docs/PHASE_2_INVENTORY_BASELINE.md)
+- [Phase 2 non-posting FBA receipt and variance manifest](docs/PHASE_2_FBA_RECEIPT_MANIFEST.md)
 - [Phase 2 historical FBA shipment linking](docs/PHASE_2_FBA_HISTORICAL_LINKING.md)
 - [Phase 2 WP1 stabilization and staging foundation](docs/PHASE_2_WP1_STABILIZATION.md)
 - [Phase 2 staging and rollback evidence record](docs/PHASE_2_STAGING_RECORD.md)

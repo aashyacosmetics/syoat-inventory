@@ -47,6 +47,8 @@ Detailed execution sequence: `PHASE_2_PLAN.md`.
 - Correct self-approval policy and maker-checker behavior.
 - Repair stock counts and variance approval.
 - Validate returns, damage, samples, and combo assembly.
+- Establish one inventory-only marketplace fulfilment lifecycle for warehouse-fulfilled orders across FirstCry, Flipkart, Myntra, JioMart, the website/Shopify and future channels: reserve, dispatch to channel transit, deliver, cancel and return.
+- Reconcile marketplace order/shipment evidence to warehouse and channel-transit movements through controlled report imports first and official APIs where reliable access is available.
 - Add location/product reconciliation and exception reporting.
 - Clean invalid configuration/header rows through a reviewed migration.
 
@@ -73,11 +75,10 @@ Exit criteria:
 ## Phase 4 — Purchasing and channel operations
 
 - Complete operational purchase-order and goods-receipt flow without expenses, payments, supplier accounts, or cash flow.
-- Add Amazon marketplace activity tracking.
-- Add FirstCry and other marketplace activities.
+- Extend Amazon, FirstCry and other marketplaces beyond the Phase 2 inventory bridge into broader channel activities, operational issue tracking and approved automation.
 - Add website catalog/content/promotion/issue workflow.
 
-Channel activities may include order references, quantities, fulfilment, dispatch, cancellations, returns, and issues. They do not include daily sales/revenue accounts, receipts, collections, or cash flow.
+Phase 2 owns only the stock-affecting warehouse fulfilment lifecycle and its reconciliation. Phase 4 owns broader marketplace operations. Neither phase includes daily sales/revenue accounts, settlements, fees, receipts, collections or cash flow.
 
 ## Phase 5 — Social media and collaborations
 

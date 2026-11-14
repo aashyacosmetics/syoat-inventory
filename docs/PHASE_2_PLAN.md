@@ -1,12 +1,12 @@
 # Phase 2 Execution Plan — Inventory Correctness
 
-Status: in progress. Work Package 1 stabilization evidence is retained, and owner decision D-022 closes staging as a current gate. Phase 2 continues local-first with owner-controlled live verification and rollback/recovery safeguards.
+Status: in progress. Work Package 1 stabilization evidence is retained, and owner decision D-022 closes staging as a current gate. The bounded historical FBA shipment-linking migration is complete and closed, but it did not change stock or satisfy the remaining inventory-reconciliation exit criteria. Phase 2 continues local-first with owner-controlled live verification and rollback/recovery safeguards.
 
 ## Objective
 
 Make the movement ledger and current stock trustworthy for every product and operational location before expanding Amazon FC workflows or adding new business modules.
 
-Phase 2 corrects inventory configuration, movement lifecycle, stock counts, adjustments, returns, damage, samples, combos, batch/expiry handling and existing historical exceptions. It also makes Record Movement a guided visual workflow and redesigns inventory Analytics so employees can understand actions, balances and exceptions with minimal training. It does not build the full Amazon shipment/FC lifecycle planned for Phase 3 and does not add accounting.
+Phase 2 corrects inventory configuration, movement lifecycle, stock counts, adjustments, returns, damage, samples, combos, batch/expiry handling and existing historical exceptions. It also establishes one inventory-only lifecycle for warehouse-fulfilled marketplace orders, so dispatch, delivery, cancellation and return evidence reconcile consistently across FirstCry, Flipkart, Myntra, JioMart, the website/Shopify and future channels. It makes Record Movement a guided visual workflow and redesigns inventory Analytics so employees can understand actions, balances and exceptions with minimal training. It does not build the full Amazon shipment/FC lifecycle planned for Phase 3, broader marketplace operations planned for Phase 4, or accounting.
 
 ## Non-negotiable boundaries
 
@@ -18,6 +18,8 @@ Phase 2 corrects inventory configuration, movement lifecycle, stock counts, adju
 - Approved operational records are reversed or superseded; they are not silently edited or deleted.
 - Physical locations cannot have unexplained negative stock.
 - The movement ledger is the inventory authority. Counts create reviewed adjustment movements; marketplace snapshots remain evidence and never silently overwrite the ledger.
+- Marketplace order/shipment reports and APIs are reconciliation evidence, not a second stock ledger. A warehouse-fulfilled order follows one explicit lifecycle: reservation, warehouse dispatch to channel transit, delivery completion, pre-dispatch cancellation release, or return to inspection and reviewed disposition.
+- Phase 2 marketplace work is limited to inventory quantities, operational references, fulfilment status, dispatch, cancellations, returns and discrepancies. Revenue, settlement, fees, collections, taxation and marketplace accounting remain excluded.
 - Amazon FBA and transit locations participate in general stock correctness, but shipment-to-transit-to-specific-FC expansion remains Phase 3.
 - Operational unit cost and estimated inventory value may be validated for decisions. Expenses, revenue books, cash received/paid, cash flow and accounting ledgers remain excluded.
 - Staging is excluded from the current Phase 2 workflow under D-022. No production migration is authorized without owner approval, exact backup, reviewed dry-run, bounded/resumable execution, immediate live reconciliation and a documented production rollback or recovery sequence.
@@ -94,6 +96,7 @@ Deliverables:
 - Duplicate ID, orphan line, missing product/location, malformed quantity/date and invalid-state reports.
 - Batch, expiry and unit-cost completeness report.
 - Current returns, damage, samples, combo and opening-balance usage summary.
+- Current warehouse-fulfilled marketplace dispatch evidence by channel, including existing FirstCry/Flipkart flows and any Myntra, JioMart, website/Shopify or other-platform records that can affect warehouse or transit stock.
 - Current FBA dispatch, transit, receipt, shipment-link, snapshot-import and reconciliation-adjustment alignment report, following `PHASE_2_FBA_ALIGNMENT.md`.
 - Sanitized aggregate snapshot and reproducible local analysis script; no production writes.
 
@@ -202,6 +205,10 @@ Deliverables:
 - Combo assembly rules using the effective BOM; decide and implement disassembly only if approved.
 - Batch/manufacture/expiry policy by product/process, including validation and near-expiry reporting where data supports it.
 - Opening-balance restriction for migration-only use after go-live.
+- One channel-neutral marketplace inventory contract covering order reference, platform, SKU mapping, quantity, lifecycle status, dispatch/delivery/cancellation/return dates and shipment/tracking reference.
+- Explicit stock effects for reservation, warehouse-to-channel-transit dispatch, delivery completion, cancellation, failed delivery/return and damage/loss exception review.
+- Idempotent controlled report upload as the first supported reconciliation path, with official API adapters added per platform only after access, source-of-truth, status mapping, retry and failure behavior are documented.
+- FirstCry as the first channel implementation because an operational movement flow already exists, followed by Flipkart, Myntra, JioMart, website/Shopify and other channels without platform-specific stock calculations.
 - Operational unit-cost completeness and valuation estimate checks without accounting entries.
 - Scenario tests for each special flow and mixed-product movement.
 
@@ -209,9 +216,12 @@ Exit checks:
 
 - Returns never become available stock without a recorded disposition.
 - Damage and samples reduce the correct physical location exactly once.
+- Optional FBA freebies are entered manually from the quantity physically packed, reduce `MAIN_WH` as linked promotional/sample consumption, and never enter FBA Transit or Amazon stock; no product/BOM/default rule may auto-add them.
 - Combo assembly consumes components and creates combo units in balance.
 - Required tracked products cannot move without valid batch/expiry data.
 - Opening balances cannot be used as routine adjustments.
+- Every warehouse-fulfilled marketplace quantity is either reserved, in channel transit, delivered/consumed, cancelled/released, returned/under inspection or recorded as a reviewed exception; the same external event cannot change stock twice.
+- Unknown platform statuses, unmapped SKUs and quantity mismatches fail visibly and do not silently update inventory.
 
 ## Work Package 8 — Guided Record Movement and visual Inventory Analytics
 
@@ -304,6 +314,7 @@ Required UAT scenarios:
 - Competing approvals and duplicate request replay.
 - Zero, positive, negative and stale stock counts.
 - Return-to-sellable, return-to-damage, damage and sample issue.
+- FirstCry warehouse dispatch through delivery/cancellation/return reconciliation, plus one sanitized second-channel case proving the shared marketplace contract.
 - Combo assembly and approved batch/expiry examples.
 - Unauthorized role/action, maker-checker denial and expired session.
 - Reconciliation report before/after every stock-changing scenario.

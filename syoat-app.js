@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20261031-fba-reference.1";
+const BUILD_VERSION = "20261113-fba-freebies.1";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -1822,8 +1822,16 @@ function MovModal({
   React.useEffect(() => {
     if (type !== "FBA Dispatch") {
       setFbaShipmentID("");
+      setFreebieLines([]);
       return;
     }
+    const firstSellable = products.find(product => product.ItemType !== "Freebie");
+    setLines(rows => rows.map(row => {
+      const selected = products.find(product => product.ProductID === row.pid);
+      return selected && selected.ItemType === "Freebie"
+        ? { ...row, pid: firstSellable?.ProductID || "" }
+        : row;
+    }));
     let alive = true;
     setFbaShipmentOptions(null);
     setFbaShipmentError("");
@@ -1838,6 +1846,8 @@ function MovModal({
     return () => { alive = false; };
   }, [type]);
   const selectedFbaShipment = (fbaShipmentOptions || []).find(shipment => shipment.shipmentID === fbaShipmentID) || null;
+  const freebieProducts = products.filter(product => product.Status === "Active" && product.ItemType === "Freebie");
+  const [freebieLines, setFreebieLines] = React.useState([]);
   const [lines, setLines] = React.useState([{
     pid: products[0]?.ProductID || "",
     qty: "",
@@ -1962,6 +1972,18 @@ function MovModal({
     ...x,
     [k]: v
   } : x));
+  const addFreebieLine = () => setFreebieLines(rows => {
+    const next = freebieProducts.find(product => !rows.some(row => row.pid === product.ProductID));
+    return rows.concat([{
+      pid: next?.ProductID || freebieProducts[0]?.ProductID || "",
+      qty: ""
+    }]);
+  });
+  const removeFreebieLine = i => setFreebieLines(rows => rows.filter((_, j) => j !== i));
+  const setFreebieLine = (i, k, v) => setFreebieLines(rows => rows.map((row, j) => j === i ? {
+    ...row,
+    [k]: v
+  } : row));
   async function submit() {
     if (!type) {
       setErr("Select a movement type.");
@@ -1981,6 +2003,14 @@ function MovModal({
     }
     if (type === "FBA Dispatch" && !refNo.trim()) {
       setErr("Enter the Amazon Shipment ID in Reference No.");
+      return;
+    }
+    if (type === "FBA Dispatch" && freebieLines.some(line => !line.pid || !line.qty || isNaN(Number(line.qty)) || Number(line.qty) <= 0 || !Number.isInteger(Number(line.qty)))) {
+      setErr("Every manual freebie line needs a product and whole-number quantity greater than 0.");
+      return;
+    }
+    if (type === "FBA Dispatch" && new Set(freebieLines.map(line => line.pid)).size !== freebieLines.length) {
+      setErr("Add each freebie product only once; increase its quantity instead of adding a duplicate line.");
       return;
     }
     setBusy(true);
@@ -2031,6 +2061,10 @@ function MovModal({
         notes: finalNotes,
         purchaseOrderID: type === "Stock In" ? purchaseOrderID : "",
         attachmentImages: uploads,
+        freebieLines: type === "FBA Dispatch" ? freebieLines.map(line => ({
+          productID: line.pid,
+          quantity: Number(line.qty)
+        })) : [],
         lines: lines.map(l => ({
           productID: l.pid,
           quantity: Number(l.qty),
@@ -2041,7 +2075,8 @@ function MovModal({
       const res = hasImgs
         ? await apiWritePost("createMovement", user.email, movPayload)
         : await apiWrite("createMovement", user.email, movPayload);
-      onDone(`✅ ${res.movementID} saved as Draft` + (user.canApprove ? " — approve it on the dashboard" : " — a Manager will approve it"));
+      const freebieMessage = res.freebieMovementID ? ` · ${res.freebieMovementID} manual freebies saved as a separate Draft` : "";
+      onDone(`✅ ${res.movementID} saved as Draft${freebieMessage}` + (user.canApprove ? " — approve the FBA Dispatch first, then its freebie Draft" : " — a Manager will approve them in that order"));
       onClose();
     } catch (e) {
       setErr(e.message);
@@ -2215,6 +2250,61 @@ function MovModal({
     readOnly: type === "FBA Dispatch",
     placeholder: "e.g. HYD3 — check the shipment plan from Pushpa",
     style: { ...inp, background: type === "FBA Dispatch" ? "#f5ecdc" : inp.background }
+  })), type === "FBA Dispatch" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#fff8e8",
+      border: "1px solid #e7c98b",
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 5 }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { color: "#5b3a1f", fontWeight: 800, fontSize: 13 }
+  }, "🎁 Optional Manual Freebies"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: addFreebieLine,
+    disabled: freebieProducts.length === 0,
+    style: { ...ghost, padding: "3px 9px", fontSize: 11, opacity: freebieProducts.length ? 1 : 0.45 }
+  }, "+ Add Freebie")), /*#__PURE__*/React.createElement("div", {
+    style: { color: "#7c6752", fontSize: 10, lineHeight: 1.45, marginBottom: freebieLines.length ? 10 : 0 }
+  }, "Add only freebies physically packed with this shipment. Leave empty for none. They are saved as a separate Samples draft from Main Warehouse and never enter FBA Transit."), freebieProducts.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: { color: "#b23a2e", fontSize: 10, marginTop: 8 }
+  }, "No active Freebie products are configured. Ask the Founder to add the freebie product before recording it."), freebieLines.map((line, i) => {
+    const available = stock
+      ? stock.filter(row => row.ProductID === line.pid && row.LocationID === "MAIN_WH").reduce((sum, row) => sum + Number(row.Quantity || 0), 0)
+      : null;
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 78px 34px", gap: 7, alignItems: "end", marginTop: 8 }
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+      style: { ...lbl, fontSize: 9 }
+    }, "Freebie product"), /*#__PURE__*/React.createElement("select", {
+      value: line.pid,
+      onChange: e => setFreebieLine(i, "pid", e.target.value),
+      style: { ...inp, padding: "8px 9px", fontSize: 11, marginBottom: 0 }
+    }, freebieProducts.map(product => /*#__PURE__*/React.createElement("option", {
+      key: product.ProductID,
+      value: product.ProductID
+    }, product.ProductName, product.VariantName ? " (" + product.VariantName + ")" : ""))), /*#__PURE__*/React.createElement("div", {
+      style: { color: available === 0 ? "#b23a2e" : "#7c6752", fontSize: 9, marginTop: 3 }
+    }, "Available in WH: ", available === null ? "—" : available)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+      style: { ...lbl, fontSize: 9 }
+    }, "Qty"), /*#__PURE__*/React.createElement("input", {
+      type: "number",
+      min: "1",
+      step: "1",
+      value: line.qty,
+      onChange: e => setFreebieLine(i, "qty", e.target.value),
+      placeholder: "0",
+      style: { ...inp, padding: "8px 5px", textAlign: "center", fontWeight: 800, marginBottom: 0 }
+    })), /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      onClick: () => removeFreebieLine(i),
+      title: "Remove freebie line",
+      style: { background: "#fff", border: "1px solid #e7d9c4", borderRadius: 8, height: 35, color: "#b23a2e", cursor: "pointer" }
+    }, "✕"));
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -2285,7 +2375,7 @@ function MovModal({
         fontWeight: 600,
         background: "#fdf9f1"
       }
-    }, products.map(p => /*#__PURE__*/React.createElement("option", {
+    }, products.filter(p => type !== "FBA Dispatch" || p.ItemType !== "Freebie").map(p => /*#__PURE__*/React.createElement("option", {
       key: p.ProductID,
       value: p.ProductID
     }, p.ProductName, " (", p.VariantName, ")")))), /*#__PURE__*/React.createElement("button", {
