@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-freebies.1",
+  VERSION:               "3.2-phase2-fba-avee-exclusion.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -1908,6 +1908,65 @@ function fbaReportDateKey(value) {
   return isNaN(parsed.getTime()) ? text : Utilities.formatDate(parsed, "Asia/Kolkata", "yyyy-MM-dd");
 }
 
+// Avee is a retired external brand, not a Syoat inventory identity (D-028).
+// Keep the title/brand check as the primary rule and retain the confirmed
+// historical identifiers as a fail-safe for report formats without a title.
+const FBA_EXCLUDED_AVEE_IDENTIFIERS = {
+  B0CZP73V3Y: true,
+  X0020QXF2F: true,
+};
+
+function splitFbaEvidenceRow(line, delimiter) {
+  var out = [], current = "", quoted = false;
+  String(line || "").split("").forEach(function (character, index, all) {
+    if (character === '"') {
+      if (quoted && all[index + 1] === '"') {
+        current += '"';
+        all[index + 1] = "";
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === delimiter && !quoted) {
+      out.push(current.trim());
+      current = "";
+    } else {
+      current += character;
+    }
+  });
+  out.push(current.trim());
+  return out;
+}
+
+function isExcludedAveeFbaIdentity(asin, fnsku, title, brand) {
+  var identity = [asin, fnsku].map(function (value) { return String(value || "").trim().toUpperCase(); });
+  if (identity.some(function (value) { return !!FBA_EXCLUDED_AVEE_IDENTIFIERS[value]; })) return true;
+  return /(^|[^A-Z0-9])AVEE(?:\s+KIDS)?([^A-Z0-9]|$)/i.test([title, brand].join(" "));
+}
+
+function excludedAveeFbaEvidence(fileText) {
+  var lines = String(fileText || "").split(/\r?\n/).filter(function (line) { return line.trim(); });
+  if (!lines.length) return { asins: {}, fnskus: {}, rows: 0 };
+  var delimiter = lines[0].indexOf("\t") !== -1 && lines[0].indexOf(",") === -1 ? "\t" : ",";
+  var header = splitFbaEvidenceRow(lines[0], delimiter), positions = {};
+  header.forEach(function (name, index) { positions[String(name || "").trim().toLowerCase()] = index; });
+  var asinIndex = positions.asin, fnskuIndex = positions.fnsku;
+  var titleIndex = positions.title !== undefined ? positions.title : positions["product name"];
+  var brandIndex = positions.brand;
+  var result = { asins: {}, fnskus: {}, rows: 0 };
+  for (var index = 1; index < lines.length; index++) {
+    var row = splitFbaEvidenceRow(lines[index], delimiter);
+    var asin = asinIndex === undefined ? "" : row[asinIndex];
+    var fnsku = fnskuIndex === undefined ? "" : row[fnskuIndex];
+    var title = titleIndex === undefined ? "" : row[titleIndex];
+    var brand = brandIndex === undefined ? "" : row[brandIndex];
+    if (!isExcludedAveeFbaIdentity(asin, fnsku, title, brand)) continue;
+    result.rows++;
+    if (asin) result.asins[String(asin).trim().toUpperCase()] = true;
+    if (fnsku) result.fnskus[String(fnsku).trim().toUpperCase()] = true;
+  }
+  return result;
+}
+
 const FBA_VARIANCE_REASON = "FBA Report Variance Review";
 const FBA_VARIANCE_CLASSIFICATIONS = {
   sale_timing: "Sale timing",
@@ -1934,8 +1993,19 @@ function isFbaVarianceReview(count) {
 
 function createFbaReconciliation(body, staff) {
   requireRole(staff, ["Founder","Co-Founder","Admin","Manager","Warehouse Manager"]);
-  var items = body.items || [];
-  var fcSnapshotIn = Array.isArray(body.fcSnapshot) ? body.fcSnapshot : [];
+  var aveeEvidence = excludedAveeFbaEvidence(body.fileText);
+  var excludedProductIDs = {};
+  sheetToObjects(SHEETS.PRODUCTS).forEach(function (product) {
+    var asin = String(product.AmazonASIN || "").trim().toUpperCase();
+    var fnsku = String(product.FNSKU || "").trim().toUpperCase();
+    if (aveeEvidence.asins[asin] || aveeEvidence.fnskus[fnsku] ||
+        isExcludedAveeFbaIdentity(asin, fnsku, product.ProductName, product.Brand)) {
+      excludedProductIDs[String(product.ProductID || "")] = true;
+    }
+  });
+  var items = (body.items || []).filter(function (item) { return !excludedProductIDs[String(item.productID || "")]; });
+  var fcSnapshotIn = (Array.isArray(body.fcSnapshot) ? body.fcSnapshot : [])
+    .filter(function (row) { return !excludedProductIDs[String(row.productID || "")]; });
   // A week where every product already matches the ledger (no adjustments
   // needed) still needs its history row saved for week-over-week comparisons —
   // only reject if there's truly nothing to do at all.
@@ -2003,7 +2073,7 @@ function createFbaReconciliation(body, staff) {
   // report import remains visible in the write-recovery queue.
   var snapshotSaved = 0;
   try {
-    var fcSnapshot = Array.isArray(body.fcSnapshot) ? body.fcSnapshot : [];
+    var fcSnapshot = fcSnapshotIn;
     var uploadedAt = now();
     fcSnapshot.forEach(function (row, index) {
       if (!row.productID || !row.fc) return;
@@ -2023,9 +2093,9 @@ function createFbaReconciliation(body, staff) {
   } catch (e) { throw new Error("FBA report snapshot could not be saved. Review recovery status before retrying."); }
 
   writeLog("createFbaReconciliation", reportDate, staff,
-    "FBA evidence import " + importKey + ": " + pending + " pending review, " + unchanged + " unchanged, " + snapshotSaved + " FC-snapshot row(s). " + (driveFile ? "private-file:" + driveFile.fileId : "no-file"),
+    "FBA evidence import " + importKey + ": " + pending + " pending review, " + unchanged + " unchanged, " + snapshotSaved + " FC-snapshot row(s), " + aveeEvidence.rows + " Avee row(s) ignored. " + (driveFile ? "private-file:" + driveFile.fileId : "no-file"),
     body.requestId);
-  return { pendingReviewCount: pending, unchanged: unchanged, snapshotSaved: snapshotSaved, ledgerArchived: !!driveFile, importKey: importKey };
+  return { pendingReviewCount: pending, unchanged: unchanged, snapshotSaved: snapshotSaved, ignoredAveeRows: aveeEvidence.rows, ledgerArchived: !!driveFile, importKey: importKey };
 }
 
 function reviewFbaVariance(body, staff) {

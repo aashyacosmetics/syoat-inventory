@@ -1,10 +1,36 @@
 # Current Status and Handoff
 
-Last updated: 2026-11-13
+Last updated: 2026-11-14
 
-### 2026-11-13 — Optional manual FBA freebie workflow implemented locally
+### 2026-11-14 — Avee excluded from FBA uploads before mapping
 
-- Status: implementation complete and locally verified; owner deployment/publication remains pending. Historical correction remains separate and blocked.
+- Status: local backend/frontend implementation complete; owner deployment/publication still required.
+- Owner rule: Avee is not a Syoat product, must never map to Syoat and must be ignored whenever an FBA Inventory Ledger is uploaded.
+- Frontend result: Avee rows are detected from report title/brand and confirmed legacy identifiers, removed before ASIN mapping and excluded from reconciliation preview, counts, FC snapshots and analytics. They no longer appear as unmapped Syoat action items; the preview shows only a safe excluded-ASIN count.
+- Backend result: `createFbaReconciliation` independently reparses the original report evidence and strips any Avee-linked submitted product from both variance-count input and FC snapshot history. The response/audit note records only the number of ignored Avee rows. A deliberately submitted Avee-to-product mapping is proven to create neither a Stock Count nor an FBA snapshot.
+- Historical boundary: D-028/FBA-011 is concluded without an Avee-to-Syoat mapping treatment. `MOV-088-L001` remains immutable Approved legacy evidence, is never used to prove a Syoat receipt/shortage/excess and is not edited by this change.
+- Files changed for this rule: `Code.gs`, `syoat-app.js`, `index.html`, `tests/apps-script-baseline.test.mjs`, `docs/DECISIONS.md`, `docs/PHASE_2_FBA_RECEIPT_MANIFEST.md`, `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks and results: backend/frontend syntax passed; all 90 unique tests passed (89 passed in the normal sandbox and the localhost-only staging test passed when rerun with loopback permission); the 52-action API catalogue and environment-template safety check passed; `git diff --check` passed. The machine has Node but no `npm` executable, so the exact four commands in the package `check` script were run directly with Node.
+- Production actions still required: protected PR review/merge, owner deployment of backend candidate `3.2-phase2-fba-avee-exclusion.1`, frontend publication of build `20261114-fba-avee-exclusion.1`, ping/build verification, then one real weekly upload confirmation. Production currently remains on backend `3.2-phase2-fba-freebies.1` and frontend `20261113-fba-freebies.1`.
+- Live/production changes: none. No Sheet row, FBA import, stock value, Apps Script deployment, Pages publication or remote branch changed.
+- Next recommended action: complete the full verification suite, then prepare the protected PR handoff. After publication, continue the same-date snapshot-replacement design while warehouse staff supply real shipment activity.
+
+### 2026-11-14 — Historical FBA freebie correction manifest prepared
+
+- Status: local design complete for owner review; non-posting and not authorized for production execution.
+- Goal: define the exact auditable correction for the 720 historical freebies incorrectly held in `FBA_TRANSIT`, without touching current shipments, sellable Syoat inventory, Avee evidence or the open 140-unit lip-balm receipt.
+- Result: added manifest `FBA-FREEBIE-CORRECTION-2026-11-14-V1`, mapping nine preserved Approved dispatches to 400 Wooden Combs and 320 Bath Loofahs. The future correction is one linked compensating movement per source dispatch from `FBA_TRANSIT` to the virtual `SAMPLES` sink. Projected final effect is Transit -720, with `MAIN_WH`, `AMAZON_FBA`, FC quantities and physical stock unchanged.
+- Safety: apply authorization is false, proposed live movements are zero and current stock delta is zero. Existing Approved rows remain immutable. The four current shipments awaiting warehouse action are explicitly outside the manifest.
+- Future execution contract: Founder-only disabled-by-default idempotent preparation creates Draft corrections only after exact live preflight; a separate authorized manager performs maker-checker approval. Changed source evidence, duplicates, manifest mismatch, unexpected products or negative projected balances must fail closed.
+- Files changed: added `docs/PHASE_2_FBA_FREEBIE_CORRECTION.md`; updated `README.md`, `docs/ARCHITECTURE.md`, `docs/ROLE_CAPABILITIES.md`, `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks and results: backend/frontend syntax passed; 86 non-socket tests plus 2 localhost staging tests passed (88/88 total); the 52-action API catalogue and environment-template safety check passed; `git diff --check` passed. The localhost-only test was rerun with loopback permission after the normal sandbox correctly blocked binding to `127.0.0.1`.
+- Live/production changes: none. No Sheet row, movement, shipment, Apps Script deployment, frontend publication, GitHub remote or stock value changed.
+- Risks or blockers: execution still requires a current backup, fresh live dry run, reviewed migration code, protected-branch verification, owner deployment, separate enablement, maker-checker approval and immediate reconciliation. Snapshot-replacement work remains separate; FBA-011 is concluded by permanent exclusion and preservation, not mapping.
+- Next recommended action: enforce and publish the permanent Avee upload exclusion, then continue the snapshot-replacement design while the warehouse team completes current shipment actions.
+
+### 2026-11-13 — Optional manual FBA freebie workflow deployed and verified
+
+- Status: implementation, protected merge, owner deployment/publication and read-only live verification complete. Historical correction remains separate and blocked.
 - Goal: implement D-031 without allowing Wooden Combs, Bath Loofahs or future freebies to become sellable FBA transit stock.
 - Frontend: FBA Dispatch now has an optional **Manual Freebies** section. Warehouse staff choose only active `ItemType=Freebie` products and enter the whole-number quantity physically packed; leaving it empty records zero. Freebie products are excluded from the sellable dispatch-product picker.
 - Backend: `createMovement` validates freebie type/status, positive whole-number quantity, duplicates and current `MAIN_WH` availability. One idempotent submission returns the normal FBA Dispatch draft plus, when needed, a linked `Samples` draft from `MAIN_WH` to `SAMPLES`. The freebie draft retains the ERP shipment ID, Amazon reference and linked dispatch ID, and cannot be approved until its FBA Dispatch is Approved.
@@ -12,9 +38,10 @@ Last updated: 2026-11-13
 - Historical boundary: FBA-009's existing 720 units (400 Wooden Combs and 320 Bath Loofahs) remain unchanged in Transit pending a separately reviewed non-posting correction. This implementation does not reinterpret or rewrite historical Approved records.
 - Files changed for this implementation: `Code.gs`, `syoat-app.js`, `index.html`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `docs/DECISIONS.md`, `docs/ROLE_CAPABILITIES.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
 - Checks and results: active backend/frontend syntax passed; 86 non-socket tests plus 2 localhost staging tests passed (88/88 total); the 52-action API catalogue and environment-template safety check passed; `git diff --check` passed. New executable coverage proves paired-draft creation, dispatch-first approval, correct warehouse/transit effects, exact retry replay, and rejection of sellable, duplicate and unrelated freebie input.
-- Production actions still required: owner reviews the diff, publishes backend `3.2-phase2-fba-freebies.1`, publishes frontend `20261113-fba-freebies.1`, confirms active freebie product rows use exact `ItemType=Freebie`, then performs one no-freebie and one linked-freebie live smoke test without approving test drafts unless they represent real stock activity.
+- Production verification: backend Version 58 returned `3.2-phase2-fba-freebies.1` with `status: ok`; the live Founder FBA Dispatch form showed Optional Manual Freebies with Wooden Comb and Bath Loofah from the confirmed active `ItemType=Freebie` rows. No dummy movement or stock change was created. The owner instructed the warehouse team to use the workflow only with real shipments and actual packed quantities.
+- Remaining live acceptance: observe the first real no-freebie dispatch and the first real linked-freebie dispatch when business activity supplies them. Do not create or approve dummy stock events for testing.
 - Risks or blockers: a linked submission is recovery-controlled but Google Sheets is not transactional; any interrupted partial write must be reviewed through the existing recovery tools before retry. The historical 720-unit correction still requires a backup, reviewed dry run, owner approval and immediate reconciliation.
-- Next recommended action: owner review and controlled deployment of this local candidate, followed by the non-posting historical freebie correction design.
+- Next recommended action: prepare the non-posting historical freebie correction design while the warehouse team completes the real shipment actions.
 
 ### 2026-11-13 — Non-posting FBA receipt and variance manifest prepared
 
@@ -312,7 +339,7 @@ Last updated: 2026-11-13
 
 ## Active phase
 
-Phase 1 is complete and stored in `PHASE_1_COMPLETION.md`. Current records identify backend `3.2-phase2-fba-historical-linking.3` and frontend build `20261031-fba-reference.1`. Keerthana and Sai Ram's no-access task is closed under D-021; the four effective ERP users remain Lalith Kiran, Dharani, Pushpanjali and Zubedha.
+Phase 1 is complete and stored in `PHASE_1_COMPLETION.md`. Current records identify backend `3.2-phase2-fba-freebies.1` and frontend build `20261113-fba-freebies.1`. Keerthana and Sai Ram's no-access task is closed under D-021; the four effective ERP users remain Lalith Kiran, Dharani, Pushpanjali and Zubedha.
 
 Backend `3.2-phase2-fba-review.1` and frontend `20261028-fba-review.1` replace generic stock-count buttons on imported Amazon variances with `Review FBA Variance`. Manager-level Amazon roles classify each difference and save an evidence note without changing stock. Backend guards also block direct generic approve/edit/reject calls. Analytics uses the newest report import batch and shows 444 units of absolute drift for the current 2026-10-26 upload instead of the stale 1,042-unit historical total. Owner screenshots confirm the live build and workflow.
 
@@ -336,8 +363,8 @@ Backend `3.1-phase2-wp1.6` retains request-scoped Sheet read reuse and adds a 30
 - Local audit checkout contains `index.html`, `syoat-app.js`, styling, images, and older redesign artifacts.
 - Current backend: bound Google Apps Script connected to the live workbook.
 - The original supplied 2,145-line backend source was saved locally as `Code.gs`; that local file now contains the reviewed Work Package 2–7 changes and is no longer a byte-for-byte copy of the attachment.
-- Protected GitHub `main` is current through PR #7 merge commit `8a957dc`; PR #1 remains the audited source/CI baseline and later protected PRs contain the reviewed Phase 2 FBA changes and closeout records.
-- The current recorded production backend is `3.2-phase2-fba-historical-linking.3`; the current live frontend is build `20261031-fba-reference.1`. Source-control publication does not imply a new production deployment.
+- Protected GitHub `main` is current through the owner-confirmed PR #8 merge; PR #1 remains the audited source/CI baseline and later protected PRs contain the reviewed Phase 2 FBA changes and closeout records.
+- The current recorded production backend is `3.2-phase2-fba-freebies.1`; the current live frontend is build `20261113-fba-freebies.1`. Source-control publication does not imply a new production deployment.
 - Historical audit baseline: no package manifest, automated test suite, CI workflow, deployment guide, or staging configuration was present. The repository now contains the project foundation and required CI workflow.
 - Both committed JavaScript artifacts passed a basic Node syntax check during the audit.
 
@@ -385,16 +412,16 @@ This list records the original audit baseline for history. Later releases deploy
 
 ## Next recommended task
 
-Continue Phase 2 Work Package 2 as read-only inventory baseline/data-dictionary work. Repository and original-checkout synchronization are complete; do not perform a production correction or historical rewrite without separate owner approval and the required safeguards.
+Continue Phase 2 Work Package 2 with the same-date snapshot-replacement design while staff complete the real FBA shipment actions. FBA-011 is concluded under D-028 with permanent Avee upload exclusion and no Avee-to-Syoat mapping. The 720-unit historical freebie correction is designed but remains non-posting. Do not perform a production correction or historical rewrite without separate owner approval and the required safeguards.
 
 ## Production state
 
-- Source-control record: protected GitHub `main` includes the historical FBA closeout through PR #7 merge commit `8a957dc`. The original checkout is synchronized to that commit; its former local contents remain recoverable in stash `pre-sync-preservation-2026-11-12`.
-- Apps Script record: backend `3.2-phase2-fba-historical-linking.3` is the latest recorded deployed version. The one-time historical apply gate is removed.
-- Frontend record: build `20261031-fba-reference.1` is the latest recorded live frontend build.
+- Source-control record: protected GitHub `main` includes the optional manual-freebie workflow through owner-confirmed PR #8. The original checkout's former local contents remain recoverable in stash `pre-sync-preservation-2026-11-12`.
+- Apps Script record: backend `3.2-phase2-fba-freebies.1` is the latest recorded deployed version. The completed one-time historical linking apply gate remains removed.
+- Frontend record: build `20261113-fba-freebies.1` is the latest recorded live frontend build.
 - Live Google Sheet: PIN hashes/salts populated, readable PIN cells cleared, and 85 movement file references normalized.
 - Live Drive: the earlier migration audit reported 187 checked and private; the later read-only folder inventory observed at least 359 owner-only/not-shared files.
-- Deployment/health: the recorded owner-run backend deployment is healthy; PR #7 CI passed, the final migration dry run had zero mutations/conflicts, the Phase 2 health audit had zero recovery/unresolved errors, and the effective login allowlist remains four authorized identities.
+- Deployment/health: the owner-run backend Version 58 deployment is healthy and returns `3.2-phase2-fba-freebies.1`; the live Founder UI displays the optional manual-freebie workflow. PR #8 CI passed before merge, the final historical-linking dry run had zero mutations/conflicts, the Phase 2 health audit had zero recovery/unresolved errors, and the effective login allowlist remains four authorized identities.
 
 ## Handoff log
 

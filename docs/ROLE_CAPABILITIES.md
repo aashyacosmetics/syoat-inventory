@@ -1,6 +1,6 @@
 # Role and Capability Matrix
 
-Status: production access policy remains unchanged; local candidate `3.2-phase2-fba-historical-linking.2` retains the Founder-only historical FBA migration capability and keeps live apply disabled by default.
+Status: production access policy remains unchanged; deployed backend `3.2-phase2-fba-freebies.1` retains the Founder-only historical FBA migration capability, keeps that completed migration disabled, and adds the linked manual-freebie workflow described below.
 
 ## Enforcement model
 
@@ -97,7 +97,7 @@ Module-specific data remains restricted. Staff, support, purchasing, Amazon and 
 
 ## Action-level source
 
-The exact mapping of all 46 authenticated business actions is in:
+The exact mapping of all 52 authenticated business actions is in:
 
 - `Code.gs` → `ACTION_CAPABILITIES`
 - `config/api-catalog.json`

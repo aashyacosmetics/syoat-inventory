@@ -71,7 +71,7 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-fba-freebies.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-avee-exclusion.1");
 });
 
 test("FBA Dispatch frontend exposes an optional manual-freebie section without mixing transit stock", () => {
@@ -895,6 +895,68 @@ test("FBA report import saves evidence for review without changing stock", () =>
   const duplicate = post(harness, { ...payload, requestId: "req-fba-report-0002" });
   assert.equal(duplicate.success, false);
   assert.match(duplicate.error, /already imported/i);
+});
+
+test("FBA report import ignores Avee rows even if a submitted product mapping exists", () => {
+  const sheets = writeReadySheets();
+  sheets.Products = objectsToRows([
+    ...fixture.products.map(product => product.ProductID === "TEST-P001"
+      ? { ...product, AmazonASIN: "TEST-ASIN", FNSKU: "TEST-FNSKU" }
+      : product),
+    {
+      ProductID: "AVEE-P001",
+      SKU: "AVEE-SKU-001",
+      ProductName: "Avee Kids Shampoo",
+      AmazonASIN: "AVEE-ASIN-001",
+      FNSKU: "AVEE-FNSKU-001",
+      Status: "Inactive",
+    },
+  ]);
+  sheets.Stock_Counts = objectsToRows([], [
+    "CountID", "CountDateTime", "LocationID", "ProductID", "SystemQty",
+    "PhysicalQty", "Difference", "CountedByEmail", "ApprovedByEmail",
+    "Status", "Reason", "AdjustmentMovementID", "Notes",
+  ]);
+  sheets.FBA_Ledger_Snapshots = objectsToRows([], [
+    "SnapshotID", "ReportDate", "ProductID", "FC", "Qty", "Sold",
+    "UploadedByEmail", "UploadedAt",
+  ]);
+  const harness = createAppsScriptHarness(sheets);
+  const signedIn = login(harness).data;
+  const imported = post(harness, {
+    action: "createFbaReconciliation",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-report-avee-0001",
+    reportDate: "2026-11-14",
+    fileText: [
+      "date,asin,fnsku,title,disposition,ending warehouse balance,location",
+      "2026-11-14,TEST-ASIN,TEST-FNSKU,Syoat Test Product,SELLABLE,3,TEST_FC",
+      "2026-11-14,AVEE-ASIN-001,AVEE-FNSKU-001,Avee Kids Shampoo,SELLABLE,40,TEST_FC",
+    ].join("\n"),
+    fileName: "synthetic-fba-report-with-avee.csv",
+    fileMime: "text/csv",
+    items: [
+      { productID: "TEST-P001", ledgerQty: 3 },
+      { productID: "AVEE-P001", ledgerQty: 40 },
+    ],
+    fcSnapshot: [
+      { productID: "TEST-P001", fc: "TEST_FC", qty: 3, sold: 1 },
+      { productID: "AVEE-P001", fc: "TEST_FC", qty: 40, sold: 0 },
+    ],
+  });
+
+  assert.equal(imported.success, true, JSON.stringify(imported));
+  assert.equal(imported.data.ignoredAveeRows, 1);
+  assert.deepEqual(harness.call("sheetToObjects", "Stock_Counts").map(row => row.ProductID), ["TEST-P001"]);
+  assert.deepEqual(harness.call("sheetToObjects", "FBA_Ledger_Snapshots").map(row => row.ProductID), ["TEST-P001"]);
+});
+
+test("FBA upload frontend excludes Avee before Syoat ASIN mapping", () => {
+  const source = readProjectFile("syoat-app.js");
+  assert.match(source, /function isAveeFbaRow/);
+  assert.match(source, /if \(isAveeFbaRow\(a, fnsku, title, brand\)\) \{ ignoredAveeByAsin\[a\] = true; continue; \}/);
+  assert.match(source, /Avee is excluded from Syoat and nothing was imported/);
+  assert.match(source, /not included in Syoat counts, FC stock or analytics/);
 });
 
 test("retrying a completed request returns its result without another business event", () => {
