@@ -47,7 +47,7 @@ Important preservation rules:
 
 - Opening Balance: Founder only. Backend `3.1-phase2-wp1.3` aligns the issued UI capability and backend handler with the existing live Founder/Lalith setting.
 - Stock In, FBA Dispatch, Returns, Damage, Samples, Website Warehouse Ship, Flipkart, FirstCry, Return Received, Returns to Warehouse, and Returns Damaged: Founder, Co-Founder, Warehouse Manager, and Warehouse Operator.
-- FBA Receipt and Website FBA Ship: Founder, Co-Founder, and Warehouse Manager.
+- FBA Receipt and Website FBA Ship: Founder, Co-Founder, and Warehouse Manager. The prepared FBA Receipt picker returns only minimal dispatched-shipment identity and outstanding product quantities; backend creation and approval enforce the selected shipment, Amazon reference, destination FC and remaining balance.
 - Stock Audit: Founder, Co-Founder, Warehouse Manager, and Accounts.
 
 These feature settings are an additional gate. They do not replace the server-side role capability checks below.

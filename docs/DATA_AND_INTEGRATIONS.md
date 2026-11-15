@@ -71,6 +71,8 @@ The live `FBA_Shipments` sheet contains the exact `AmazonReferenceID` header. Ba
 
 Optional physical freebies are not Amazon shipment-plan lines. For a new FBA Dispatch, staff may manually enter active `ItemType=Freebie` products and the exact whole-number quantities packed. The backend stores them in a separate linked `Samples` movement from `MAIN_WH` to `SAMPLES`, carrying the internal shipment ID, external Amazon reference and linked FBA Dispatch ID. The linked freebie movement must remain Draft until the FBA Dispatch is Approved. It never contributes to `FBA_TRANSIT`, FBA Receipt or Amazon FC quantities.
 
+The prepared FBA Receipt workflow derives its limited picker from Approved linked FBA Dispatch less Approved linked FBA Receipt quantities. It exposes only shipment ID, Amazon reference, destination FC, status and per-product dispatched/received/remaining quantities. A new receipt is linked at draft creation, restricted to `FBA_TRANSIT -> AMAZON_FBA`, and revalidated against the latest outstanding shipment balance during approval. Manual linking of an older Approved movement applies the same reference, FC and quantity validations and refuses silent relinking.
+
 ## Integration principles
 
 - Prefer official APIs or controlled report imports.
@@ -85,6 +87,8 @@ Optional physical freebies are not Amazon shipment-plan lines. For a new FBA Dis
 
 - Amazon Seller/FBA for inventory, shipments, listings, and operational exceptions.
 - FirstCry, Flipkart, Myntra, JioMart, website/Shopify and additional marketplaces through the shared Phase 2 inventory-reconciliation contract. Controlled order/shipment report upload comes first; official API automation is added only where reliable access, status mapping and retry behavior are documented.
+
+Warehouse-affecting marketplace events are continuous daily inputs and require channel, external reference, exact SKU, quantity, event/status time and an idempotency key. Amazon FBA Inventory Ledger files are separate irregular weekly snapshots, commonly uploaded Monday or Tuesday. Every snapshot retains its Amazon report cutoff and ERP upload time. It may reconcile only the same-cutoff `AMAZON_FBA` position and must never overwrite or backdate intervening warehouse, marketplace, FBA Dispatch or FBA Receipt movements. This separation is binding under D-032.
 - Website platform for catalog, content, promotion, and operational issues.
 - Social channels or scheduling tools for content operations.
 - Google Drive for private evidence and approved report imports.

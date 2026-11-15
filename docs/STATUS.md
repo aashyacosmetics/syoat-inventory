@@ -1,6 +1,42 @@
 # Current Status and Handoff
 
-Last updated: 2026-11-14
+Last updated: 2026-11-15
+
+### 2026-11-15 — Shipment-linked FBA Receipt candidate completed locally
+
+- Status: P0 application candidate implemented locally; production and Google Sheets remain unchanged.
+- Backend: `3.2-phase2-fba-receipts.1` adds the capability-gated `getFbaReceiptShipmentOptions` action. It returns only shipments with an Approved dispatched-but-not-received balance and only minimal shipment/reference/FC/status and product quantity fields.
+- Write integrity: every new FBA Receipt is linked at draft creation, must use `FBA_TRANSIT -> AMAZON_FBA`, must match the shipment's dedicated Amazon reference and destination FC, and cannot exceed the product's latest linked dispatch balance. Approval repeats the validation under the business lock, so competing partial drafts cannot both consume the same units. The older manual-link correction path now applies the same validation and rejects silent relinking.
+- Frontend: `20261115-fba-receipts.1` adds the **Dispatched FBA Shipment** picker, auto-fills the reference and FC, limits product choices to outstanding shipment lines and describes the dispatched-not-received balance. Partial receipts remain supported.
+- Files changed for the workflow: `Code.gs`, `syoat-app.js`, `index.html`, `config/api-catalog.json`, `docs/API_CATALOG.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/ROLE_CAPABILITIES.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, tests and this handoff record. The pre-existing daily/snapshot documentation changes remain in the same local working set.
+- Checks performed: 92/92 automated tests passed (91 in the normal sandbox plus the localhost isolation test 2/2 with loopback permission); backend/frontend syntax passed; the 53-action API catalogue is current; environment-template safety and `git diff --check` passed.
+- Production actions still required: protected review/merge, owner deployment of `Code.gs`, owner publication of the frontend and a no-write UI acceptance check. Do not create a receipt merely to test it; use the next genuine Amazon located quantity.
+- Risks and blockers: this workflow corrects future receipt capture but does not clear the historical 4,516 Transit baseline or resolve `CNT-071` to `CNT-078`. Status automation, evidence-backed variance resolution and the owner-reviewed canonical historical migration remain separate pending P0 work.
+- Next recommended task after release acceptance: implement evidence-derived shipment status/closure while waiting for the next genuine shipment receipt event.
+
+### 2026-11-15 — Daily marketplace events separated from irregular FBA snapshots
+
+- Status: owner operating rule accepted and documented; no live data or application code changed.
+- Decision: website, Flipkart, FirstCry, JioMart, Myntra and other warehouse-affecting events are recorded daily, while the Amazon FBA Inventory Ledger is an independent dated snapshot uploaded approximately weekly, commonly Monday or Tuesday without a guaranteed day.
+- Mapping result: daily events retain channel, external reference, exact SKU, quantity, event/status time and an idempotency key. FBA files retain both report cutoff and upload time and compare only with ERP FBA at that cutoff. Later daily movements remain outside the snapshot comparison and cannot be overwritten or backdated by it.
+- Files changed for this clarification: `docs/DECISIONS.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks and results: documentation consistency and `git diff --check` passed; the previously completed 90/90 application suite remains the current code verification because this clarification changes no code.
+- Production actions still required: deploy and accept the prepared receipt candidate; then evidence-derived shipment closure, FBA variance resolution and the channel-neutral marketplace idempotency contract must implement D-032 before those workflows are considered complete.
+- Next recommended action: implement the shipment-linked FBA Receipt workflow first, then the marketplace event/idempotency bridge without coupling either workflow to a fixed FBA upload weekday.
+
+### 2026-11-15 — FBA inventory operating SOP and gap review
+
+- Status: staff operating flow documented; no live stock correction or application change performed.
+- Goal: define how Warehouse, FBA Transit and Amazon FBA are mapped and reconciled without mixing shipment status, movement-ledger stock and dated Amazon reports.
+- Result: added `docs/FBA_INVENTORY_OPERATING_SOP.md` with the end-to-end plan, physical handover, linked dispatch, product-level receipt, shortage/excess, dated Inventory Ledger, variance review, daily/weekly control and staff-teaching process. Product identity is exact FNSKU/ASIN based; Avee and freebies remain outside Syoat sellable FBA stock.
+- Evidence reviewed: the seven-page 2026-11-14 ERP shipment export, the 2026-11-12 Inventory Ledger example, current ERP Warehouse/Transit/FBA totals and current `CNT-071` to `CNT-078` variance batch. The shipment export confirms that status labels and stock movements remain out of alignment for historical records: many fully dispatched plans have zero receipt movements, and one Received plan still reports zero received quantities.
+- Current external check: the read-only Amazon India FBA inventory API on 2026-11-15 returned 1,428 active-Syoat fulfillable, 38 reserved and 2 unfulfillable units, with inbound quantities separate. This newer operational view is not compared directly to the older dated ledger as an adjustment instruction.
+- High-priority gaps: shipment-linked receipt picker/backend validation; automatic evidence-derived status/closure; a separate maker-checker variance-resolution workflow; and a non-posting historical canonical-ledger migration that clears only reviewed Transit quantities while replacing the 29 snapshot adjustments without double counting.
+- Files changed: `docs/FBA_INVENTORY_OPERATING_SOP.md`, `README.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks and results: full PDF rendered and visually inspected across all seven pages; existing code paths for dispatch/receipt linking, shipment status and FBA variance review inspected; 90/90 automated tests passed (including the localhost staging isolation test), backend/frontend syntax passed, the 52-action API catalogue and environment-isolation checks passed, and `git diff --check` passed.
+- Live/production changes: none. No Google Sheet row, movement, count, shipment, Apps Script deployment, frontend publication, Amazon resource or GitHub remote changed.
+- Risks or blockers: historical receipt posting remains blocked until the snapshot-basis replacement and per-product before/after manifest are reviewed. `CNT-071` to `CNT-078` must remain Pending evidence; they cannot be used as generic count approvals.
+- Next recommended action: implement the P0 shipment-linked FBA Receipt picker and backend approval-time validation, then prepare the historical canonical-ledger migration as a separate non-posting manifest.
 
 ### 2026-11-14 — Avee excluded from FBA uploads before mapping
 

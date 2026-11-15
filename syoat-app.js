@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20261114-fba-avee-exclusion.1";
+const BUILD_VERSION = "20261115-fba-receipts.1";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -1814,17 +1814,20 @@ function MovModal({
   // so received-vs-ordered quantities can be tracked back to the PO (Module B).
   const [purchaseOrderID, setPurchaseOrderID] = React.useState("");
   const openPOs = (purchaseOrders || []).filter(po => po.Status === "Approved");
-  // Warehouse operators receive only the minimum open-shipment information
-  // needed to record an FBA Dispatch. The full Amazon module remains hidden.
+  // Staff receive only the minimum shipment information needed for the selected
+  // movement: remaining plan quantities for Dispatch, or Approved dispatched-
+  // not-received quantities for Receipt. The full Amazon module remains hidden.
   const [fbaShipmentOptions, setFbaShipmentOptions] = React.useState(null);
   const [fbaShipmentError, setFbaShipmentError] = React.useState("");
   const [fbaShipmentID, setFbaShipmentID] = React.useState("");
   React.useEffect(() => {
-    if (type !== "FBA Dispatch") {
+    const linkedFbaMovement = type === "FBA Dispatch" || type === "FBA Receipt";
+    if (!linkedFbaMovement) {
       setFbaShipmentID("");
       setFreebieLines([]);
       return;
     }
+    if (type !== "FBA Dispatch") setFreebieLines([]);
     const firstSellable = products.find(product => product.ItemType !== "Freebie");
     setLines(rows => rows.map(row => {
       const selected = products.find(product => product.ProductID === row.pid);
@@ -1835,7 +1838,10 @@ function MovModal({
     let alive = true;
     setFbaShipmentOptions(null);
     setFbaShipmentError("");
-    api("getFbaDispatchShipmentOptions").then(rows => {
+    const shipmentRequest = type === "FBA Receipt"
+      ? api("getFbaReceiptShipmentOptions")
+      : api("getFbaDispatchShipmentOptions");
+    shipmentRequest.then(rows => {
       if (alive) setFbaShipmentOptions(Array.isArray(rows) ? rows : []);
     }).catch(e => {
       if (alive) {
@@ -1846,10 +1852,17 @@ function MovModal({
     return () => { alive = false; };
   }, [type]);
   const selectedFbaShipment = (fbaShipmentOptions || []).find(shipment => shipment.shipmentID === fbaShipmentID) || null;
+  const selectedFbaProductIDs = selectedFbaShipment ? new Set(selectedFbaShipment.lines.map(line => line.productID)) : null;
+  const selectableMovementProducts = products.filter(product => {
+    if ((type === "FBA Dispatch" || type === "FBA Receipt") && selectedFbaProductIDs) {
+      return selectedFbaProductIDs.has(product.ProductID);
+    }
+    return type !== "FBA Dispatch" && type !== "FBA Receipt" ? true : product.ItemType !== "Freebie";
+  });
   const freebieProducts = products.filter(product => product.Status === "Active" && product.ItemType === "Freebie");
   const [freebieLines, setFreebieLines] = React.useState([]);
   const [lines, setLines] = React.useState([{
-    pid: products[0]?.ProductID || "",
+    pid: (selectableMovementProducts.find(product => !l.some(row => row.pid === product.ProductID)) || selectableMovementProducts[0])?.ProductID || "",
     qty: "",
     cost: ""
   }]);
@@ -1997,11 +2010,13 @@ function MovModal({
       setErr("Select a reason.");
       return;
     }
-    if (type === "FBA Dispatch" && !fbaShipmentID) {
-      setErr("Select the open FBA shipment for this dispatch.");
+    if ((type === "FBA Dispatch" || type === "FBA Receipt") && !fbaShipmentID) {
+      setErr(type === "FBA Receipt"
+        ? "Select a dispatched FBA shipment with units still to receive."
+        : "Select the open FBA shipment for this dispatch.");
       return;
     }
-    if (type === "FBA Dispatch" && !refNo.trim()) {
+    if ((type === "FBA Dispatch" || type === "FBA Receipt") && !refNo.trim()) {
       setErr("Enter the Amazon Shipment ID in Reference No.");
       return;
     }
@@ -2055,7 +2070,7 @@ function MovModal({
         sourceLocationID: sd.src,
         destinationLocationID: sd.dst,
         referenceNumber: refNo,
-        amazonShipmentID: type === "FBA Dispatch" ? fbaShipmentID : "",
+        amazonShipmentID: (type === "FBA Dispatch" || type === "FBA Receipt") ? fbaShipmentID : "",
         carrierTrackingNumber: carrier,
         amazonDestinationFC: (type === "FBA Dispatch" || type === "FBA Receipt") ? destFC : "",
         notes: finalNotes,
@@ -2076,7 +2091,10 @@ function MovModal({
         ? await apiWritePost("createMovement", user.email, movPayload)
         : await apiWrite("createMovement", user.email, movPayload);
       const freebieMessage = res.freebieMovementID ? ` · ${res.freebieMovementID} manual freebies saved as a separate Draft` : "";
-      onDone(`✅ ${res.movementID} saved as Draft${freebieMessage}` + (user.canApprove ? " — approve the FBA Dispatch first, then its freebie Draft" : " — a Manager will approve them in that order"));
+      const nextStep = type === "FBA Dispatch" && res.freebieMovementID
+        ? (user.canApprove ? " — approve the FBA Dispatch first, then its freebie Draft" : " — a Manager will approve them in that order")
+        : (user.canApprove ? " — ready for approval" : " — a Manager will approve it");
+      onDone(`✅ ${res.movementID} saved as Draft${freebieMessage}${nextStep}`);
       onClose();
     } catch (e) {
       setErr(e.message);
@@ -2214,15 +2232,15 @@ function MovModal({
     }
   }, user.role)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
-  }, type === "FBA Dispatch" ? "Amazon Shipment ID / Reference *" : "Reference No."), /*#__PURE__*/React.createElement("input", {
+  }, (type === "FBA Dispatch" || type === "FBA Receipt") ? "Amazon Shipment ID / Reference *" : "Reference No."), /*#__PURE__*/React.createElement("input", {
     value: refNo,
     onChange: e => setRefNo(e.target.value),
-    readOnly: type === "FBA Dispatch" && !!(selectedFbaShipment && selectedFbaShipment.amazonReferenceID),
-    placeholder: type === "FBA Dispatch" ? "Exact Amazon Shipment ID" : "Invoice / Order ID",
-    style: { ...inp, background: type === "FBA Dispatch" && selectedFbaShipment && selectedFbaShipment.amazonReferenceID ? "#f5ecdc" : inp.background }
-  }))), type === "FBA Dispatch" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    readOnly: (type === "FBA Dispatch" || type === "FBA Receipt") && !!(selectedFbaShipment && selectedFbaShipment.amazonReferenceID),
+    placeholder: (type === "FBA Dispatch" || type === "FBA Receipt") ? "Exact Amazon Shipment ID" : "Invoice / Order ID",
+    style: { ...inp, background: (type === "FBA Dispatch" || type === "FBA Receipt") && selectedFbaShipment && selectedFbaShipment.amazonReferenceID ? "#f5ecdc" : inp.background }
+  }))), (type === "FBA Dispatch" || type === "FBA Receipt") && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
-  }, "Open FBA Shipment *"), /*#__PURE__*/React.createElement("select", {
+  }, type === "FBA Receipt" ? "Dispatched FBA Shipment *" : "Open FBA Shipment *"), /*#__PURE__*/React.createElement("select", {
     value: fbaShipmentID,
     onChange: e => {
       const shipmentID = e.target.value;
@@ -2230,12 +2248,17 @@ function MovModal({
       const shipment = (fbaShipmentOptions || []).find(row => row.shipmentID === shipmentID);
       setDestFC(shipment ? shipment.destinationFC : "");
       setRefNo(shipment ? shipment.amazonReferenceID || "" : "");
+      if (shipment && shipment.lines && shipment.lines.length) {
+        const first = shipment.lines[0];
+        const product = products.find(row => row.ProductID === first.productID);
+        setLines([{ pid: first.productID, qty: "", cost: product && product.UnitCost ? product.UnitCost : "" }]);
+      }
     },
     disabled: fbaShipmentOptions === null,
     style: inp
-  }, [/*#__PURE__*/React.createElement("option", { key: "", value: "" }, fbaShipmentOptions === null ? "Loading open shipments..." : "Select shipment...")].concat(
-    (fbaShipmentOptions || []).map(shipment => /*#__PURE__*/React.createElement("option", { key: shipment.shipmentID, value: shipment.shipmentID }, (shipment.amazonReferenceID || shipment.shipmentID) + " · " + shipment.destinationFC + " · " + shipment.lines.reduce((sum, line) => sum + Number(line.remainingQty || 0), 0) + " units remaining"))
-  )), fbaShipmentError && /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 11, marginTop: -8, marginBottom: 10 } }, fbaShipmentError), fbaShipmentOptions !== null && fbaShipmentOptions.length === 0 && !fbaShipmentError && /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 11, marginTop: -8, marginBottom: 10 } }, "No open shipment plan is available. Ask the Warehouse Manager to create one in Amazon FBA first."), selectedFbaShipment && /*#__PURE__*/React.createElement("div", { style: { background: "#f5ecdc", borderRadius: 8, padding: "8px 10px", fontSize: 11, color: "#6f6152", marginTop: -6, marginBottom: 10 } }, selectedFbaShipment.lines.map(line => line.productID + ": " + line.remainingQty + " remaining").join(" · "))), (type === "FBA Dispatch" || type === "Website – WH Ship" || type === "Website – FBA Ship" || type === "Flipkart Dispatch" || type === "Firstcry Dispatch") && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+  }, [/*#__PURE__*/React.createElement("option", { key: "", value: "" }, fbaShipmentOptions === null ? "Loading shipments..." : "Select shipment...")].concat(
+    (fbaShipmentOptions || []).map(shipment => /*#__PURE__*/React.createElement("option", { key: shipment.shipmentID, value: shipment.shipmentID }, (shipment.amazonReferenceID || shipment.shipmentID) + " · " + shipment.destinationFC + " · " + shipment.lines.reduce((sum, line) => sum + Number(line.remainingQty || 0), 0) + (type === "FBA Receipt" ? " dispatched units to receive" : " plan units remaining")))
+  )), fbaShipmentError && /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 11, marginTop: -8, marginBottom: 10 } }, fbaShipmentError), fbaShipmentOptions !== null && fbaShipmentOptions.length === 0 && !fbaShipmentError && /*#__PURE__*/React.createElement("div", { style: { color: "#b23a2e", fontSize: 11, marginTop: -8, marginBottom: 10 } }, type === "FBA Receipt" ? "No Approved dispatched quantity is waiting for receipt." : "No open shipment plan is available. Ask the Warehouse Manager to create one in Amazon FBA first."), selectedFbaShipment && /*#__PURE__*/React.createElement("div", { style: { background: "#f5ecdc", borderRadius: 8, padding: "8px 10px", fontSize: 11, color: "#6f6152", marginTop: -6, marginBottom: 10 } }, selectedFbaShipment.lines.map(line => line.productID + ": " + line.remainingQty + (type === "FBA Receipt" ? " dispatched-not-received" : " plan remaining")).join(" · "))), (type === "FBA Dispatch" || type === "Website – WH Ship" || type === "Website – FBA Ship" || type === "Flipkart Dispatch" || type === "Firstcry Dispatch") && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     style: lbl
   }, "Carrier / AWB"), /*#__PURE__*/React.createElement("input", {
     value: carrier,
@@ -2247,9 +2270,9 @@ function MovModal({
   }, "Destination FC"), /*#__PURE__*/React.createElement("input", {
     value: destFC,
     onChange: e => setDestFC(e.target.value),
-    readOnly: type === "FBA Dispatch",
+    readOnly: type === "FBA Dispatch" || type === "FBA Receipt",
     placeholder: "e.g. HYD3 — check the shipment plan from Pushpa",
-    style: { ...inp, background: type === "FBA Dispatch" ? "#f5ecdc" : inp.background }
+    style: { ...inp, background: (type === "FBA Dispatch" || type === "FBA Receipt") ? "#f5ecdc" : inp.background }
   })), type === "FBA Dispatch" && /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#fff8e8",
@@ -2375,7 +2398,7 @@ function MovModal({
         fontWeight: 600,
         background: "#fdf9f1"
       }
-    }, products.filter(p => type !== "FBA Dispatch" || p.ItemType !== "Freebie").map(p => /*#__PURE__*/React.createElement("option", {
+    }, selectableMovementProducts.map(p => /*#__PURE__*/React.createElement("option", {
       key: p.ProductID,
       value: p.ProductID
     }, p.ProductName, " (", p.VariantName, ")")))), /*#__PURE__*/React.createElement("button", {
