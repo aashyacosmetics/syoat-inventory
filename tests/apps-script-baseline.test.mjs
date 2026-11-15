@@ -71,7 +71,7 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-fba-avee-exclusion.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-receipts.1");
 });
 
 test("FBA Dispatch frontend exposes an optional manual-freebie section without mixing transit stock", () => {
@@ -81,7 +81,15 @@ test("FBA Dispatch frontend exposes an optional manual-freebie section without m
   assert.match(source, /saved as a separate Samples draft from Main Warehouse and never enter FBA Transit/);
   assert.match(source, /freebieLines: type === "FBA Dispatch"/);
   assert.match(source, /product\.ItemType === "Freebie"/);
-  assert.match(source, /type !== "FBA Dispatch" \|\| p\.ItemType !== "Freebie"/);
+  assert.match(source, /product\.ItemType !== "Freebie"/);
+});
+
+test("FBA Receipt frontend requires a dispatched shipment and sends the link with the draft", () => {
+  const source = readProjectFile("syoat-app.js");
+  assert.match(source, /getFbaReceiptShipmentOptions/);
+  assert.match(source, /Dispatched FBA Shipment \*/);
+  assert.match(source, /dispatched-not-received/);
+  assert.match(source, /amazonShipmentID: \(type === "FBA Dispatch" \|\| type === "FBA Receipt"\) \? fbaShipmentID : ""/);
 });
 
 test("public staff picker exposes only name, email, and role", () => {
@@ -625,6 +633,18 @@ test("FBA Dispatch requires an open shipment, matching Amazon reference, and pla
   });
   assert.equal(approved.success, true, JSON.stringify(approved));
 
+  const silentRelink = post(harness, {
+    action: "linkMovementToShipment",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-receipt-relink-0001",
+    movementID: first.data.movementID,
+    shipmentID: "SHIP-TEST-001",
+  });
+  assert.equal(silentRelink.success, false);
+  const stillLinked = harness.call("sheetToObjects", "Movement_Headers")
+    .find(row => row.MovementID === first.data.movementID);
+  assert.equal(stillLinked.AmazonShipmentID, "SHIP-TEST-001");
+
   const staleApproval = post(harness, {
     action: "approveMovement",
     sessionToken: signedIn.sessionToken,
@@ -639,6 +659,117 @@ test("FBA Dispatch requires an open shipment, matching Amazon reference, and pla
     sessionToken: signedIn.sessionToken,
   });
   assert.equal(options.data[0].lines[0].remainingQty, 1);
+});
+
+test("FBA Receipt requires the linked dispatch balance and revalidates partial receipts at approval", () => {
+  const sheets = writeReadySheets();
+  const locationHeaders = sheets.Locations[0];
+  sheets.Locations.push(locationHeaders.map(header => ({
+    LocationID: "AMAZON_FBA",
+    LocationName: "Amazon FBA aggregate",
+    Status: "Active",
+  })[header] ?? ""));
+  const harness = createAppsScriptHarness(sheets);
+  const signedIn = login(harness).data;
+  const dispatch = post(harness, {
+    action: "createMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-receipt-dispatch-create-0001",
+    movementType: "FBA Dispatch",
+    sourceLocationID: "MAIN_WH",
+    destinationLocationID: "FBA_TRANSIT",
+    referenceNumber: "FBA15MTEST01",
+    amazonShipmentID: "SHIP-TEST-001",
+    amazonDestinationFC: "TEST_FC",
+    lines: [{ productID: "TEST-P001", quantity: 4 }],
+  });
+  assert.equal(dispatch.success, true, JSON.stringify(dispatch));
+  assert.equal(post(harness, {
+    action: "approveMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-receipt-dispatch-approve-0001",
+    movementID: dispatch.data.movementID,
+  }).success, true);
+
+  const initialOptions = post(harness, {
+    action: "getFbaReceiptShipmentOptions",
+    sessionToken: signedIn.sessionToken,
+  });
+  assert.equal(initialOptions.success, true, JSON.stringify(initialOptions));
+  assert.equal(initialOptions.data.length, 1);
+  assert.deepEqual(Object.keys(initialOptions.data[0]).sort(), ["amazonReferenceID", "destinationFC", "lines", "shipmentID", "status"]);
+  assert.deepEqual(Object.keys(initialOptions.data[0].lines[0]).sort(), ["dispatchedQty", "productID", "receivedQty", "remainingQty"]);
+  assert.equal(initialOptions.data[0].lines[0].dispatchedQty, 4);
+  assert.equal(initialOptions.data[0].lines[0].receivedQty, 0);
+  assert.equal(initialOptions.data[0].lines[0].remainingQty, 4);
+
+  const receiptBase = {
+    action: "createMovement",
+    sessionToken: signedIn.sessionToken,
+    movementType: "FBA Receipt",
+    sourceLocationID: "FBA_TRANSIT",
+    destinationLocationID: "AMAZON_FBA",
+    referenceNumber: "FBA15MTEST01",
+    amazonShipmentID: "SHIP-TEST-001",
+    amazonDestinationFC: "TEST_FC",
+    lines: [{ productID: "TEST-P001", quantity: 3 }],
+  };
+  const missingShipment = post(harness, {
+    ...receiptBase,
+    requestId: "req-fba-receipt-missing-0001",
+    amazonShipmentID: "",
+  });
+  assert.equal(missingShipment.success, false);
+  assert.match(missingShipment.error, /select a dispatched FBA shipment/i);
+
+  const wrongReference = post(harness, {
+    ...receiptBase,
+    requestId: "req-fba-receipt-reference-0001",
+    referenceNumber: "FBA15MOTHER01",
+  });
+  assert.equal(wrongReference.success, false);
+  assert.match(wrongReference.error, /Amazon reference must match shipment/i);
+
+  const tooMany = post(harness, {
+    ...receiptBase,
+    requestId: "req-fba-receipt-excess-0001",
+    lines: [{ productID: "TEST-P001", quantity: 5 }],
+  });
+  assert.equal(tooMany.success, false);
+  assert.match(tooMany.error, /dispatched-not-received balance/i);
+
+  const first = post(harness, { ...receiptBase, requestId: "req-fba-receipt-first-0001" });
+  const competing = post(harness, { ...receiptBase, requestId: "req-fba-receipt-second-0001" });
+  assert.equal(first.success, true, JSON.stringify(first));
+  assert.equal(competing.success, true, JSON.stringify(competing));
+  const created = harness.call("sheetToObjects", "Movement_Headers")
+    .find(row => row.MovementID === first.data.movementID);
+  assert.equal(created.AmazonShipmentID, "SHIP-TEST-001");
+  assert.equal(created.ReferenceNumber, "FBA15MTEST01");
+
+  const approved = post(harness, {
+    action: "approveMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-receipt-approve-0001",
+    movementID: first.data.movementID,
+  });
+  assert.equal(approved.success, true, JSON.stringify(approved));
+
+  const staleApproval = post(harness, {
+    action: "approveMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-receipt-approve-0002",
+    movementID: competing.data.movementID,
+  });
+  assert.equal(staleApproval.success, false);
+  assert.match(staleApproval.error, /dispatched-not-received balance/i);
+
+  const finalOptions = post(harness, {
+    action: "getFbaReceiptShipmentOptions",
+    sessionToken: signedIn.sessionToken,
+  });
+  assert.equal(finalOptions.data[0].lines[0].receivedQty, 3);
+  assert.equal(finalOptions.data[0].lines[0].remainingQty, 1);
 });
 
 test("FBA Dispatch records optional manual freebies as a separate Samples draft", () => {

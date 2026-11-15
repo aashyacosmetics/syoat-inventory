@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-avee-exclusion.1",
+  VERSION:               "3.2-phase2-fba-receipts.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -104,6 +104,7 @@ const ACTION_CAPABILITIES = {
   getPurchaseOrders:           "purchasing.orders.view",
   getFbaShipments:             "amazon.shipments.view",
   getFbaDispatchShipmentOptions: "inventory.movements.create",
+  getFbaReceiptShipmentOptions: "inventory.movements.create",
   getFbaLedgerSnapshots:       "amazon.reconciliation.view",
   getHistoricalFbaLinkingDryRun: "amazon.shipments.historicalMigration",
   getOperationalFile:          "inventory.files.view",
@@ -326,6 +327,7 @@ function handleAuthenticatedAction(action, body, email) {
   if (action === "getPurchaseOrders")  return ok(getPurchaseOrders(body));
   if (action === "getFbaShipments")    return ok(getFbaShipments(body));
   if (action === "getFbaDispatchShipmentOptions") return ok(getFbaDispatchShipmentOptions(staff));
+  if (action === "getFbaReceiptShipmentOptions") return ok(getFbaReceiptShipmentOptions(staff));
   if (action === "getFbaLedgerSnapshots") return ok(getFbaLedgerSnapshots(body));
   if (action === "getHistoricalFbaLinkingDryRun") return ok(getHistoricalFbaLinkingDryRun(body, staff));
   if (action === "getOperationalFile") return ok(getOperationalFile(body, staff));
@@ -1266,6 +1268,7 @@ function createMovement(body, staff) {
   // The server validates the selected plan and remaining quantities; the
   // limited frontend picker is only a convenience and is not trusted.
   assertFbaDispatchShipmentPlan(body, body.lines);
+  assertFbaReceiptShipmentPlan(body, body.lines);
 
   // Step 0 (2026-07-19): negative-stock guard. Previously a typo or double-entry
   // on Stock In/Returns/Damage/dispatch movements could push a physical location
@@ -1418,6 +1421,7 @@ function approveMovement(body, staff) {
   // created against the same remaining quantity, but only the first valid
   // approval may consume it.
   assertFbaDispatchShipmentPlan(header, movementLines);
+  assertFbaReceiptShipmentPlan(header, movementLines);
   assertLinkedFbaFreebieApproval(header);
   // This check runs while the global business-write lock is held. It evaluates
   // the latest Approved stock, not the earlier quantity seen when the Draft was
@@ -2989,6 +2993,47 @@ function getFbaDispatchShipmentOptions(staff) {
     .sort((a, b) => _idNum(b.shipmentID) - _idNum(a.shipmentID));
 }
 
+// Minimal shipment view for an FBA Receipt. Unlike the dispatch picker, this
+// is derived from Approved linked dispatches rather than planned quantities.
+// A plan becomes receivable only after stock actually moved to FBA_TRANSIT.
+function getFbaReceiptShipmentOptions(staff) {
+  requireRole(staff, FBA_SHIPMENT_ROLES);
+  checkFeatureGate("FBA Receipt", staff.Role);
+
+  const totals = shipmentQtyTotals();
+  const allLines = sheetToObjects(SHEETS.FBA_SHIPMENT_LINES);
+  return sheetToObjects(SHEETS.FBA_SHIPMENTS)
+    .map(shipment => {
+      const shipmentTotals = totals[shipment.ShipmentID] || { shipped: {}, received: {} };
+      const productIDs = {};
+      allLines
+        .filter(line => line.ShipmentID === shipment.ShipmentID)
+        .forEach(line => { productIDs[String(line.ProductID)] = true; });
+      Object.keys(shipmentTotals.shipped || {}).forEach(productID => { productIDs[String(productID)] = true; });
+
+      const lines = Object.keys(productIDs).map(productID => {
+        const dispatchedQty = parseFloat((shipmentTotals.shipped || {})[productID]) || 0;
+        const receivedQty = parseFloat((shipmentTotals.received || {})[productID]) || 0;
+        return {
+          productID: productID,
+          dispatchedQty: dispatchedQty,
+          receivedQty: receivedQty,
+          remainingQty: Math.max(0, dispatchedQty - receivedQty),
+        };
+      }).filter(line => line.remainingQty > 0);
+
+      return {
+        shipmentID: shipment.ShipmentID,
+        amazonReferenceID: shipment[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD] || "",
+        destinationFC: shipment.DestinationFC,
+        status: shipment.Status,
+        lines: lines,
+      };
+    })
+    .filter(shipment => shipment.lines.length > 0)
+    .sort((a, b) => _idNum(b.shipmentID) - _idNum(a.shipmentID));
+}
+
 function assertFbaDispatchShipmentPlan(header, lines) {
   const movementType = String(header.MovementType || header.movementType || "");
   if (movementType !== "FBA Dispatch") return;
@@ -3046,6 +3091,60 @@ function assertFbaDispatchShipmentPlan(header, lines) {
     return productID + " (dispatch " + requested[productID] + ", remaining " + remaining + ")";
   });
   if (problems.length) throw new Error("Invalid FBA Dispatch: quantity exceeds the selected shipment plan: " + problems.join("; "));
+}
+
+function assertFbaReceiptShipmentPlan(header, lines) {
+  const movementType = String(header.MovementType || header.movementType || "");
+  if (movementType !== "FBA Receipt") return;
+
+  const shipmentID = String(header.AmazonShipmentID || header.amazonShipmentID || "").trim();
+  const referenceNumber = String(header.ReferenceNumber || header.referenceNumber || "").trim();
+  if (!shipmentID) throw new Error("Invalid FBA Receipt: select a dispatched FBA shipment before recording this receipt.");
+  if (!referenceNumber) throw new Error("Invalid FBA Receipt: the Amazon Shipment ID / Reference is required.");
+
+  const source = String(header.SourceLocationID || header.sourceLocationID || "");
+  const destination = String(header.DestinationLocationID || header.destinationLocationID || "");
+  if (source !== "FBA_TRANSIT" || destination !== "AMAZON_FBA") {
+    throw new Error("Invalid FBA Receipt: stock must move from FBA_TRANSIT to AMAZON_FBA.");
+  }
+
+  const shipment = sheetToObjects(SHEETS.FBA_SHIPMENTS).find(row => row.ShipmentID === shipmentID);
+  if (!shipment) throw new Error("FBA shipment not found: " + shipmentID);
+
+  const plannedReference = normalizeAmazonReferenceID(shipment[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD], false);
+  const suppliedReference = normalizeAmazonReferenceID(referenceNumber, false);
+  if (!plannedReference) throw new Error("Invalid FBA Receipt: shipment " + shipmentID + " has no dedicated Amazon reference.");
+  if (suppliedReference !== plannedReference) {
+    throw new Error("Invalid FBA Receipt: Amazon reference must match shipment " + shipmentID + ": " + plannedReference);
+  }
+  if (Object.prototype.hasOwnProperty.call(header, "referenceNumber")) header.referenceNumber = plannedReference;
+
+  const suppliedFC = String(header.AmazonDestinationFC || header.amazonDestinationFC || "").trim().toUpperCase();
+  const plannedFC = String(shipment.DestinationFC || "").trim().toUpperCase();
+  if (!suppliedFC || suppliedFC !== plannedFC) {
+    throw new Error("Invalid FBA Receipt: destination FC must match shipment " + shipmentID + ": " + plannedFC);
+  }
+  if (Object.prototype.hasOwnProperty.call(header, "amazonDestinationFC")) header.amazonDestinationFC = plannedFC;
+
+  const totals = shipmentQtyTotals()[shipmentID] || { shipped: {}, received: {} };
+  const requested = {};
+  lines.forEach(line => {
+    const productID = String(line.ProductID || line.productID || "");
+    const quantity = parseFloat(line.Quantity !== undefined ? line.Quantity : line.quantity) || 0;
+    requested[productID] = (requested[productID] || 0) + quantity;
+  });
+
+  const problems = Object.keys(requested).filter(productID => {
+    const remaining = (parseFloat(totals.shipped[productID]) || 0) - (parseFloat(totals.received[productID]) || 0);
+    return remaining <= 0 || requested[productID] > remaining;
+  }).map(productID => {
+    const remaining = Math.max(0,
+      (parseFloat(totals.shipped[productID]) || 0) - (parseFloat(totals.received[productID]) || 0));
+    return productID + " (receive " + requested[productID] + ", dispatched-not-received " + remaining + ")";
+  });
+  if (problems.length) {
+    throw new Error("Invalid FBA Receipt: quantity exceeds the selected shipment's dispatched-not-received balance: " + problems.join("; "));
+  }
 }
 
 function getFbaShipments(params) {
@@ -3573,9 +3672,22 @@ function linkMovementToShipment(body, staff) {
     throw new Error("Only FBA Dispatch or FBA Receipt movements can be linked to a shipment.");
   }
   if (mov.Status !== "Approved") throw new Error("Only an Approved movement can be linked to a shipment.");
+  if (mov.AmazonShipmentID) {
+    throw new Error("This movement is already linked to shipment " + mov.AmazonShipmentID + ". Unlink it before making a correction.");
+  }
 
   const shipments = sheetToObjects(SHEETS.FBA_SHIPMENTS);
   if (!shipments.find(s => s.ShipmentID === body.shipmentID)) throw new Error("ShipmentID not found: " + body.shipmentID);
+
+  // The manual linker is a correction path for older Approved movements. It
+  // must enforce the same plan/reference/quantity rules as the normal linked
+  // draft workflow; otherwise it could silently overstate shipped or received
+  // quantities after approval.
+  const candidate = Object.assign({}, mov, { AmazonShipmentID: body.shipmentID });
+  const movementLines = sheetToObjects(SHEETS.MOV_LINES)
+    .filter(line => line.MovementID === body.movementID);
+  assertFbaDispatchShipmentPlan(candidate, movementLines);
+  assertFbaReceiptShipmentPlan(candidate, movementLines);
 
   updateRow(SHEETS.MOV_HEADERS, movIdx + 2, { AmazonShipmentID: body.shipmentID });
 

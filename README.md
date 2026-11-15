@@ -44,6 +44,7 @@ The present application is a static React frontend backed by Google Apps Script 
 - [Phase 1 completion record](docs/PHASE_1_COMPLETION.md)
 - [Phase 2 execution plan](docs/PHASE_2_PLAN.md)
 - [Phase 2 inventory baseline](docs/PHASE_2_INVENTORY_BASELINE.md)
+- [FBA inventory operating SOP](docs/FBA_INVENTORY_OPERATING_SOP.md)
 - [Phase 2 non-posting FBA receipt and variance manifest](docs/PHASE_2_FBA_RECEIPT_MANIFEST.md)
 - [Phase 2 historical FBA freebie correction manifest](docs/PHASE_2_FBA_FREEBIE_CORRECTION.md)
 - [Phase 2 historical FBA shipment linking](docs/PHASE_2_FBA_HISTORICAL_LINKING.md)

@@ -178,6 +178,14 @@
       "targetCapability": "inventory.movements.create"
     },
     {
+      "action": "getFbaReceiptShipmentOptions",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability inventory.movements.create; returns minimal dispatched-not-received shipment fields only",
+      "targetCapability": "inventory.movements.create"
+    },
+    {
       "action": "getFbaLedgerSnapshots",
       "routes": [
         "POST"

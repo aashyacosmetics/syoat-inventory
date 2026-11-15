@@ -51,6 +51,7 @@ Only `ping`, a strictly minimal staff picker, and the PIN-login entry are reacha
 | `getPurchaseOrders` | POST | Valid session + central capability purchasing.orders.view | current | `purchasing.orders.view` |
 | `getFbaShipments` | POST | Valid session + central capability amazon.shipments.view | current | `amazon.shipments.view` |
 | `getFbaDispatchShipmentOptions` | POST | Valid session + central capability inventory.movements.create; returns minimal open-shipment fields only | current | `inventory.movements.create` |
+| `getFbaReceiptShipmentOptions` | POST | Valid session + central capability inventory.movements.create; returns minimal dispatched-not-received shipment fields only | current | `inventory.movements.create` |
 | `getFbaLedgerSnapshots` | POST | Valid session + central capability amazon.reconciliation.view | current | `amazon.reconciliation.view` |
 | `getHistoricalFbaLinkingDryRun` | POST | Valid Founder session + central capability amazon.shipments.historicalMigration; read-only reviewed manifest preflight | none | `amazon.shipments.historicalMigration` |
 | `getOperationalFile` | POST | Valid session + central capability inventory.files.view; movement ownership/scope and stored file reference are revalidated | current | `inventory.files.view` |
