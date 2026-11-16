@@ -1,12 +1,25 @@
 # Current Status and Handoff
 
-Last updated: 2026-11-15
+Last updated: 2026-11-16
 
-### 2026-11-15 — Shipment-linked FBA Receipt candidate completed locally
+### 2026-11-16 — Regular FBA acceptance changed to Transit-only clearance
+
+- Status: local application candidate implemented; no production data, deployment or publication changed.
+- Owner rule: Amazon product-level located/accepted evidence is a recurring operational event that clears `FBA_TRANSIT`. It must not add to `AMAZON_FBA`, because the irregular dated Amazon Inventory Ledger upload is the Phase 2 authority for aggregate Amazon stock.
+- Backend: candidate `3.2-phase2-fba-transit-clearance.1` requires every FBA Receipt to use `FBA_TRANSIT -> FBA_ACCEPTED`. `FBA_ACCEPTED` is a controlled virtual evidence endpoint included in endpoint validation and stock calculation, so an Approved receipt reduces Transit without creating stock at the endpoint or changing Amazon FBA.
+- Frontend: candidate `20261116-fba-transit-clearance.1` labels the action **Clear FBA Transit — Amazon evidence**. The internal evidence endpoint is excluded from all inventory-location and stock displays; staff see only that Transit is cleared, while Amazon FBA remains controlled by the latest dated ledger upload.
+- Integrity retained: exact shipment/reference/FC validation, dispatched-minus-received limits, partial receipts, approval-lock revalidation, request idempotency, maker-checker and audit history remain unchanged. Shipment receipt totals continue to derive from Approved linked FBA Receipt movements.
+- Permanent training rule recorded: plan = no stock movement; courier handover = Warehouse down/Transit up; Amazon located evidence = Transit down only; Inventory Ledger upload = independent Amazon FBA authority. The contradictory older “FBA up” training sentence was removed.
+- Files changed: `Code.gs`, `syoat-app.js`, `index.html`, receipt regression tests, `docs/DECISIONS.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, `docs/PHASE_2_FBA_ALIGNMENT.md`, `docs/INVENTORY_DATA_DICTIONARY.md`, `docs/CHANGELOG.md` and this handoff.
+- Checks performed: 92/92 automated tests passed (91 in the normal sandbox plus the localhost isolation test 2/2 with loopback permission); backend/frontend syntax passed; the 53-action API catalogue is current; environment-template safety and `git diff --check` passed.
+- Production actions still required: protected review/merge, owner deployment of `Code.gs`, owner frontend publication and acceptance with genuine product-level Amazon located evidence only. Do not create a dummy receipt.
+- Next recommended task: after verification, record the confirmed `SHIP-001 / FBA15MRFBLH8` 98 shampoo and 140 lip-balm quantities through the revised receipt flow, approve them, confirm Transit decreases by 238 while Amazon FBA is unchanged, then mark the balanced shipment Received.
+
+### 2026-11-15 — Shipment-linked FBA Receipt candidate completed locally (superseded by D-033 route correction)
 
 - Status: P0 application candidate implemented locally; production and Google Sheets remain unchanged.
 - Backend: `3.2-phase2-fba-receipts.1` adds the capability-gated `getFbaReceiptShipmentOptions` action. It returns only shipments with an Approved dispatched-but-not-received balance and only minimal shipment/reference/FC/status and product quantity fields.
-- Write integrity: every new FBA Receipt is linked at draft creation, must use `FBA_TRANSIT -> AMAZON_FBA`, must match the shipment's dedicated Amazon reference and destination FC, and cannot exceed the product's latest linked dispatch balance. Approval repeats the validation under the business lock, so competing partial drafts cannot both consume the same units. The older manual-link correction path now applies the same validation and rejects silent relinking.
+- Historical write-integrity design: every new FBA Receipt was linked at draft creation and originally used `FBA_TRANSIT -> AMAZON_FBA`; D-033 supersedes only that destination with `FBA_ACCEPTED`. Shipment reference/FC matching, dispatched-minus-received limits, approval-lock validation and silent-relink rejection remain active.
 - Frontend: `20261115-fba-receipts.1` adds the **Dispatched FBA Shipment** picker, auto-fills the reference and FC, limits product choices to outstanding shipment lines and describes the dispatched-not-received balance. Partial receipts remain supported.
 - Files changed for the workflow: `Code.gs`, `syoat-app.js`, `index.html`, `config/api-catalog.json`, `docs/API_CATALOG.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/ROLE_CAPABILITIES.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, tests and this handoff record. The pre-existing daily/snapshot documentation changes remain in the same local working set.
 - Checks performed: 92/92 automated tests passed (91 in the normal sandbox plus the localhost isolation test 2/2 with loopback permission); backend/frontend syntax passed; the 53-action API catalogue is current; environment-template safety and `git diff --check` passed.

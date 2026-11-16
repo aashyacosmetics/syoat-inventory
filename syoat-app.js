@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20261115-fba-receipts.1";
+const BUILD_VERSION = "20261116-fba-transit-clearance.1";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -395,7 +395,7 @@ const SRC_DST = {
   },
   "FBA Receipt": {
     src: "FBA_TRANSIT",
-    dst: "AMAZON_FBA"
+    dst: "FBA_ACCEPTED"
   },
   "Website – WH Ship": {
     src: "MAIN_WH",
@@ -438,7 +438,7 @@ const TYPE_LABEL = {
   "Opening Balance – FBA": "Opening Balance — Amazon FBA",
   "Stock In":              "Stock In — Supplier → Warehouse",
   "FBA Dispatch":          "Send to Amazon FBA — WH → FBA",
-  "FBA Receipt":           "FBA Receipt — In-Transit → FBA",
+  "FBA Receipt":           "Clear FBA Transit — Amazon evidence",
   "Website – WH Ship":     "Website Order — ship from Warehouse",
   "Website – FBA Ship":    "Website Order — ship from Amazon FBA",
   "Flipkart Dispatch":     "Flipkart Order — WH → Flipkart",
@@ -464,6 +464,7 @@ const LOC_LABEL = {
   MAIN_WH: "Main Warehouse",
   AMAZON_FBA: "Amazon FBA",
   FBA_TRANSIT: "FBA Transit",
+  FBA_ACCEPTED: "Cleared from Transit",
   RETURNS: "Returns Hold",
   DAMAGE: "Damage",
   WEBSITE_SALES: "Website Sales",
@@ -2198,7 +2199,17 @@ function MovModal({
       color: "#4ade80",
       fontWeight: 600
     }
-  }, LOC_LABEL[sd.dst] || sd.dst)), /*#__PURE__*/React.createElement("div", {
+  }, LOC_LABEL[sd.dst] || sd.dst)), type === "FBA Receipt" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#edf7ed",
+      border: "1px solid #b8d8b8",
+      borderRadius: 8,
+      padding: "8px 12px",
+      marginTop: -2,
+      fontSize: 11,
+      color: "#37613c"
+    }
+  }, "This clears the Amazon-located quantity from FBA Transit. It is not displayed as accepted stock or added to Amazon FBA. Amazon FBA remains controlled only by the latest dated Inventory Ledger upload."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",

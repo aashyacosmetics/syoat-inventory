@@ -28,7 +28,7 @@ The exact equality between approved dispatch quantity and FBA transit confirms t
 ## Confirmed implementation gaps
 
 1. `FBA Dispatch` correctly moves stock from `MAIN_WH` to `FBA_TRANSIT`, but no production dispatch is linked to a shipment record.
-2. No `FBA Receipt` movement moves accepted units from `FBA_TRANSIT` to `AMAZON_FBA`.
+2. No `FBA Receipt` movement clears accepted units from `FBA_TRANSIT`; D-033 now requires the virtual `FBA_ACCEPTED` evidence endpoint so receipt capture cannot duplicate snapshot-derived Amazon stock.
 3. `FBA_Shipments` and `FBA_Shipment_Lines` are unused even though shipment APIs and UI already exist.
 4. `createFbaReconciliation()` says it creates pending stock counts, but the implementation creates a Stock Adjustment and immediately approves it with the same employee, then writes an already-approved count row.
 5. Report reconciliation uses `SUPPLIER -> AMAZON_FBA` for positive differences and `AMAZON_FBA -> DAMAGE` for negative differences. This forces the snapshot total but does not explain receipt from transit, sales, removal, damage or loss.
@@ -45,8 +45,8 @@ The controlled chain is:
 ```text
 FBA shipment plan
     -> Approved FBA Dispatch: MAIN_WH -> FBA_TRANSIT
-    -> Approved FBA Receipt: FBA_TRANSIT -> AMAZON_FBA
-    -> Amazon report snapshot: read-only evidence and exception comparison
+    -> Approved FBA Receipt: FBA_TRANSIT -> FBA_ACCEPTED (virtual evidence sink)
+    -> Amazon report snapshot: aggregate AMAZON_FBA quantity authority
     -> Reviewed stock count/adjustment only for a remaining explained variance
 ```
 
@@ -56,6 +56,7 @@ Rules:
 - An FBA Dispatch is recorded only when the packed goods are physically handed to the courier. Amazon workflow status, a planned pickup or a booking does not move ERP stock; a changed pickup date has no stock effect.
 - A shipment cannot be marked Received merely by changing its status; accepted quantity must be supported by one or more approved FBA Receipt movements.
 - Receipt quantity cannot exceed the linked approved dispatch quantity for the product.
+- An Approved receipt reduces Transit only. Its internal evidence endpoint is not a displayed inventory location or quantity. It does not add to `AMAZON_FBA`; the dated Inventory Ledger independently owns that aggregate balance under D-033.
 - Partial receipt remains in transit. Short, lost, damaged or excess quantity is an explicit exception with reason and evidence.
 - Report upload archives the private source file and stores an idempotent snapshot/import record.
 - Report upload does not auto-approve a stock adjustment and does not use `SUPPLIER` to hide an unexplained positive difference.
