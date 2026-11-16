@@ -120,7 +120,7 @@ Use Amazon shipment **Contents/Shipment events** evidence, not only a shipment s
    `new receipt = Amazon cumulative located - ERP cumulative Approved receipt`
 
 4. If the result is positive, create one FBA Receipt for only that new quantity.
-5. In the prepared `3.2-phase2-fba-receipts.1` candidate, select **Dispatched FBA Shipment**. The ERP fills the internal shipment ID, exact Amazon reference and destination FC; staff enter only the newly located product quantities shown as outstanding.
+5. In the prepared `3.2-phase2-fba-transit-clearance.1` candidate, select **Dispatched FBA Shipment**. The ERP fills the internal shipment ID, exact Amazon reference and destination FC; staff enter only the newly located product quantities shown as outstanding.
 6. Submit the linked receipt draft for maker-checker approval. The backend rechecks the latest dispatched-not-received balance while holding the approval lock, so an overlapping or stale receipt is rejected rather than double-counted.
 7. Partial receipt is valid. Leave the remaining quantity in `FBA_TRANSIT`.
 8. Do not receive an Avee line or a freebie line into Syoat FBA stock.
@@ -129,8 +129,11 @@ Use Amazon shipment **Contents/Shipment events** evidence, not only a shipment s
 Approved receipt effect:
 
 - `FBA_TRANSIT` decreases;
-- `AMAZON_FBA` increases by exactly the same quantity;
+- internal `FBA_ACCEPTED` records the linked acceptance evidence but holds no stock and is not displayed as an inventory location or quantity;
+- `AMAZON_FBA` does not change and remains equal to the latest reviewed dated Inventory Ledger snapshot;
 - `MAIN_WH` does not change.
+
+This is the permanent Phase 2 flow for every shipment, including future high-volume use. Never treat Amazon located/accepted evidence as an addition to the ERP Amazon FBA balance. The acceptance event closes Transit only; the next controlled Inventory Ledger upload independently refreshes Amazon FBA.
 
 ### Step D - Handle shortage, excess, damage and removals
 
@@ -226,7 +229,7 @@ The read-only Amazon India inventory API snapshot on 2026-11-15 returned 1,428 S
 
 ### P0 - Shipment-linked FBA Receipt workflow
 
-Locally implemented and verified in candidate backend `3.2-phase2-fba-receipts.1` / frontend `20261115-fba-receipts.1`. Production remains unchanged until owner deployment. The picker shows only shipments with an Approved dispatched-but-not-received balance, auto-fills the internal shipment ID, Amazon reference and destination FC, restricts products/quantities to that balance, supports partial receipts and revalidates under the approval lock.
+Locally implemented in candidate backend `3.2-phase2-fba-transit-clearance.1` / frontend `20261116-fba-transit-clearance.1`. Production remains unchanged until owner deployment. The picker shows only shipments with an Approved dispatched-but-not-received balance, auto-fills the internal shipment ID, Amazon reference and destination FC, restricts products/quantities to that balance, supports partial receipts and revalidates under the approval lock. Under D-033, approval clears Transit to the virtual acceptance-evidence endpoint and leaves snapshot-derived Amazon FBA unchanged.
 
 ### P0 - Status automation and closure equation
 
@@ -259,6 +262,6 @@ Ask staff to repeat these five rules before live use:
 
 1. **Plan does not move stock.**
 2. **Courier handover creates Dispatch: Warehouse down, Transit up.**
-3. **Amazon units located creates Receipt: Transit down, FBA up.**
-4. **Ledger upload creates review evidence, not stock.**
+3. **Amazon units located creates Receipt: Transit down only; no accepted-stock balance is displayed and FBA does not increase.**
+4. **The dated Inventory Ledger upload independently controls the Amazon FBA quantity.**
 5. **Avee and freebies never enter Syoat sellable FBA stock.**

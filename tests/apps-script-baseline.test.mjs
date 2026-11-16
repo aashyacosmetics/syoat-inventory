@@ -71,7 +71,7 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-fba-receipts.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-transit-clearance.1");
 });
 
 test("FBA Dispatch frontend exposes an optional manual-freebie section without mixing transit stock", () => {
@@ -89,6 +89,10 @@ test("FBA Receipt frontend requires a dispatched shipment and sends the link wit
   assert.match(source, /getFbaReceiptShipmentOptions/);
   assert.match(source, /Dispatched FBA Shipment \*/);
   assert.match(source, /dispatched-not-received/);
+  assert.match(source, /FBA_ACCEPTED: "Cleared from Transit"/);
+  assert.match(source, /It is not displayed as accepted stock or added to Amazon FBA/);
+  assert.match(source, /const STOCK_LOCATIONS = \["MAIN_WH", "AMAZON_FBA", "FBA_TRANSIT", "RETURNS"\]/);
+  assert.doesNotMatch(source, /const STOCK_LOCATIONS = \[[^\]]*FBA_ACCEPTED/);
   assert.match(source, /amazonShipmentID: \(type === "FBA Dispatch" \|\| type === "FBA Receipt"\) \? fbaShipmentID : ""/);
 });
 
@@ -708,7 +712,7 @@ test("FBA Receipt requires the linked dispatch balance and revalidates partial r
     sessionToken: signedIn.sessionToken,
     movementType: "FBA Receipt",
     sourceLocationID: "FBA_TRANSIT",
-    destinationLocationID: "AMAZON_FBA",
+    destinationLocationID: "FBA_ACCEPTED",
     referenceNumber: "FBA15MTEST01",
     amazonShipmentID: "SHIP-TEST-001",
     amazonDestinationFC: "TEST_FC",
@@ -754,6 +758,15 @@ test("FBA Receipt requires the linked dispatch balance and revalidates partial r
     movementID: first.data.movementID,
   });
   assert.equal(approved.success, true, JSON.stringify(approved));
+
+  const stockAfterReceipt = post(harness, {
+    action: "getStock",
+    sessionToken: signedIn.sessionToken,
+  });
+  assert.equal(stockAfterReceipt.success, true, JSON.stringify(stockAfterReceipt));
+  assert.equal(stockAfterReceipt.data.find(row => row.ProductID === "TEST-P001" && row.LocationID === "FBA_TRANSIT").Quantity, 1);
+  assert.equal(stockAfterReceipt.data.some(row => row.ProductID === "TEST-P001" && row.LocationID === "FBA_ACCEPTED"), false);
+  assert.equal(stockAfterReceipt.data.some(row => row.ProductID === "TEST-P001" && row.LocationID === "AMAZON_FBA"), false);
 
   const staleApproval = post(harness, {
     action: "approveMovement",

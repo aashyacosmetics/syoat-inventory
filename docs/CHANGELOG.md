@@ -1,5 +1,8 @@
 # Changelog
 
+- Prepared local backend `3.2-phase2-fba-transit-clearance.1` and frontend `20261116-fba-transit-clearance.1` under D-033. A linked Approved FBA Receipt now clears accepted quantity from `FBA_TRANSIT` to the internal virtual `FBA_ACCEPTED` evidence endpoint and never adds to `AMAZON_FBA`; the endpoint is excluded from inventory-location and stock displays. The dated Inventory Ledger remains the sole Phase 2 authority for aggregate Amazon stock. The existing shipment/reference/FC, quantity, partial-receipt, approval-lock, idempotency and audit controls remain in force. Production remains unchanged pending protected review and owner deployment.
+- Corrected the canonical staff training rule so future receipts always mean Transit down only, never FBA up; documented that the internal acceptance endpoint is hidden and that the dated Inventory Ledger independently controls Amazon FBA.
+
 - Prepared local backend `3.2-phase2-fba-receipts.1` and frontend `20261115-fba-receipts.1`. FBA Receipt now starts from a minimal dispatched-shipment picker, is linked at draft creation, auto-fills the exact Amazon reference/destination FC, restricts product quantities to Approved dispatch less Approved receipt, and revalidates that balance under the approval lock. Competing stale partial receipts fail closed; the older manual-link correction path applies the same controls and refuses silent relinking. Verification passed 92/92 automated tests, syntax, the 53-action API catalogue, environment safety and `git diff --check`. No Sheet row, stock quantity, Apps Script deployment or frontend publication changed.
 
 This log records meaningful project changes. It is not a substitute for Git history or the business audit trail.

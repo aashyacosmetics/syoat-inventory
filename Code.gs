@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-receipts.1",
+  VERSION:               "3.2-phase2-fba-transit-clearance.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -435,7 +435,7 @@ function getStockFromRows(params, headerRows, lineRows) {
     .filter(h => h.Status === "Approved" && h.MovementType !== "Reversal")
     .forEach(h => { approvedMap[h.MovementID] = h; });
 
-  const VIRTUAL = ["SUPPLIER","CUSTOMER","WEBSITE_SALES","FLIPKART_SALES","FIRSTCRY_SALES","SAMPLES","DAMAGE"];
+  const VIRTUAL = ["SUPPLIER","CUSTOMER","WEBSITE_SALES","FLIPKART_SALES","FIRSTCRY_SALES","SAMPLES","DAMAGE","FBA_ACCEPTED"];
 
   const stock = {};
   lineRows.forEach(line => {
@@ -1139,7 +1139,7 @@ function validateMovementLines(lines) {
   });
 }
 
-const VIRTUAL_LOCATIONS = ["SUPPLIER","CUSTOMER","WEBSITE_SALES","FLIPKART_SALES","FIRSTCRY_SALES","SAMPLES","DAMAGE"];
+const VIRTUAL_LOCATIONS = ["SUPPLIER","CUSTOMER","WEBSITE_SALES","FLIPKART_SALES","FIRSTCRY_SALES","SAMPLES","DAMAGE","FBA_ACCEPTED"];
 
 function validateMovementEndpoints(sourceLocationID, destinationLocationID) {
   const known = {};
@@ -1279,7 +1279,7 @@ function createMovement(body, staff) {
   // this function. Virtual locations (Supplier, Customer, sales-channel sinks,
   // Damage) aren't stock-tracked, so a virtual source needs no check either.
   const OB_TYPES_GUARD = ["Opening Balance – WH", "Opening Balance – FBA", "Opening Balance"];
-  const VIRTUAL_SRC = ["SUPPLIER", "CUSTOMER", "WEBSITE_SALES", "FLIPKART_SALES", "FIRSTCRY_SALES", "SAMPLES", "DAMAGE"];
+  const VIRTUAL_SRC = ["SUPPLIER", "CUSTOMER", "WEBSITE_SALES", "FLIPKART_SALES", "FIRSTCRY_SALES", "SAMPLES", "DAMAGE", "FBA_ACCEPTED"];
   if (!OB_TYPES_GUARD.includes(body.movementType) && body.movementType !== "Assemble Combo"
       && body.sourceLocationID && !VIRTUAL_SRC.includes(body.sourceLocationID)) {
     const stockRows = getStock({});
@@ -3104,8 +3104,11 @@ function assertFbaReceiptShipmentPlan(header, lines) {
 
   const source = String(header.SourceLocationID || header.sourceLocationID || "");
   const destination = String(header.DestinationLocationID || header.destinationLocationID || "");
-  if (source !== "FBA_TRANSIT" || destination !== "AMAZON_FBA") {
-    throw new Error("Invalid FBA Receipt: stock must move from FBA_TRANSIT to AMAZON_FBA.");
+  // D-033: Amazon acceptance clears the operational Transit balance, while the
+  // dated Amazon Inventory Ledger remains the sole authority for AMAZON_FBA.
+  // FBA_ACCEPTED is therefore an auditable virtual endpoint, not stock on hand.
+  if (source !== "FBA_TRANSIT" || destination !== "FBA_ACCEPTED") {
+    throw new Error("Invalid FBA Receipt: accepted stock must clear from FBA_TRANSIT to the FBA_ACCEPTED evidence endpoint.");
   }
 
   const shipment = sheetToObjects(SHEETS.FBA_SHIPMENTS).find(row => row.ShipmentID === shipmentID);

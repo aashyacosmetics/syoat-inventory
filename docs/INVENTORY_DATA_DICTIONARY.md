@@ -66,7 +66,7 @@ Live header order: `LocationID`, `LocationName`, `LocationType`, `IsVirtual`, `S
 | `Status` | Enum | Required | New contract: `Active` or `Archived`; archival hides normal entry but preserves history. |
 | `Notes` | Text | Optional | Operational explanation. |
 
-Hard-coded virtual movement endpoints (`SUPPLIER`, `CUSTOMER`, `WEBSITE_SALES`, `FLIPKART_SALES`, `FIRSTCRY_SALES`, `SAMPLES`, `DAMAGE`) may be valid transaction endpoints without being stock-holding locations. `MAIN_WH`, `FBA_TRANSIT`, `AMAZON_FBA` and `RETURNS` are distinct stock locations.
+Hard-coded virtual movement endpoints (`SUPPLIER`, `CUSTOMER`, `WEBSITE_SALES`, `FLIPKART_SALES`, `FIRSTCRY_SALES`, `SAMPLES`, `DAMAGE`, `FBA_ACCEPTED`) may be valid transaction endpoints without being stock-holding locations. `FBA_ACCEPTED` is internal-only: it records linked Amazon acceptance evidence while reducing Transit, never holds or adds stock, and must not appear in staff inventory-location or quantity views. `MAIN_WH`, `FBA_TRANSIT`, `AMAZON_FBA` and `RETURNS` are distinct stock locations.
 
 ## Combo BOM
 
