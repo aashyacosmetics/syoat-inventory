@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20261116-fba-transit-clearance.1";
+const BUILD_VERSION = "20261116-record-movement-hotfix.1";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -1863,7 +1863,7 @@ function MovModal({
   const freebieProducts = products.filter(product => product.Status === "Active" && product.ItemType === "Freebie");
   const [freebieLines, setFreebieLines] = React.useState([]);
   const [lines, setLines] = React.useState([{
-    pid: (selectableMovementProducts.find(product => !l.some(row => row.pid === product.ProductID)) || selectableMovementProducts[0])?.ProductID || "",
+    pid: selectableMovementProducts[0]?.ProductID || "",
     qty: "",
     cost: ""
   }]);

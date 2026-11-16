@@ -2,6 +2,15 @@
 
 Last updated: 2026-11-16
 
+### 2026-11-16 — Record Movement frontend crash hotfix prepared locally
+
+- Live evidence after the D-033 release showed Record Movement failing before form entry with `l is not defined`. Inspection identified an invalid first-row initializer in `syoat-app.js`; because the form crashed before submission, no receipt movement or stock change was created by that attempt.
+- Frontend candidate `20261116-record-movement-hotfix.1` initializes the first movement line from `selectableMovementProducts[0]` without referencing an undeclared row variable. `index.html` uses the matching cache key.
+- Files changed: `syoat-app.js`, `index.html`, `tests/apps-script-baseline.test.mjs`, `docs/CHANGELOG.md`, and `docs/STATUS.md`.
+- Verification passed: 93/93 automated tests, backend/frontend syntax, the 53-action API catalogue, environment-template safety, and `git diff --check`.
+- Production action still required: protected review/merge and GitHub Pages publication. `Code.gs` does not need redeployment for this frontend-only correction. Do not retry the genuine 238-unit receipt until the corrected frontend build is visible.
+- Risk and next action: SHIP-001 is already marked Received while its Approved receipt total remains zero. After the frontend hotfix is published, record and approve the exact 98-unit shampoo and 140-unit lip-balm FBA Receipt; then verify Transit decreases by 238 and Amazon FBA remains unchanged. A separate workflow guard should prevent future Received status changes until all dispatched quantities have Approved receipt evidence.
+
 ### 2026-11-16 — Regular FBA acceptance changed to Transit-only clearance
 
 - Status: local application candidate implemented; no production data, deployment or publication changed.

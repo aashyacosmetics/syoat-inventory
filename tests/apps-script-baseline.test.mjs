@@ -96,6 +96,18 @@ test("FBA Receipt frontend requires a dispatched shipment and sends the link wit
   assert.match(source, /amazonShipmentID: \(type === "FBA Dispatch" \|\| type === "FBA Receipt"\) \? fbaShipmentID : ""/);
 });
 
+test("Record Movement initializes its first product without an undefined row variable", () => {
+  const source = readProjectFile("syoat-app.js");
+  assert.match(
+    source,
+    /const \[lines, setLines\] = React\.useState\(\[\{\s*pid: selectableMovementProducts\[0\]\?\.ProductID \|\| ""/,
+  );
+  assert.doesNotMatch(
+    source,
+    /selectableMovementProducts\.find\(product => !l\.some\(/,
+  );
+});
+
 test("public staff picker exposes only name, email, and role", () => {
   const harness = createAppsScriptHarness(authenticatedSheets());
   const response = harness.callJson("doGet", { parameter: { action: "getAppLogins" } });

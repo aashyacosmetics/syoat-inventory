@@ -1,5 +1,7 @@
 # Changelog
 
+- Fixed a live frontend crash in Record Movement where the first product row referenced an undefined variable (`l`) during form initialization. Frontend candidate `20261116-record-movement-hotfix.1` now safely initializes from the first selectable product, and a focused regression test prevents the faulty expression from returning. No movement, stock, Sheet data, backend deployment or production configuration was changed by this local hotfix.
+
 - Prepared local backend `3.2-phase2-fba-transit-clearance.1` and frontend `20261116-fba-transit-clearance.1` under D-033. A linked Approved FBA Receipt now clears accepted quantity from `FBA_TRANSIT` to the internal virtual `FBA_ACCEPTED` evidence endpoint and never adds to `AMAZON_FBA`; the endpoint is excluded from inventory-location and stock displays. The dated Inventory Ledger remains the sole Phase 2 authority for aggregate Amazon stock. The existing shipment/reference/FC, quantity, partial-receipt, approval-lock, idempotency and audit controls remain in force. Production remains unchanged pending protected review and owner deployment.
 - Corrected the canonical staff training rule so future receipts always mean Transit down only, never FBA up; documented that the internal acceptance endpoint is hidden and that the dated Inventory Ledger independently controls Amazon FBA.
 
