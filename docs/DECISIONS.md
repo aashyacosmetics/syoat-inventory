@@ -214,6 +214,13 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 - Decision: An Approved linked FBA Receipt records product-level Amazon located/accepted evidence and removes that quantity from `FBA_TRANSIT`; it must not add the quantity to `AMAZON_FBA`. The receipt route is internally `FBA_TRANSIT -> FBA_ACCEPTED`, where `FBA_ACCEPTED` is an auditable virtual evidence endpoint and never a stock-holding location. It must not appear as an inventory location or accepted-stock balance in the staff interface. The dated Amazon Inventory Ledger snapshot remains the sole quantity authority for aggregate `AMAZON_FBA` in Phase 2.
 - Consequence: receipt capture may occur before or after the next irregular weekly snapshot without double-counting Amazon stock. Partial acceptance leaves the remaining quantity in Transit. Shipment closure still requires linked Approved receipt quantities or separately classified exceptions to balance every sellable Syoat line. Reversals restore Transit through the existing immutable reversal controls. The current-date Amazon FBA dashboard may lag the live Seller Central position until the next controlled report upload, and must show the snapshot cutoff/age rather than implying real-time stock.
 
+### D-034 — FBA shipment status is derived from approved evidence
+
+- Date: 2026-11-17
+- Status: accepted owner priority; local implementation complete, protected release pending
+- Decision: FBA shipment lifecycle is not a manual workflow control. It is derived from Approved linked movements: no dispatch is `Working`; dispatch without receipt is `In Transit`; partial receipt is `Receiving`; and `Received` requires the complete shipment plan to be dispatched and every dispatched unit to have Approved FBA Receipt evidence. Approval, reversal, link and unlink operations must resynchronize the stored status and `ClosedAt` with an audit trail. A manual API request may only reconcile to the exact evidence-derived result and cannot skip stages or force closure.
+- Consequence: a shipment label cannot move stock or conceal an open Transit balance. Existing stale manual labels may be displayed with their derived status but are not silently rewritten during reads. Until P0-2 provides a maker-checker exception-resolution record, shortage, loss, removal, excess and other classifications cannot satisfy closure; full Approved receipt evidence is required. The dated Inventory Ledger remains independently authoritative for aggregate Amazon FBA under D-033.
+
 ## Open decisions
 
 ### Access and production-baseline decisions captured 2026-10-23

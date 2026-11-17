@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-transit-clearance.1",
+  VERSION:               "3.2-phase2-fba-status-closure.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -1434,13 +1434,18 @@ function approveMovement(body, staff) {
     ApprovedAt:      now(),
   });
 
+  let shipmentLifecycle = null;
+  if ((header.MovementType === "FBA Dispatch" || header.MovementType === "FBA Receipt") && header.AmazonShipmentID) {
+    shipmentLifecycle = syncFbaShipmentLifecycle(header.AmazonShipmentID, staff, body.requestId, "approveMovement " + body.movementID);
+  }
+
   writeLog("approveMovement", body.movementID, staff, isSelf ? "Approved [SELF-APPROVED]" : "Approved", body.requestId);
   writeAuditTrail("approveMovement", "Movement", body.movementID, [
     { field: "Status", oldValue: header.Status, newValue: "Approved" },
   ], staff, body.requestId, isSelf ? "Self-approved by " + staff.Role : "");
   try { notifyLowStockOnApproval(body.movementID); } catch (mailErr) { /* email is best-effort — never block approval */ }
   try { checkAnomalies(body.movementID, header, staff, isSelf); } catch (anomErr) { /* best-effort — never block approval */ }
-  return { movementID: body.movementID, status: "Approved" };
+  return { movementID: body.movementID, status: "Approved", shipmentLifecycle: shipmentLifecycle };
 }
 
 // ── Combo assembly (kitting) ────────────────────────────────────────────────
@@ -2230,11 +2235,16 @@ function reverseMovement(body, staff) {
   const origIdx = headers.findIndex(h => h.MovementID === body.movementID);
   updateRow(SHEETS.MOV_HEADERS, origIdx + 2, { Status: "Reversed" });
 
+  let shipmentLifecycle = null;
+  if ((original.MovementType === "FBA Dispatch" || original.MovementType === "FBA Receipt") && original.AmazonShipmentID) {
+    shipmentLifecycle = syncFbaShipmentLifecycle(original.AmazonShipmentID, staff, body.requestId, "reverseMovement " + body.movementID);
+  }
+
   writeLog("reverseMovement", body.movementID, staff, "Reversed → " + reverseID, body.requestId);
   writeAuditTrail("reverseMovement", "Movement", body.movementID, [
     { field: "Status", oldValue: original.Status, newValue: "Reversed" },
   ], staff, body.requestId, "Reason: " + (body.reason || "") + " | Reversal movement: " + reverseID);
-  return { originalMovementID: body.movementID, reversalMovementID: reverseID, reversalLineIDs };
+  return { originalMovementID: body.movementID, reversalMovementID: reverseID, reversalLineIDs, shipmentLifecycle };
 }
 
 function editMovement(body, staff) {
@@ -2926,7 +2936,7 @@ function closePurchaseOrder(body, staff) {
 // ─────────────────────────────────────────────────────────────
 
 const FBA_SHIPMENT_ROLES = ["Founder","Co-Founder","Admin","Manager","Warehouse Manager"];
-const FBA_SHIPMENT_STATUSES = ["Working","Shipped","In Transit","Received"];
+const FBA_SHIPMENT_STATUSES = ["Working","Shipped","In Transit","Receiving","Received"];
 const FBA_SHIPMENT_AMAZON_REFERENCE_FIELD = "AmazonReferenceID";
 // Undoing a link is a correction to already-approved audit data, not a routine
 // action — deliberately a higher bar than linking itself (which Warehouse
@@ -2955,6 +2965,106 @@ function shipmentQtyTotals() {
   return result;
 }
 
+// Shipment lifecycle is evidence-driven. A shipment is not closed merely
+// because somebody selected "Received": every planned unit must first have an
+// Approved FBA Dispatch and every dispatched unit must then have an Approved
+// FBA Receipt. Classified shortages/excesses are intentionally not part of the
+// equation until the separate exception workflow (Phase 2 P0-2) is implemented.
+function deriveFbaShipmentLifecycle(shipmentID, data) {
+  data = data || {};
+  const shipments = data.shipments || sheetToObjects(SHEETS.FBA_SHIPMENTS);
+  const shipment = shipments.find(row => String(row.ShipmentID) === String(shipmentID));
+  if (!shipment) throw new Error("ShipmentID not found: " + shipmentID);
+
+  const allLines = data.lines || sheetToObjects(SHEETS.FBA_SHIPMENT_LINES);
+  const totalsByShipment = data.totals || shipmentQtyTotals();
+  const totals = totalsByShipment[shipment.ShipmentID] || { shipped: {}, received: {} };
+  const expected = {};
+  allLines.filter(line => String(line.ShipmentID) === String(shipment.ShipmentID)).forEach(line => {
+    const productID = String(line.ProductID || "");
+    expected[productID] = (expected[productID] || 0) + (parseFloat(line.ExpectedQty) || 0);
+  });
+
+  const productIDs = {};
+  Object.keys(expected).forEach(productID => { productIDs[productID] = true; });
+  Object.keys(totals.shipped || {}).forEach(productID => { productIDs[productID] = true; });
+  Object.keys(totals.received || {}).forEach(productID => { productIDs[productID] = true; });
+
+  const lines = Object.keys(productIDs).map(productID => {
+    const expectedQty = parseFloat(expected[productID]) || 0;
+    const dispatchedQty = parseFloat((totals.shipped || {})[productID]) || 0;
+    const receivedQty = parseFloat((totals.received || {})[productID]) || 0;
+    return {
+      productID: productID,
+      expectedQty: expectedQty,
+      dispatchedQty: dispatchedQty,
+      receivedQty: receivedQty,
+      remainingToDispatch: Math.max(0, expectedQty - dispatchedQty),
+      remainingInTransit: Math.max(0, dispatchedQty - receivedQty),
+      quantityMismatch: dispatchedQty > expectedQty || receivedQty > dispatchedQty,
+    };
+  });
+
+  const totalExpected = lines.reduce((sum, line) => sum + line.expectedQty, 0);
+  const totalDispatched = lines.reduce((sum, line) => sum + line.dispatchedQty, 0);
+  const totalReceived = lines.reduce((sum, line) => sum + line.receivedQty, 0);
+  const hasQuantityMismatch = lines.some(line => line.quantityMismatch);
+  const fullyDispatched = totalExpected > 0 && lines.every(line => line.dispatchedQty === line.expectedQty);
+  const fullyReceived = totalDispatched > 0 && lines.every(line => line.receivedQty === line.dispatchedQty);
+  const closureReady = fullyDispatched && fullyReceived && !hasQuantityMismatch;
+
+  let status = "Working";
+  let reason = "Waiting for an Approved FBA Dispatch.";
+  if (closureReady) {
+    status = "Received";
+    reason = "All planned units were dispatched and all dispatched units have Approved FBA Receipt evidence.";
+  } else if (totalReceived > 0) {
+    status = "Receiving";
+    reason = "Amazon receipt evidence is partial; planned or dispatched quantities remain open.";
+  } else if (totalDispatched > 0) {
+    status = "In Transit";
+    reason = "Approved dispatch exists; no Approved FBA Receipt has been recorded yet.";
+  }
+
+  return {
+    shipmentID: shipment.ShipmentID,
+    storedStatus: String(shipment.Status || ""),
+    status: status,
+    statusMismatch: String(shipment.Status || "") !== status,
+    closureReady: closureReady,
+    fullyDispatched: fullyDispatched,
+    fullyReceived: fullyReceived,
+    hasQuantityMismatch: hasQuantityMismatch,
+    totalExpected: totalExpected,
+    totalDispatched: totalDispatched,
+    totalReceived: totalReceived,
+    remainingToDispatch: lines.reduce((sum, line) => sum + line.remainingToDispatch, 0),
+    remainingInTransit: lines.reduce((sum, line) => sum + line.remainingInTransit, 0),
+    reason: reason,
+    lines: lines,
+  };
+}
+
+function syncFbaShipmentLifecycle(shipmentID, staff, requestId, sourceAction) {
+  const shipments = sheetToObjects(SHEETS.FBA_SHIPMENTS);
+  const idx = shipments.findIndex(row => String(row.ShipmentID) === String(shipmentID));
+  if (idx === -1) throw new Error("ShipmentID not found: " + shipmentID);
+  const shipment = shipments[idx];
+  const lifecycle = deriveFbaShipmentLifecycle(shipmentID, { shipments: shipments });
+  if (!lifecycle.statusMismatch) return Object.assign({ changed: false }, lifecycle);
+
+  const updates = { Status: lifecycle.status };
+  updates.ClosedAt = lifecycle.status === "Received" ? (shipment.ClosedAt || now()) : "";
+  updateRow(SHEETS.FBA_SHIPMENTS, idx + 2, updates);
+  writeLog("syncFbaShipmentLifecycle", shipmentID, staff,
+    lifecycle.storedStatus + " → " + lifecycle.status + " from " + sourceAction, requestId);
+  writeAuditTrail("syncFbaShipmentLifecycle", "FbaShipment", shipmentID, [
+    { field: "Status", oldValue: lifecycle.storedStatus, newValue: lifecycle.status },
+    { field: "ClosedAt", oldValue: shipment.ClosedAt || "", newValue: updates.ClosedAt },
+  ], staff, requestId, lifecycle.reason + " Source: " + sourceAction);
+  return Object.assign({ changed: true }, lifecycle);
+}
+
 // Minimal shipment-plan view for employees who may record an FBA Dispatch but
 // do not have access to the full Amazon module. Never returns creator identity,
 // notes, files, reconciliation history or other Amazon operational detail.
@@ -2964,9 +3074,12 @@ function getFbaDispatchShipmentOptions(staff) {
 
   const totals = shipmentQtyTotals();
   const allLines = sheetToObjects(SHEETS.FBA_SHIPMENT_LINES);
-  return sheetToObjects(SHEETS.FBA_SHIPMENTS)
-    .filter(shipment => ["Working","Shipped","In Transit"].includes(String(shipment.Status)))
+  const shipments = sheetToObjects(SHEETS.FBA_SHIPMENTS);
+  const lifecycleData = { shipments: shipments, lines: allLines, totals: totals };
+  return shipments
+    .filter(shipment => !deriveFbaShipmentLifecycle(shipment.ShipmentID, lifecycleData).closureReady)
     .map(shipment => {
+      const lifecycle = deriveFbaShipmentLifecycle(shipment.ShipmentID, lifecycleData);
       const shipped = (totals[shipment.ShipmentID] && totals[shipment.ShipmentID].shipped) || {};
       const lines = allLines
         .filter(line => line.ShipmentID === shipment.ShipmentID)
@@ -2985,7 +3098,7 @@ function getFbaDispatchShipmentOptions(staff) {
         shipmentID: shipment.ShipmentID,
         amazonReferenceID: shipment[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD] || "",
         destinationFC: shipment.DestinationFC,
-        status: shipment.Status,
+        status: lifecycle.status,
         lines: lines,
       };
     })
@@ -3002,8 +3115,11 @@ function getFbaReceiptShipmentOptions(staff) {
 
   const totals = shipmentQtyTotals();
   const allLines = sheetToObjects(SHEETS.FBA_SHIPMENT_LINES);
-  return sheetToObjects(SHEETS.FBA_SHIPMENTS)
+  const shipments = sheetToObjects(SHEETS.FBA_SHIPMENTS);
+  const lifecycleData = { shipments: shipments, lines: allLines, totals: totals };
+  return shipments
     .map(shipment => {
+      const lifecycle = deriveFbaShipmentLifecycle(shipment.ShipmentID, lifecycleData);
       const shipmentTotals = totals[shipment.ShipmentID] || { shipped: {}, received: {} };
       const productIDs = {};
       allLines
@@ -3026,7 +3142,7 @@ function getFbaReceiptShipmentOptions(staff) {
         shipmentID: shipment.ShipmentID,
         amazonReferenceID: shipment[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD] || "",
         destinationFC: shipment.DestinationFC,
-        status: shipment.Status,
+        status: lifecycle.status,
         lines: lines,
       };
     })
@@ -3051,8 +3167,9 @@ function assertFbaDispatchShipmentPlan(header, lines) {
 
   const shipment = sheetToObjects(SHEETS.FBA_SHIPMENTS).find(row => row.ShipmentID === shipmentID);
   if (!shipment) throw new Error("FBA shipment not found: " + shipmentID);
-  if (!["Working","Shipped","In Transit"].includes(String(shipment.Status))) {
-    throw new Error("Invalid FBA Dispatch: shipment " + shipmentID + " is not open. Current status: " + shipment.Status);
+  const lifecycle = deriveFbaShipmentLifecycle(shipmentID);
+  if (lifecycle.closureReady) {
+    throw new Error("Invalid FBA Dispatch: shipment " + shipmentID + " is already closed by approved receipt evidence.");
   }
 
   const plannedReference = normalizeAmazonReferenceID(shipment[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD], false);
@@ -3153,12 +3270,22 @@ function assertFbaReceiptShipmentPlan(header, lines) {
 function getFbaShipments(params) {
   params = params || {};
   let headers = sheetToObjects(SHEETS.FBA_SHIPMENTS);
+  const allLines = sheetToObjects(SHEETS.FBA_SHIPMENT_LINES);
+  const totals = shipmentQtyTotals();
+  const lifecycleData = { shipments: headers, lines: allLines, totals: totals };
+  headers = headers.map(header => {
+    const lifecycle = deriveFbaShipmentLifecycle(header.ShipmentID, lifecycleData);
+    return Object.assign({}, header, {
+      StoredStatus: lifecycle.storedStatus,
+      Status: lifecycle.status,
+      StatusMismatch: lifecycle.statusMismatch,
+      Closure: lifecycle,
+    });
+  });
   if (params.status) headers = headers.filter(h => h.Status === params.status);
   headers.sort((a, b) => _idNum(b.ShipmentID) - _idNum(a.ShipmentID));
 
   if (params.includeLines === "true") {
-    const allLines = sheetToObjects(SHEETS.FBA_SHIPMENT_LINES);
-    const totals = shipmentQtyTotals();
     // Movements actually linked to each shipment (any status — a movement that
     // was later Reversed stays visible here even though shipmentQtyTotals()
     // stops counting it) so Founder/Co-Founder have something concrete to pick
@@ -3623,9 +3750,9 @@ function applyHistoricalFbaShipmentLinks(body, staff) {
   };
 }
 
-// Manual forward-only status advance. Skipping a stage is allowed (e.g. going
-// straight from Working to Received if the in-between updates were missed) —
-// but never backwards, since that would misrepresent history.
+// Compatibility endpoint: shipment lifecycle is no longer manually advanced.
+// The requested status must exactly match current Approved movement evidence;
+// the call can then repair a stale stored status and optionally update metadata.
 function updateFbaShipmentStatus(body, staff) {
   requireFields(body, ["shipmentID","status"]);
   requireRole(staff, FBA_SHIPMENT_ROLES);
@@ -3634,27 +3761,19 @@ function updateFbaShipmentStatus(body, staff) {
     throw new Error("Invalid status. Must be one of: " + FBA_SHIPMENT_STATUSES.join(", "));
   }
 
+  const lifecycle = deriveFbaShipmentLifecycle(body.shipmentID);
+  if (body.status !== lifecycle.status) {
+    throw new Error("Shipment status is evidence-driven. Current approved evidence requires '" + lifecycle.status + "', not '" + body.status + "'. " + lifecycle.reason);
+  }
+  const synced = syncFbaShipmentLifecycle(body.shipmentID, staff, body.requestId, "updateFbaShipmentStatus reconciliation");
   const headers = sheetToObjects(SHEETS.FBA_SHIPMENTS);
   const idx = headers.findIndex(h => h.ShipmentID === body.shipmentID);
-  if (idx === -1) throw new Error("ShipmentID not found: " + body.shipmentID);
   const shipment = headers[idx];
-
-  const curIdx = FBA_SHIPMENT_STATUSES.indexOf(shipment.Status);
-  const newIdx = FBA_SHIPMENT_STATUSES.indexOf(body.status);
-  if (newIdx <= curIdx) throw new Error("Shipment is already at '" + shipment.Status + "' — status can only move forward.");
-
-  const updates = { Status: body.status };
+  const updates = {};
   if (body.carrierTrackingNumber) updates.CarrierTrackingNumber = body.carrierTrackingNumber;
-  if (body.status === "Received")  updates.ClosedAt = now();
   if (body.reason) updates.Notes = (shipment.Notes || "") + " | " + body.status + ": " + body.reason;
-
-  updateRow(SHEETS.FBA_SHIPMENTS, idx + 2, updates);
-
-  writeLog("updateFbaShipmentStatus", body.shipmentID, staff, shipment.Status + " → " + body.status, body.requestId);
-  writeAuditTrail("updateFbaShipmentStatus", "FbaShipment", body.shipmentID, [
-    { field: "Status", oldValue: shipment.Status, newValue: body.status },
-  ], staff, body.requestId, body.reason || "");
-  return { shipmentID: body.shipmentID, status: body.status };
+  if (Object.keys(updates).length) updateRow(SHEETS.FBA_SHIPMENTS, idx + 2, updates);
+  return { shipmentID: body.shipmentID, status: lifecycle.status, closureReady: lifecycle.closureReady, changed: synced.changed };
 }
 
 // Tags an existing, already-Approved FBA Dispatch/FBA Receipt movement to a
@@ -3693,12 +3812,13 @@ function linkMovementToShipment(body, staff) {
   assertFbaReceiptShipmentPlan(candidate, movementLines);
 
   updateRow(SHEETS.MOV_HEADERS, movIdx + 2, { AmazonShipmentID: body.shipmentID });
+  const shipmentLifecycle = syncFbaShipmentLifecycle(body.shipmentID, staff, body.requestId, "linkMovementToShipment " + body.movementID);
 
   writeLog("linkMovementToShipment", body.movementID, staff, "Linked to shipment " + body.shipmentID, body.requestId);
   writeAuditTrail("linkMovementToShipment", "Movement", body.movementID, [
     { field: "AmazonShipmentID", oldValue: mov.AmazonShipmentID || "", newValue: body.shipmentID },
   ], staff, body.requestId, "");
-  return { movementID: body.movementID, shipmentID: body.shipmentID };
+  return { movementID: body.movementID, shipmentID: body.shipmentID, shipmentLifecycle: shipmentLifecycle };
 }
 
 // Undoes a mistaken link (wrong movement linked to wrong shipment). Founder/
@@ -3719,12 +3839,13 @@ function unlinkMovementFromShipment(body, staff) {
   const oldShipmentID = mov.AmazonShipmentID;
 
   updateRow(SHEETS.MOV_HEADERS, movIdx + 2, { AmazonShipmentID: "" });
+  const shipmentLifecycle = syncFbaShipmentLifecycle(oldShipmentID, staff, body.requestId, "unlinkMovementFromShipment " + body.movementID);
 
   writeLog("unlinkMovementFromShipment", body.movementID, staff, "Unlinked from shipment " + oldShipmentID + " — " + body.reason, body.requestId);
   writeAuditTrail("unlinkMovementFromShipment", "Movement", body.movementID, [
     { field: "AmazonShipmentID", oldValue: oldShipmentID, newValue: "" },
   ], staff, body.requestId, body.reason);
-  return { movementID: body.movementID, unlinkedFrom: oldShipmentID };
+  return { movementID: body.movementID, unlinkedFrom: oldShipmentID, shipmentLifecycle: shipmentLifecycle };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -4227,7 +4348,7 @@ function resolveOperationalError(errorId, resolutionNotes) {
 }
 
 function isExpectedClientError(message) {
-  return /^(Unauthorised|Unauthorized|Forbidden|Missing fields|Invalid |Unknown |Not enough stock|Not enough warehouse stock|Approval would create negative stock|Approve the linked FBA Dispatch|Stock changed|Already |Only |Cannot |Maker-checker|Feature disabled|Role |Request ID collision|Recovery required|Cancelled|PIN confirmation|Temporarily locked|This file is too large|Operational file not found|freebieLines must|Manual FBA freebie|Every manual freebie)/i.test(String(message || ""));
+  return /^(Unauthorised|Unauthorized|Forbidden|Missing fields|Invalid |Unknown |Not enough stock|Not enough warehouse stock|Approval would create negative stock|Approve the linked FBA Dispatch|Stock changed|Shipment status is evidence-driven|Already |Only |Cannot |Maker-checker|Feature disabled|Role |Request ID collision|Recovery required|Cancelled|PIN confirmation|Temporarily locked|This file is too large|Operational file not found|freebieLines must|Manual FBA freebie|Every manual freebie)/i.test(String(message || ""));
 }
 
 function safeClientErrorMessage(error) {

@@ -1,8 +1,8 @@
 # FBA Inventory Operating SOP
 
-Status: Phase 2 operating design and staff-training baseline. This document does not authorize a live stock correction, historical migration, count approval or Apps Script deployment.
+Status: Phase 2 production operating procedure and staff-training baseline. It does not authorize a historical migration, generic count approval or unexplained stock correction.
 
-Last reviewed: 2026-11-15
+Last reviewed: 2026-11-16
 
 ## 1. Accuracy objective
 
@@ -120,7 +120,7 @@ Use Amazon shipment **Contents/Shipment events** evidence, not only a shipment s
    `new receipt = Amazon cumulative located - ERP cumulative Approved receipt`
 
 4. If the result is positive, create one FBA Receipt for only that new quantity.
-5. In the prepared `3.2-phase2-fba-transit-clearance.1` candidate, select **Dispatched FBA Shipment**. The ERP fills the internal shipment ID, exact Amazon reference and destination FC; staff enter only the newly located product quantities shown as outstanding.
+5. In production backend `3.2-phase2-fba-transit-clearance.1`, select **Dispatched FBA Shipment**. The ERP fills the internal shipment ID, exact Amazon reference and destination FC; staff enter only the newly located product quantities shown as outstanding.
 6. Submit the linked receipt draft for maker-checker approval. The backend rechecks the latest dispatched-not-received balance while holding the approval lock, so an overlapping or stale receipt is rejected rather than double-counted.
 7. Partial receipt is valid. Leave the remaining quantity in `FBA_TRANSIT`.
 8. Do not receive an Avee line or a freebie line into Syoat FBA stock.
@@ -209,9 +209,13 @@ Daily warehouse and marketplace events outside that window remain in the movemen
 
 ## 5. Current Phase 2 position
 
-The reviewed shipment PDF shows many historical shipment plans with complete dispatched quantities but no linked receipt quantities. Several remain labelled In Transit, and one is labelled Received while its product receipt totals remain zero. A status label therefore cannot be used as a stock event.
+The reviewed shipment PDF shows many historical shipment plans with complete dispatched quantities but no linked receipt quantities. A status label therefore cannot be used as a stock event.
 
-The recorded 4,516 Transit units are currently explained as:
+The first genuine current-chain acceptance is complete. `SHIP-001` / `FBA15MRFBLH8` at `BOM5` is linked to Approved dispatch `MOV-379` and Approved receipt `MOV-456`. The receipt clears 98 shampoo plus 140 lip-balm units (238 total) from Transit, creates no Amazon FBA addition, and is traceable through shipment lines, movement lines and the audit trail. This is the production example staff should follow.
+
+The shipment was manually marked Received before its receipt evidence was approved. Although the final records now balance, this chronology is a known workflow gap and must not be repeated.
+
+The 4,516-unit table below is the read-only historical baseline captured before the 238-unit `MOV-456` clearance. It is retained for audit context and must not be treated as the current Transit total:
 
 | Category | Units | Current treatment |
 | --- | ---: | --- |
@@ -227,13 +231,13 @@ The read-only Amazon India inventory API snapshot on 2026-11-15 returned 1,428 S
 
 ## 6. High-priority system work still required
 
-### P0 - Shipment-linked FBA Receipt workflow
+### Completed - Shipment-linked FBA Receipt workflow
 
-Locally implemented in candidate backend `3.2-phase2-fba-transit-clearance.1` / frontend `20261116-fba-transit-clearance.1`. Production remains unchanged until owner deployment. The picker shows only shipments with an Approved dispatched-but-not-received balance, auto-fills the internal shipment ID, Amazon reference and destination FC, restricts products/quantities to that balance, supports partial receipts and revalidates under the approval lock. Under D-033, approval clears Transit to the virtual acceptance-evidence endpoint and leaves snapshot-derived Amazon FBA unchanged.
+Production backend `3.2-phase2-fba-transit-clearance.1` and the corrected frontend flow are accepted. The picker shows only shipments with an Approved dispatched-but-not-received balance, auto-fills the internal shipment ID, Amazon reference and destination FC, restricts products/quantities to that balance, supports partial receipts and revalidates under the approval lock. `MOV-456` proves that approval clears Transit to the virtual acceptance-evidence endpoint and leaves snapshot-derived Amazon FBA unchanged.
 
-### P0 - Status automation and closure equation
+### P0-1 prepared locally - Status automation and closure equation
 
-After an Approved linked dispatch, advance the plan to In Transit. After Approved receipts, calculate product-level received/open/exception quantities. Mark Received only when the closure equation balances; never let a manual status update imply a stock movement.
+Backend `3.2-phase2-fba-status-closure.1` and frontend `20261117-fba-status-closure.1` implement the receipt-only closure rule pending protected release. No Approved dispatch means `Working`; Approved dispatch without receipt means `In Transit`; any partial Approved receipt means `Receiving`; and `Received` requires the complete shipment plan to be dispatched and every dispatched unit to have Approved FBA Receipt evidence. Staff cannot manually skip or advance the lifecycle. Approval, reversal, correction linking and unlinking resynchronize the stored status and audit the change. Classified shortage/loss/removal/other closure is not available until P0-2 is implemented.
 
 ### P0 - Evidence-backed FBA variance resolution
 

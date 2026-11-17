@@ -78,7 +78,7 @@ Only `ping`, a strictly minimal staff picker, and the PIN-login entry are reacha
 | `rejectPurchaseOrder` | POST | Valid session + central capability purchasing.orders.reject; existing handler domain rules also apply | current | `purchasing.orders.reject` |
 | `closePurchaseOrder` | POST | Valid session + central capability purchasing.orders.close; existing handler domain rules also apply | current | `purchasing.orders.close` |
 | `createFbaShipment` | POST | Valid session + central capability amazon.shipments.create; existing handler domain rules also apply | current | `amazon.shipments.create` |
-| `updateFbaShipmentStatus` | POST | Valid session + central capability amazon.shipments.update; existing handler domain rules also apply | current | `amazon.shipments.update` |
+| `updateFbaShipmentStatus` | POST | Valid session + central capability amazon.shipments.update; existing handler domain rules also apply | none | `amazon.shipments.update` |
 | `linkMovementToShipment` | POST | Valid session + central capability amazon.shipments.linkMovement; existing handler domain rules also apply | current | `amazon.shipments.linkMovement` |
 | `unlinkMovementFromShipment` | POST | Valid session + central capability amazon.shipments.unlinkMovement; existing handler domain rules also apply | current | `amazon.shipments.unlinkMovement` |
 | `applyHistoricalFbaShipmentLinks` | POST | Valid Founder session + exact manifest fingerprint/confirmation + separately enabled Script Property; locked idempotent batch of at most five shipments | none | `amazon.shipments.historicalMigration` |

@@ -22,7 +22,10 @@ function fixtureSheets() {
       "ApprovedAt", "ReversalOfMovementID", "PurchaseOrderID", "Notes",
     ]),
     Movement_Lines: objectsToRows(lines),
-    FBA_Shipments: objectsToRows(fixture.fbaShipments.map(({ lines: ignored, ...shipment }) => shipment)),
+    FBA_Shipments: objectsToRows(fixture.fbaShipments.map(({ lines: ignored, ...shipment }) => shipment), [
+      "ShipmentID", "AmazonReferenceID", "ShipmentDateTime", "DestinationFC", "Status",
+      "CarrierTrackingNumber", "ExpectedDeliveryDate", "CreatedByEmail", "ClosedAt", "Notes",
+    ]),
     FBA_Shipment_Lines: objectsToRows(fixture.fbaShipments.flatMap(shipment =>
       shipment.lines.map(line => ({ ...line, ShipmentID: shipment.ShipmentID }))
     )),
@@ -71,7 +74,7 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-fba-transit-clearance.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-status-closure.1");
 });
 
 test("FBA Dispatch frontend exposes an optional manual-freebie section without mixing transit stock", () => {
@@ -94,6 +97,14 @@ test("FBA Receipt frontend requires a dispatched shipment and sends the link wit
   assert.match(source, /const STOCK_LOCATIONS = \["MAIN_WH", "AMAZON_FBA", "FBA_TRANSIT", "RETURNS"\]/);
   assert.doesNotMatch(source, /const STOCK_LOCATIONS = \[[^\]]*FBA_ACCEPTED/);
   assert.match(source, /amazonShipmentID: \(type === "FBA Dispatch" \|\| type === "FBA Receipt"\) \? fbaShipmentID : ""/);
+});
+
+test("FBA shipment UI is evidence-driven and has no manual lifecycle advance", () => {
+  const source = readProjectFile("syoat-app.js");
+  assert.match(source, /Status updates automatically from approved dispatch and receipt evidence/);
+  assert.match(source, /"Receiving": "#b7793e"/);
+  assert.doesNotMatch(source, /function advanceShipment/);
+  assert.doesNotMatch(source, /"Mark " \+ nextStatus/);
 });
 
 test("Record Movement initializes its first product without an undefined row variable", () => {
@@ -648,6 +659,7 @@ test("FBA Dispatch requires an open shipment, matching Amazon reference, and pla
     movementID: first.data.movementID,
   });
   assert.equal(approved.success, true, JSON.stringify(approved));
+  assert.equal(approved.data.shipmentLifecycle.status, "In Transit");
 
   const silentRelink = post(harness, {
     action: "linkMovementToShipment",
@@ -770,6 +782,17 @@ test("FBA Receipt requires the linked dispatch balance and revalidates partial r
     movementID: first.data.movementID,
   });
   assert.equal(approved.success, true, JSON.stringify(approved));
+  assert.equal(approved.data.shipmentLifecycle.status, "Receiving");
+
+  const prematureClose = post(harness, {
+    action: "updateFbaShipmentStatus",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-premature-close-0001",
+    shipmentID: "SHIP-TEST-001",
+    status: "Received",
+  });
+  assert.equal(prematureClose.success, false);
+  assert.match(prematureClose.error, /evidence-driven/);
 
   const stockAfterReceipt = post(harness, {
     action: "getStock",
@@ -795,6 +818,73 @@ test("FBA Receipt requires the linked dispatch balance and revalidates partial r
   });
   assert.equal(finalOptions.data[0].lines[0].receivedQty, 3);
   assert.equal(finalOptions.data[0].lines[0].remainingQty, 1);
+
+  const finalDispatch = post(harness, {
+    action: "createMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-final-dispatch-create-0001",
+    movementType: "FBA Dispatch",
+    sourceLocationID: "MAIN_WH",
+    destinationLocationID: "FBA_TRANSIT",
+    referenceNumber: "FBA15MTEST01",
+    amazonShipmentID: "SHIP-TEST-001",
+    amazonDestinationFC: "TEST_FC",
+    lines: [{ productID: "TEST-P001", quantity: 1 }],
+  });
+  assert.equal(finalDispatch.success, true, JSON.stringify(finalDispatch));
+  assert.equal(post(harness, {
+    action: "approveMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-final-dispatch-approve-0001",
+    movementID: finalDispatch.data.movementID,
+  }).success, true);
+
+  const finalReceipt = post(harness, {
+    action: "createMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-final-receipt-create-0001",
+    movementType: "FBA Receipt",
+    sourceLocationID: "FBA_TRANSIT",
+    destinationLocationID: "FBA_ACCEPTED",
+    referenceNumber: "FBA15MTEST01",
+    amazonShipmentID: "SHIP-TEST-001",
+    amazonDestinationFC: "TEST_FC",
+    lines: [{ productID: "TEST-P001", quantity: 2 }],
+  });
+  assert.equal(finalReceipt.success, true, JSON.stringify(finalReceipt));
+  const finalApproval = post(harness, {
+    action: "approveMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-final-receipt-approve-0001",
+    movementID: finalReceipt.data.movementID,
+  });
+  assert.equal(finalApproval.success, true, JSON.stringify(finalApproval));
+  assert.equal(finalApproval.data.shipmentLifecycle.status, "Received");
+  assert.equal(finalApproval.data.shipmentLifecycle.closureReady, true);
+  const closedShipment = harness.call("sheetToObjects", "FBA_Shipments")
+    .find(row => row.ShipmentID === "SHIP-TEST-001");
+  assert.equal(closedShipment.Status, "Received");
+  assert.ok(closedShipment.ClosedAt);
+  const noReceiptOptions = post(harness, {
+    action: "getFbaReceiptShipmentOptions",
+    sessionToken: signedIn.sessionToken,
+  });
+  assert.equal(noReceiptOptions.data.length, 0);
+
+  const reversedReceipt = post(harness, {
+    action: "reverseMovement",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-final-receipt-reverse-0001",
+    movementID: finalReceipt.data.movementID,
+    reason: "Synthetic lifecycle downgrade verification",
+  });
+  assert.equal(reversedReceipt.success, true, JSON.stringify(reversedReceipt));
+  assert.equal(reversedReceipt.data.shipmentLifecycle.status, "Receiving");
+  assert.equal(reversedReceipt.data.shipmentLifecycle.closureReady, false);
+  const reopenedShipment = harness.call("sheetToObjects", "FBA_Shipments")
+    .find(row => row.ShipmentID === "SHIP-TEST-001");
+  assert.equal(reopenedShipment.Status, "Receiving");
+  assert.equal(reopenedShipment.ClosedAt, "");
 });
 
 test("FBA Dispatch records optional manual freebies as a separate Samples draft", () => {

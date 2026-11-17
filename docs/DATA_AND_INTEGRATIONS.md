@@ -73,6 +73,8 @@ Optional physical freebies are not Amazon shipment-plan lines. For a new FBA Dis
 
 The prepared FBA Receipt workflow derives its limited picker from Approved linked FBA Dispatch less Approved linked FBA Receipt quantities. It exposes only shipment ID, Amazon reference, destination FC, status and per-product dispatched/received/remaining quantities. A new receipt is linked at draft creation, restricted internally to `FBA_TRANSIT -> FBA_ACCEPTED`, and revalidated against the latest outstanding shipment balance during approval. `FBA_ACCEPTED` is a hidden virtual evidence endpoint: the receipt reduces Transit but never adds to aggregate Amazon stock and never creates a staff-facing inventory location or accepted-stock balance. Manual linking of an older Approved movement applies the same reference, FC and quantity validations and refuses silent relinking.
 
+Shipment lifecycle fields are derived from this same Approved linked evidence. `Working` has no Approved dispatch, `In Transit` has dispatch but no receipt, `Receiving` has partial receipt, and `Received` requires the complete plan to be dispatched and every dispatched quantity to be received. The backend synchronizes stored `Status` and `ClosedAt` after approval, reversal, link and unlink operations. A read may expose a stale stored status as a mismatch, but it does not mutate the Sheet. Exception-based closure is excluded until the separate maker-checker variance-resolution contract is implemented.
+
 ## Integration principles
 
 - Prefer official APIs or controlled report imports.
