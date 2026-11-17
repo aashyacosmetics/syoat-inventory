@@ -14,11 +14,11 @@ This catalogue is the Phase 1 baseline for the Apps Script API. It records every
 
 ## Summary
 
-- 52 unique backend actions.
+- 54 unique backend actions.
 - Only `ping` and `getAppLogins` are routed by public `doGet`.
 - 4 session actions are handled directly by `doPost` (`login`, `logout`, `confirmPin`, and `verifySession`).
-- 20 business reads pass through the authenticated POST router.
-- 26 writes pass through the authenticated POST router.
+- 21 business reads pass through the authenticated POST router.
+- 27 writes pass through the authenticated POST router.
 - No business-data read or write is routed through GET.
 - 15 backend actions have no caller in the current frontend.
 
@@ -71,6 +71,7 @@ Only `ping`, a strictly minimal staff picker, and the PIN-login entry are reacha
 | `assembleCombo` | POST | Valid session + central capability inventory.combos.assemble; existing handler domain rules also apply | current | `inventory.combos.assemble` |
 | `createFbaReconciliation` | POST | Valid session + central capability amazon.reconciliation.create; existing handler domain rules also apply | current | `amazon.reconciliation.create` |
 | `reviewFbaVariance` | POST | Valid session + central capability amazon.reconciliation.review; Manager-level FBA variance classification only; no stock change | current | `amazon.reconciliation.review` |
+| `resolveFbaVariance` | POST | Valid session + central capability amazon.reconciliation.resolve; second authorized Amazon manager closes or supersedes classified evidence; no stock change | current | `amazon.reconciliation.resolve` |
 | `createSupportTicket` | POST | Valid session + central capability support.tickets.create; existing handler domain rules also apply | current | `support.tickets.create` |
 | `updateSupportTicket` | POST | Valid session + central capability support.tickets.update; existing handler domain rules also apply | current | `support.tickets.update` |
 | `createPurchaseOrder` | POST | Valid session + central capability purchasing.orders.create; existing handler domain rules also apply | current | `purchasing.orders.create` |
@@ -122,7 +123,7 @@ These require an explicit retain, migrate, or remove decision during the secured
 - `Owner` is not a supported application role. Founder and Co-Founder are the only top-authority roles.
 - `Admin`, `Manager`, and `Warehouse Manager` share many approval permissions but are maker-checker restricted on records they created.
 - `Warehouse`/`Warehouse Operator` movement creation is controlled primarily through movement-type settings.
-- Founder, Co-Founder, Admin, Manager and Warehouse Manager may classify an imported FBA variance through the dedicated review action. Generic count approve, edit and reject actions are blocked for these rows.
+- Founder, Co-Founder, Admin, Manager and Warehouse Manager may classify an imported FBA variance through the dedicated review action. A different authorized Amazon manager may then resolve or supersede the evidence row through `amazon.reconciliation.resolve`; this never changes stock or creates an adjustment movement. Generic count approve, edit and reject actions remain blocked for these rows.
 - `Operations Manager` is explicitly restricted to support tickets.
 - `Accounts` can create/edit stock counts in the current backend even though daily accounts are excluded from the product scope.
 - Frontend tab visibility and action controls use capabilities issued by the authenticated backend session.

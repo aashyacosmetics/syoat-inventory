@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20261117-fba-status-closure.1";
+const BUILD_VERSION = "20261117-fba-variance-resolution.1";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -187,6 +187,7 @@ const PIN_ACTION_LABELS = {
   assembleCombo: "assemble this combo",
   createFbaReconciliation: "sync Amazon FBA stock",
   reviewFbaVariance: "save this FBA variance review",
+  resolveFbaVariance: "resolve this FBA variance evidence",
   createSupportTicket: "create this ticket",
   updateSupportTicket: "update this ticket",
   createPurchaseOrder: "create this purchase order",
@@ -3179,6 +3180,15 @@ const FBA_VARIANCE_CLASSIFICATIONS_FE = [{
   label: "Unexplained",
   help: "The difference needs more evidence before any stock correction."
 }];
+const FBA_VARIANCE_RESOLUTIONS_FE = [{
+  value: "evidence_confirmed",
+  label: "Evidence confirmed",
+  help: "Close this evidence row because the reviewed external or operational evidence explains the difference."
+}, {
+  value: "superseded",
+  label: "Superseded by later evidence",
+  help: "Close this older row because a later identified report or evidence record replaces it."
+}];
 
 function isFbaVarianceCount(count) {
   if (!count) return false;
@@ -3186,7 +3196,13 @@ function isFbaVarianceCount(count) {
 }
 
 function parseFbaVarianceReview(notes) {
-  var match = String(notes || "").match(/\|\s*FBA_REVIEW:(\{.*\})\s*$/);
+  var match = String(notes || "").match(/\|\s*FBA_REVIEW:(\{.*\})(?=\s*\|\s*FBA_RESOLUTION:|\s*$)/);
+  if (!match) return null;
+  try { return JSON.parse(match[1]); } catch (e) { return null; }
+}
+
+function parseFbaVarianceResolution(notes) {
+  var match = String(notes || "").match(/\|\s*FBA_RESOLUTION:(\{.*\})\s*$/);
   if (!match) return null;
   try { return JSON.parse(match[1]); } catch (e) { return null; }
 }
@@ -3254,6 +3270,71 @@ function FbaVarianceReviewModal({ count, products, user, onClose, onDone }) {
   }, err), /*#__PURE__*/React.createElement("div", {
     style: { display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10, marginTop: 16 }
   }, /*#__PURE__*/React.createElement("button", { onClick: onClose, disabled: busy, style: { ...ghost, padding: 11 } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: submit, disabled: busy, style: { ...btnS("#2a201a"), padding: 11, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.7 : 1 } }, busy ? "Saving…" : existing.classification ? "Update Review" : "Save Review"))));
+}
+
+function FbaVarianceResolutionModal({ count, products, user, onClose, onDone }) {
+  const product = (products || []).find(p => p.ProductID === count.ProductID);
+  const review = parseFbaVarianceReview(count.Notes) || {};
+  const [resolution, setResolution] = React.useState("evidence_confirmed");
+  const [evidenceReference, setEvidenceReference] = React.useState("");
+  const [resolutionNote, setResolutionNote] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  const selected = FBA_VARIANCE_RESOLUTIONS_FE.find(x => x.value === resolution);
+  const diff = Number(count.Difference) || 0;
+
+  async function submit() {
+    if (!resolution) { setErr("Choose how this evidence row should be closed."); return; }
+    if (evidenceReference.trim().length < 3) { setErr("Add the shipment, report, case, removal, movement or later-count reference."); return; }
+    if (resolutionNote.trim().length < 3) { setErr("Add a short checker note explaining the evidence."); return; }
+    setBusy(true);
+    setErr("");
+    try {
+      const result = await apiWrite("resolveFbaVariance", user.email, {
+        countID: count.CountID,
+        resolution: resolution,
+        evidenceReference: evidenceReference.trim(),
+        resolutionNote: resolutionNote.trim(),
+        reviewedAt: review.reviewedAt,
+        reviewClassification: review.classification,
+        reviewNote: review.reviewNote
+      });
+      onDone("✅ " + count.CountID + " " + result.status.toLowerCase() + ". Stock was not changed.");
+      onClose();
+    } catch (e) {
+      setErr(e.message);
+    }
+    setBusy(false);
+  }
+
+  return /*#__PURE__*/React.createElement("div", {
+    style: { position: "fixed", inset: 0, background: "rgba(60,40,20,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 321, padding: 16 }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { background: "#fefcf9", borderRadius: 16, padding: 22, width: 540, maxWidth: "100%", border: "1px solid #e0d2bd", maxHeight: "90vh", overflowY: "auto" }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }
+  }, /*#__PURE__*/React.createElement("div", { style: { fontWeight: 800, fontSize: 16, color: "#2c211a" } }, "Resolve FBA Variance Evidence"), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose, disabled: busy, style: { background: "none", border: "none", color: "#a89680", fontSize: 22, cursor: "pointer" }
+  }, "×")), /*#__PURE__*/React.createElement("div", {
+    style: { background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 12, padding: 13, marginBottom: 12 }
+  }, /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, color: "#2c211a", marginBottom: 4 } }, count.CountID, " · ", product ? product.ProductName : count.ProductID), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#6f6152" } }, "ERP ", count.SystemQty, " · Amazon report ", count.PhysicalQty, " · Difference ", diff > 0 ? "+" + diff : diff), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#6b5326", marginTop: 7, lineHeight: 1.45 } }, "Maker review: ", review.classificationLabel || review.classification, " · ", review.reviewNote)), /*#__PURE__*/React.createElement("div", {
+    style: { background: "#e9f4e7", border: "1px solid #b9d8b5", borderRadius: 10, padding: "10px 12px", marginBottom: 14, fontSize: 12, color: "#355c3a", lineHeight: 1.5 }
+  }, "Checker resolution closes or supersedes this evidence row only. It never changes stock or creates an adjustment movement."), /*#__PURE__*/React.createElement("label", { style: lbl }, "Resolution *"), /*#__PURE__*/React.createElement("select", {
+    value: resolution, onChange: e => setResolution(e.target.value), style: inp
+  }, FBA_VARIANCE_RESOLUTIONS_FE.map(x => /*#__PURE__*/React.createElement("option", { key: x.value, value: x.value }, x.label))), selected && /*#__PURE__*/React.createElement("div", {
+    style: { color: "#6f6152", fontSize: 11.5, margin: "6px 0 12px", lineHeight: 1.45 }
+  }, selected.help), /*#__PURE__*/React.createElement("label", { style: lbl }, "Evidence reference *"), /*#__PURE__*/React.createElement("input", {
+    value: evidenceReference, onChange: e => setEvidenceReference(e.target.value), maxLength: 160,
+    placeholder: "Shipment, report/import, case, removal, movement or later count ID", style: inp
+  }), /*#__PURE__*/React.createElement("label", { style: { ...lbl, marginTop: 12 } }, "Checker note *"), /*#__PURE__*/React.createElement("textarea", {
+    value: resolutionNote, onChange: e => setResolutionNote(e.target.value), maxLength: 500, rows: 4,
+    placeholder: "Explain what evidence was checked and why this row can close without a stock change",
+    style: { ...inp, resize: "vertical", lineHeight: 1.45 }
+  }), err && /*#__PURE__*/React.createElement("div", {
+    style: { background: "#f3dcd5", border: "1px solid #e3b7ad", borderRadius: 10, padding: "9px 11px", color: "#b23a2e", fontSize: 12, marginTop: 10 }
+  }, err), /*#__PURE__*/React.createElement("div", {
+    style: { display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10, marginTop: 16 }
+  }, /*#__PURE__*/React.createElement("button", { onClick: onClose, disabled: busy, style: { ...ghost, padding: 11 } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: submit, disabled: busy, style: { ...btnS("#4a7c59"), padding: 11, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.7 : 1 } }, busy ? "Resolving…" : "Confirm Checker Resolution"))));
 }
 
 function StockCountModal({
@@ -4666,7 +4747,7 @@ function FbaReconcileTab(props) {
 
   function shipmentsTab() {
     return /*#__PURE__*/React.createElement("div", null,
-      sectionHead("🚢", "Shipment Tracking", "Plan → link an approved movement → advance status → done. Zubedha's FBA Dispatch/Receipt movements are separate — link them here once approved."),
+      sectionHead("🚢", "Shipment Tracking", "Plan → approve and link the FBA Dispatch → record approved Amazon receipt evidence → status updates automatically. Dispatch and Receipt movements remain separate auditable records."),
       shpErr && /*#__PURE__*/React.createElement("div", { style: { background: "#fbeae7", color: "#b23a2e", padding: "8px 12px", borderRadius: 8, fontSize: 12, marginBottom: 12 } }, shpErr),
       canManageShipments && !shpFormOpen && /*#__PURE__*/React.createElement("button", { onClick: function () { setShpFormOpen(true); }, style: { ...btnS(), width: "100%", marginBottom: 14 } }, "+ New Shipment"),
       shpFormOpen && /*#__PURE__*/React.createElement("div", { style: { ...card, padding: 14, marginBottom: 14 } },
@@ -6552,6 +6633,7 @@ function App() {
   const [countsLoading, setCountsLoading] = React.useState(false);
   const [editingCount, setEditingCount] = React.useState(null);
   const [reviewingFbaCount, setReviewingFbaCount] = React.useState(null);
+  const [resolvingFbaCount, setResolvingFbaCount] = React.useState(null);
   const [showLowStockAlert, setShowLowStockAlert] = React.useState(false);
   const [lowStockItems, setLowStockItems] = React.useState([]);
   const [analyticsMovs, setAnalyticsMovs] = React.useState(null); // approved movs for analytics dispatch panel
@@ -7412,6 +7494,9 @@ function App() {
     const isPending = c.Status === "Pending";
     const isFbaVariance = isFbaVarianceCount(c);
     const fbaReview = isFbaVariance ? parseFbaVarianceReview(c.Notes) : null;
+    const fbaResolution = isFbaVariance ? parseFbaVarianceResolution(c.Notes) : null;
+    const canResolveFba = isPending && fbaReview && fbaReview.classification !== "unexplained" && hasCapability(user, "amazon.reconciliation.resolve");
+    const isReviewMaker = fbaReview && String(fbaReview.reviewedByEmail || "").toLowerCase() === String(user.email || "").toLowerCase();
     return /*#__PURE__*/React.createElement("div", {
       key: c.CountID || i,
       style: {
@@ -7469,7 +7554,9 @@ function App() {
       }
     }, "Counted by ", (c.CountedByEmail || "").split("@")[0], c.CountDateTime && /*#__PURE__*/React.createElement("span", null, " · ", String(c.CountDateTime).substring(0, 16)), c.Reason && /*#__PURE__*/React.createElement("span", null, " · ", c.Reason)), fbaReview && /*#__PURE__*/React.createElement("div", {
       style: { marginTop: 6, padding: "7px 9px", borderRadius: 8, background: "#f4e7c8", color: "#6b5326", fontSize: 11.5, lineHeight: 1.45 }
-    }, /*#__PURE__*/React.createElement("b", null, "Classified: ", fbaReview.classificationLabel || fbaReview.classification), " · ", fbaReview.reviewNote, fbaReview.reviewedByEmail && /*#__PURE__*/React.createElement("span", { style: { color: "#a89680" } }, " · by ", String(fbaReview.reviewedByEmail).split("@")[0])), c.AdjustmentMovementID && /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("b", null, "Classified: ", fbaReview.classificationLabel || fbaReview.classification), " · ", fbaReview.reviewNote, fbaReview.reviewedByEmail && /*#__PURE__*/React.createElement("span", { style: { color: "#a89680" } }, " · by ", String(fbaReview.reviewedByEmail).split("@")[0])), fbaResolution && /*#__PURE__*/React.createElement("div", {
+      style: { marginTop: 6, padding: "7px 9px", borderRadius: 8, background: "#e9f4e7", color: "#355c3a", fontSize: 11.5, lineHeight: 1.45 }
+    }, /*#__PURE__*/React.createElement("b", null, fbaResolution.resolutionLabel || fbaResolution.resolution), " · ", fbaResolution.evidenceReference, " · ", fbaResolution.resolutionNote, fbaResolution.resolvedByEmail && /*#__PURE__*/React.createElement("span", { style: { color: "#78907b" } }, " · checked by ", String(fbaResolution.resolvedByEmail).split("@")[0]), " · stock unchanged"), c.AdjustmentMovementID && /*#__PURE__*/React.createElement("div", {
       style: {
         color: "#bd5d38",
         fontSize: 11,
@@ -7544,7 +7631,19 @@ function App() {
         fontSize: 12,
         whiteSpace: "nowrap"
       }
-    }, fbaReview ? "Update FBA Review" : "Review FBA Variance"), user.canApprove && !isFbaVariance && /*#__PURE__*/React.createElement("button", {
+    }, fbaReview ? "Update FBA Review" : "Review FBA Variance"), canResolveFba && !isReviewMaker && /*#__PURE__*/React.createElement("button", {
+      onClick: () => setResolvingFbaCount(c),
+      style: {
+        ...btnS("#4a7c59"),
+        padding: "8px 14px",
+        fontSize: 12,
+        whiteSpace: "nowrap"
+      }
+    }, "Resolve Evidence"), canResolveFba && isReviewMaker && /*#__PURE__*/React.createElement("div", {
+      style: { maxWidth: 170, color: "#a97b52", fontSize: 10.5, lineHeight: 1.35, textAlign: "center" }
+    }, "Awaiting a different authorized manager for checker resolution"), isFbaVariance && fbaReview && fbaReview.classification === "unexplained" && /*#__PURE__*/React.createElement("div", {
+      style: { maxWidth: 170, color: "#b23a2e", fontSize: 10.5, lineHeight: 1.35, textAlign: "center" }
+    }, "More evidence is required before resolution"), user.canApprove && !isFbaVariance && /*#__PURE__*/React.createElement("button", {
       onClick: async () => {
         try {
           await apiWrite("approveStockCount", user.email, {
@@ -8583,6 +8682,16 @@ function App() {
       notify(msg);
       loadCounts();
       setReviewingFbaCount(null);
+    }
+  }), resolvingFbaCount && /*#__PURE__*/React.createElement(FbaVarianceResolutionModal, {
+    count: resolvingFbaCount,
+    products: products,
+    user: user,
+    onClose: () => setResolvingFbaCount(null),
+    onDone: msg => {
+      notify(msg);
+      loadCounts();
+      setResolvingFbaCount(null);
     }
   }), editingMov && /*#__PURE__*/React.createElement(MovEditModal, {
     movement: editingMov,

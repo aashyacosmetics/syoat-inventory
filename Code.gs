@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-status-closure.1",
+  VERSION:               "3.2-phase2-fba-variance-resolution.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -124,6 +124,7 @@ const ACTION_CAPABILITIES = {
   assembleCombo:               "inventory.combos.assemble",
   createFbaReconciliation:     "amazon.reconciliation.create",
   reviewFbaVariance:           "amazon.reconciliation.review",
+  resolveFbaVariance:          "amazon.reconciliation.resolve",
   createSupportTicket:         "support.tickets.create",
   updateSupportTicket:         "support.tickets.update",
   createPurchaseOrder:         "purchasing.orders.create",
@@ -174,6 +175,7 @@ const AMAZON_MANAGER_CAPABILITIES = [
   "amazon.reconciliation.view",
   "amazon.reconciliation.create",
   "amazon.reconciliation.review",
+  "amazon.reconciliation.resolve",
 ];
 
 const FULFILMENT_CAPABILITIES = [
@@ -361,6 +363,7 @@ function dispatchBusinessWrite(action, body, staff) {
   if (action === "assembleCombo")      return assembleCombo(body, staff);
   if (action === "createFbaReconciliation") return createFbaReconciliation(body, staff);
   if (action === "reviewFbaVariance") return reviewFbaVariance(body, staff);
+  if (action === "resolveFbaVariance") return resolveFbaVariance(body, staff);
   if (action === "createSupportTicket") return createSupportTicket(body, staff);
   if (action === "updateSupportTicket") return updateSupportTicket(body, staff);
   if (action === "createPurchaseOrder") return createPurchaseOrder(body, staff);
@@ -1985,14 +1988,25 @@ const FBA_VARIANCE_CLASSIFICATIONS = {
   unexplained: "Unexplained",
 };
 
+const FBA_VARIANCE_RESOLUTIONS = {
+  evidence_confirmed: { label: "Evidence confirmed", status: "Resolved" },
+  superseded: { label: "Superseded by later evidence", status: "Superseded" },
+};
+
 function fbaVarianceReviewFromNotes(notes) {
-  var match = String(notes || "").match(/\|\s*FBA_REVIEW:(\{.*\})\s*$/);
+  var match = String(notes || "").match(/\|\s*FBA_REVIEW:(\{.*\})(?=\s*\|\s*FBA_RESOLUTION:|\s*$)/);
   if (!match) return null;
   try { return JSON.parse(match[1]); } catch (e) { return null; }
 }
 
 function withoutFbaVarianceReview(notes) {
   return String(notes || "").replace(/\s*\|\s*FBA_REVIEW:\{.*\}\s*$/, "").trim();
+}
+
+function fbaVarianceResolutionFromNotes(notes) {
+  var match = String(notes || "").match(/\|\s*FBA_RESOLUTION:(\{.*\})\s*$/);
+  if (!match) return null;
+  try { return JSON.parse(match[1]); } catch (e) { return null; }
 }
 
 function isFbaVarianceReview(count) {
@@ -2154,6 +2168,81 @@ function reviewFbaVariance(body, staff) {
     classification: classification,
     classificationLabel: FBA_VARIANCE_CLASSIFICATIONS[classification],
     reviewedAt: reviewedAt,
+  };
+}
+
+function resolveFbaVariance(body, staff) {
+  requireFields(body, ["countID", "resolution", "evidenceReference", "resolutionNote", "reviewedAt", "reviewClassification", "reviewNote"]);
+  requireRole(staff, ["Founder","Co-Founder","Admin","Manager","Warehouse Manager"]);
+
+  var resolutionKey = String(body.resolution || "").trim().toLowerCase();
+  var resolutionRule = FBA_VARIANCE_RESOLUTIONS[resolutionKey];
+  if (!resolutionRule) throw new Error("Invalid FBA variance resolution: choose a valid resolution.");
+
+  var evidenceReference = String(body.evidenceReference || "").trim();
+  var resolutionNote = String(body.resolutionNote || "").trim();
+  if (evidenceReference.length < 3 || evidenceReference.length > 160) {
+    throw new Error("Invalid FBA variance resolution: add an evidence reference between 3 and 160 characters.");
+  }
+  if (resolutionNote.length < 3 || resolutionNote.length > 500) {
+    throw new Error("Invalid FBA variance resolution: notes must be between 3 and 500 characters.");
+  }
+
+  var counts = sheetToObjects(SHEETS.STOCK_COUNTS);
+  var idx = counts.findIndex(function (count) { return count.CountID === body.countID; });
+  if (idx === -1) throw new Error("CountID not found: " + body.countID);
+  var count = counts[idx];
+  if (!isFbaVarianceReview(count)) throw new Error("Invalid FBA variance resolution: this stock count is not imported Amazon evidence.");
+  if (count.Status !== "Pending") throw new Error("Only a Pending FBA variance can be resolved. Current status: " + count.Status);
+  if (count.AdjustmentMovementID) throw new Error("Invalid FBA variance resolution: imported evidence cannot already have an adjustment movement.");
+  if (fbaVarianceResolutionFromNotes(count.Notes)) throw new Error("Invalid FBA variance resolution: this evidence already has a resolution record.");
+
+  var review = fbaVarianceReviewFromNotes(count.Notes);
+  if (!review || !review.classification || !review.reviewedAt || !review.reviewedByEmail) {
+    throw new Error("Cannot resolve this FBA variance before it is classified with evidence.");
+  }
+  if (review.classification === "unexplained") {
+    throw new Error("Cannot resolve unexplained FBA evidence. Update the classification after obtaining evidence.");
+  }
+  if (String(body.reviewedAt) !== String(review.reviewedAt) ||
+      String(body.reviewClassification) !== String(review.classification) ||
+      String(body.reviewNote) !== String(review.reviewNote)) {
+    throw new Error("Cannot resolve this FBA variance because its review changed. Refresh and review the latest evidence.");
+  }
+  if (String(review.reviewedByEmail).trim().toLowerCase() === String(staff.Email).trim().toLowerCase()) {
+    throw new Error("Maker-checker required: the employee who classified this variance cannot resolve it.");
+  }
+
+  var resolvedAt = now();
+  var resolution = {
+    resolution: resolutionKey,
+    resolutionLabel: resolutionRule.label,
+    evidenceReference: evidenceReference,
+    resolutionNote: resolutionNote,
+    resolvedByEmail: staff.Email,
+    resolvedAt: resolvedAt,
+    stockChanged: false,
+  };
+  var notes = String(count.Notes || "").trim();
+  updateRow(SHEETS.STOCK_COUNTS, idx + 2, {
+    Status: resolutionRule.status,
+    ApprovedByEmail: staff.Email,
+    Notes: notes + (notes ? " | " : "") + "FBA_RESOLUTION:" + JSON.stringify(resolution),
+  });
+
+  writeLog("resolveFbaVariance", body.countID, staff,
+    resolutionRule.status + " without stock change: " + resolutionKey, body.requestId);
+  writeAuditTrail("resolveFbaVariance", "StockCount", body.countID, [
+    { field: "Status", oldValue: count.Status, newValue: resolutionRule.status },
+    { field: "FbaVarianceResolution", oldValue: "", newValue: resolutionKey },
+  ], staff, body.requestId, resolutionRule.label + "; stock unchanged");
+  return {
+    countID: body.countID,
+    status: resolutionRule.status,
+    resolution: resolutionKey,
+    resolutionLabel: resolutionRule.label,
+    resolvedAt: resolvedAt,
+    stockChanged: false,
   };
 }
 

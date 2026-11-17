@@ -96,7 +96,7 @@ test("only health and safe staff picker remain reachable through GET", () => {
 });
 
 test("every business write is POST-only", () => {
-  assert.equal(backend.writeActions.length, 26);
+  assert.equal(backend.writeActions.length, 27);
   assert.ok(backend.writeActions.every(action =>
     JSON.stringify(catalog.actions.find(item => item.action === action).routes) === JSON.stringify(["POST"])
   ));

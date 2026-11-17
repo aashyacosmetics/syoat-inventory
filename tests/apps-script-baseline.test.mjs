@@ -59,10 +59,10 @@ function post(harness, body) {
   return harness.callJson("doPost", { postData: { contents: JSON.stringify(body) } });
 }
 
-function login(harness, pin = TEST_PIN) {
+function login(harness, pin = TEST_PIN, email = "founder@example.invalid") {
   return post(harness, {
     action: "login",
-    email: "founder@example.invalid",
+    email,
     pin,
     userAgent: "local-test",
   });
@@ -74,7 +74,7 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-fba-status-closure.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-variance-resolution.1");
 });
 
 test("FBA Dispatch frontend exposes an optional manual-freebie section without mixing transit stock", () => {
@@ -102,9 +102,20 @@ test("FBA Receipt frontend requires a dispatched shipment and sends the link wit
 test("FBA shipment UI is evidence-driven and has no manual lifecycle advance", () => {
   const source = readProjectFile("syoat-app.js");
   assert.match(source, /Status updates automatically from approved dispatch and receipt evidence/);
+  assert.match(source, /record approved Amazon receipt evidence → status updates automatically/);
+  assert.doesNotMatch(source, /advance status → done/);
   assert.match(source, /"Receiving": "#b7793e"/);
   assert.doesNotMatch(source, /function advanceShipment/);
   assert.doesNotMatch(source, /"Mark " \+ nextStatus/);
+});
+
+test("FBA variance evidence resolution is maker-checker and explicitly non-posting", () => {
+  const source = readProjectFile("syoat-app.js");
+  assert.match(source, /resolveFbaVariance/);
+  assert.match(source, /Resolve FBA Variance Evidence/);
+  assert.match(source, /Checker resolution closes or supersedes this evidence row only/);
+  assert.match(source, /It never changes stock or creates an adjustment movement/);
+  assert.match(source, /amazon\.reconciliation\.resolve/);
 });
 
 test("Record Movement initializes its first product without an undefined row variable", () => {
@@ -1058,6 +1069,21 @@ test("manual FBA freebie input rejects sellable, duplicate, and unrelated moveme
 
 test("FBA report import saves evidence for review without changing stock", () => {
   const sheets = writeReadySheets();
+  const checkerPin = [1, 3, 5, 7].join("");
+  const checkerSalt = "synthetic-checker-salt";
+  const checker = {
+    StaffID: "STF-CHECKER",
+    Email: "checker@example.invalid",
+    Name: "Test Checker",
+    FullName: "Test Checker",
+    Role: "Manager",
+    Status: "Active",
+  };
+  sheets.Staff = objectsToRows([...fixture.staff, checker]);
+  sheets.App_Logins = objectsToRows([
+    ...fixture.staff.map(staff => ({ ...staff, PINHash: testPinHash(), PINSalt: TEST_SALT })),
+    { ...checker, PINHash: testPinHash(checkerPin, checkerSalt), PINSalt: checkerSalt },
+  ]);
   sheets.Stock_Counts = objectsToRows([], [
     "CountID", "CountDateTime", "LocationID", "ProductID", "SystemQty",
     "PhysicalQty", "Difference", "CountedByEmail", "ApprovedByEmail",
@@ -1110,6 +1136,76 @@ test("FBA report import saves evidence for review without changing stock", () =>
   assert.match(reviewedCount.Notes, /"classification":"receipt"/);
   assert.equal(harness.spreadsheet.getSheetByName("Movement_Headers").values.length, movementRowsBefore);
 
+  const makerCannotResolve = post(harness, {
+    action: "resolveFbaVariance",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-report-resolve-maker-0001",
+    countID: counts[0].CountID,
+    resolution: "evidence_confirmed",
+    evidenceReference: "SHIP-TEST-001 / synthetic report",
+    resolutionNote: "Matched the classified evidence.",
+    reviewedAt: classified.data.reviewedAt,
+    reviewClassification: "receipt",
+    reviewNote: "Matched to synthetic shipment evidence.",
+  });
+  assert.equal(makerCannotResolve.success, false);
+  assert.match(makerCannotResolve.error, /Maker-checker required/i);
+
+  const checkerSession = login(harness, checkerPin, checker.Email).data;
+  const staleResolution = post(harness, {
+    action: "resolveFbaVariance",
+    sessionToken: checkerSession.sessionToken,
+    requestId: "req-fba-report-resolve-stale-0001",
+    countID: counts[0].CountID,
+    resolution: "evidence_confirmed",
+    evidenceReference: "SHIP-TEST-001 / synthetic report",
+    resolutionNote: "Second reviewer matched the classified evidence.",
+    reviewedAt: "stale-review-time",
+    reviewClassification: "receipt",
+    reviewNote: "Matched to synthetic shipment evidence.",
+  });
+  assert.equal(staleResolution.success, false);
+  assert.match(staleResolution.error, /review changed/i);
+
+  const resolved = post(harness, {
+    action: "resolveFbaVariance",
+    sessionToken: checkerSession.sessionToken,
+    requestId: "req-fba-report-resolve-checker-0001",
+    countID: counts[0].CountID,
+    resolution: "evidence_confirmed",
+    evidenceReference: "SHIP-TEST-001 / synthetic report",
+    resolutionNote: "Second reviewer matched the classified evidence.",
+    reviewedAt: classified.data.reviewedAt,
+    reviewClassification: "receipt",
+    reviewNote: "Matched to synthetic shipment evidence.",
+  });
+  assert.equal(resolved.success, true, JSON.stringify(resolved));
+  assert.equal(resolved.data.status, "Resolved");
+  assert.equal(resolved.data.stockChanged, false);
+
+  const resolvedCount = harness.call("sheetToObjects", "Stock_Counts")[0];
+  assert.equal(resolvedCount.Status, "Resolved");
+  assert.equal(resolvedCount.ApprovedByEmail, checker.Email);
+  assert.equal(resolvedCount.AdjustmentMovementID, "");
+  assert.match(resolvedCount.Notes, /FBA_RESOLUTION:/);
+  assert.match(resolvedCount.Notes, /"stockChanged":false/);
+  assert.equal(harness.spreadsheet.getSheetByName("Movement_Headers").values.length, movementRowsBefore);
+
+  const retry = post(harness, {
+    action: "resolveFbaVariance",
+    sessionToken: checkerSession.sessionToken,
+    requestId: "req-fba-report-resolve-checker-0001",
+    countID: counts[0].CountID,
+    resolution: "evidence_confirmed",
+    evidenceReference: "SHIP-TEST-001 / synthetic report",
+    resolutionNote: "Second reviewer matched the classified evidence.",
+    reviewedAt: classified.data.reviewedAt,
+    reviewClassification: "receipt",
+    reviewNote: "Matched to synthetic shipment evidence.",
+  });
+  assert.equal(retry.success, true, JSON.stringify(retry));
+  assert.equal((harness.call("sheetToObjects", "Stock_Counts")[0].Notes.match(/FBA_RESOLUTION:/g) || []).length, 1);
+
   const unsafeEdit = post(harness, {
     action: "editStockCount",
     sessionToken: signedIn.sessionToken,
@@ -1136,11 +1232,50 @@ test("FBA report import saves evidence for review without changing stock", () =>
     countID: counts[0].CountID,
   });
   assert.equal(unsafeApproval.success, false);
-  assert.match(unsafeApproval.error, /cannot be approved as a normal stock count/i);
+  assert.match(unsafeApproval.error, /cannot be approved as a normal stock count|Only a Pending count can be approved/i);
 
   const duplicate = post(harness, { ...payload, requestId: "req-fba-report-0002" });
   assert.equal(duplicate.success, false);
   assert.match(duplicate.error, /already imported/i);
+
+  harness.call("appendRow", "Stock_Counts", {
+    CountID: "CNT-FBA-UNEXPLAINED",
+    CountDateTime: "2026-10-27 12:00:00",
+    LocationID: "AMAZON_FBA",
+    ProductID: "TEST-P001",
+    SystemQty: 3,
+    PhysicalQty: 4,
+    Difference: 1,
+    CountedByEmail: signedIn.user.email,
+    ApprovedByEmail: "",
+    Status: "Pending",
+    Reason: "FBA Report Variance Review",
+    AdjustmentMovementID: "",
+    Notes: "FBA report 2026-10-28 | import:synthetic-unexplained",
+  });
+  const unexplained = post(harness, {
+    action: "reviewFbaVariance",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-report-review-unexplained-0001",
+    countID: "CNT-FBA-UNEXPLAINED",
+    classification: "unexplained",
+    reviewNote: "No supporting evidence is available yet.",
+  });
+  assert.equal(unexplained.success, true, JSON.stringify(unexplained));
+  const unresolved = post(harness, {
+    action: "resolveFbaVariance",
+    sessionToken: checkerSession.sessionToken,
+    requestId: "req-fba-report-resolve-unexplained-0001",
+    countID: "CNT-FBA-UNEXPLAINED",
+    resolution: "evidence_confirmed",
+    evidenceReference: "No valid evidence",
+    resolutionNote: "Attempted checker closure.",
+    reviewedAt: unexplained.data.reviewedAt,
+    reviewClassification: "unexplained",
+    reviewNote: "No supporting evidence is available yet.",
+  });
+  assert.equal(unresolved.success, false);
+  assert.match(unresolved.error, /Cannot resolve unexplained FBA evidence/i);
 });
 
 test("FBA report import ignores Avee rows even if a submitted product mapping exists", () => {
