@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20261116-record-movement-hotfix.1";
+const BUILD_VERSION = "20261117-fba-status-closure.1";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -4121,8 +4121,7 @@ function regionOf(fc) { return FC_REGIONS[fc] || "Other"; }
 // FBA Shipment tracking (Module C, 2026-07-19): sit-alongside tracking layer
 // over FBA Dispatch/FBA Receipt movements. Same roles as who already sees
 // this Amazon tab today — no new role decisions needed.
-const FBA_SHIPMENT_STATUSES_FE = ["Working", "Shipped", "In Transit", "Received"];
-const FBA_SHIPMENT_STATUS_COLOR = { "Working": "#a97b52", "Shipped": "#6d5ae6", "In Transit": "#4a7c9e", "Received": "#4a7c59" };
+const FBA_SHIPMENT_STATUS_COLOR = { "Working": "#a97b52", "Shipped": "#6d5ae6", "In Transit": "#4a7c9e", "Receiving": "#b7793e", "Received": "#4a7c59" };
 // Undoing a link is a correction, not routine — Founder/Co-Founder only, same
 // higher bar as Reversal. Pushpanjali (Warehouse Manager) can link but not unlink.
 
@@ -4281,16 +4280,6 @@ function FbaReconcileTab(props) {
       await apiWrite("createFbaShipment", user.email, { amazonReferenceID: amazonReferenceID, destinationFC: shpFC, expectedDeliveryDate: shpEDD, lines: lines });
       notify("✅ Shipment created");
       setShpFormOpen(false); setShpAmazonRef(""); setShpFC(""); setShpEDD(""); setShpLines([{ productID: "", expectedQty: "" }]);
-      loadShipments();
-    } catch (e) { notify("❌ " + e.message); }
-    setShpBusy(false);
-  }
-
-  async function advanceShipment(shipmentID, nextStatus) {
-    setShpBusy(true);
-    try {
-      await apiWrite("updateFbaShipmentStatus", user.email, { shipmentID: shipmentID, status: nextStatus });
-      notify("✅ " + shipmentID + " → " + nextStatus);
       loadShipments();
     } catch (e) { notify("❌ " + e.message); }
     setShpBusy(false);
@@ -4728,8 +4717,6 @@ function FbaReconcileTab(props) {
           ? /*#__PURE__*/React.createElement("div", { style: { textAlign: "center", color: "#a89680", fontSize: 13, padding: "20px 0" } }, "No FBA shipments tracked yet.")
           : /*#__PURE__*/React.createElement("div", { style: { display: "grid", gap: 10 } },
               shipments.map(function (s) {
-                var curIdx = FBA_SHIPMENT_STATUSES_FE.indexOf(s.Status);
-                var nextStatus = FBA_SHIPMENT_STATUSES_FE[curIdx + 1];
                 return /*#__PURE__*/React.createElement("div", { key: s.ShipmentID, style: { border: "1px solid #e7d9c4", borderRadius: 12, padding: 12, background: "#f8f4ef" } },
                   /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
                     /*#__PURE__*/React.createElement("div", null,
@@ -4739,13 +4726,16 @@ function FbaReconcileTab(props) {
                     /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: "#fff", background: FBA_SHIPMENT_STATUS_COLOR[s.Status] || "#a89680", padding: "3px 8px", borderRadius: 20 } }, s.Status)),
                   (s.lines || []).length > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, display: "grid", gap: 3 } },
                     s.lines.map(function (l) {
-                      var recvOrShip = s.Status === "Received" ? l.ReceivedQty : l.ShippedQty;
+                      var shipped = parseFloat(l.ShippedQty) || 0;
+                      var received = parseFloat(l.ReceivedQty) || 0;
                       var ord = parseFloat(l.ExpectedQty) || 0;
-                      var ok = recvOrShip >= ord;
+                      var ok = shipped === ord && received === shipped;
                       return /*#__PURE__*/React.createElement("div", { key: l.ShipmentLineID, style: { fontSize: 11, color: "#5a4a3a", display: "flex", justifyContent: "space-between" } },
                         /*#__PURE__*/React.createElement("span", null, nameOfProduct(l.ProductID)),
-                        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: ok ? "#4a7c59" : (recvOrShip > 0 ? "#a97b52" : "#a89680") } }, recvOrShip + " / " + ord));
+                        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: ok ? "#4a7c59" : ((shipped > 0 || received > 0) ? "#a97b52" : "#a89680") } }, "dispatch " + shipped + "/" + ord + " · receipt " + received + "/" + shipped));
                     })),
+                  s.Closure && /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, padding: "7px 9px", borderRadius: 8, background: s.Closure.closureReady ? "#e9f4e8" : "#f2eadc", color: s.Closure.closureReady ? "#365f3d" : "#6f573e", fontSize: 10.5 } },
+                    s.Closure.reason + " Status updates automatically from approved dispatch and receipt evidence."),
                   (s.linkedMovements || []).length > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 9, paddingTop: 8, borderTop: "1px solid #e7d9c4" } },
                     /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, fontWeight: 700, color: "#a89680", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 } }, "Linked movements"),
                     s.linkedMovements.map(function (m) {
@@ -4754,7 +4744,6 @@ function FbaReconcileTab(props) {
                         canUnlinkShipment && /*#__PURE__*/React.createElement("button", { disabled: shpBusy, onClick: function () { unlinkMovement(m.MovementID, s.ShipmentID); }, style: { border: "none", background: "none", color: "#b23a2e", fontSize: 10.5, fontWeight: 700, cursor: "pointer", textDecoration: "underline" } }, "Unlink"));
                     })),
                   canManageShipments && /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" } },
-                    nextStatus && /*#__PURE__*/React.createElement("button", { disabled: shpBusy, onClick: function () { advanceShipment(s.ShipmentID, nextStatus); }, style: { ...btnS("#4a7c59"), fontSize: 11, padding: "5px 10px" } }, "Mark " + nextStatus),
                     /*#__PURE__*/React.createElement("button", { onClick: function () { openLinkPicker(s.ShipmentID); }, style: { ...ghost, fontSize: 11, padding: "5px 10px" } }, "🔗 Link Movement")));
               })));
   }

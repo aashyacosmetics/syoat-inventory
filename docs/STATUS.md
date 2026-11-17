@@ -1,6 +1,31 @@
 # Current Status and Handoff
 
-Last updated: 2026-11-16
+Last updated: 2026-11-17
+
+### 2026-11-17 — P0-1 evidence-derived shipment status and closure prepared locally
+
+- Status: local application candidate complete; no Google Sheet row, stock quantity, Apps Script deployment, frontend publication, commit or push was performed.
+- Backend candidate `3.2-phase2-fba-status-closure.1` derives each shipment lifecycle from Approved linked movements. No Approved dispatch means `Working`; dispatch without receipt means `In Transit`; partial receipt means `Receiving`; `Received` requires every planned unit to be dispatched and every dispatched unit to have Approved FBA Receipt evidence.
+- Manual premature closure is blocked. The compatibility `updateFbaShipmentStatus` action can only reconcile a stale stored status to the exact evidence-derived status. Approval, reversal, historical linking and unlinking automatically resynchronize `Status` and `ClosedAt`, and every automatic change is logged and audited.
+- Frontend candidate `20261117-fba-status-closure.1` removes manual **Mark …** lifecycle buttons, shows dispatched/expected and received/dispatched quantities per product, explains the current closure evidence and includes the new `Receiving` state.
+- Scope boundary: classified shortage, loss, removal and other exception quantities are not yet allowed to close a shipment. That maker-checker resolution belongs to P0-2; until implemented, closure requires Approved receipt evidence for the full dispatched quantity.
+- Files changed for P0-1: `Code.gs`, `syoat-app.js`, `index.html`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `docs/DECISIONS.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/ROLE_CAPABILITIES.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, `docs/PHASE_2_PLAN.md`, `docs/CHANGELOG.md` and this handoff.
+- Verification passed: 94/94 automated tests (including the localhost isolation test), backend/frontend syntax, the 53-action API catalogue, environment-template safety and whitespace validation with Windows CR-at-EOL handling.
+- Production actions still required: protected review/merge, owner deployment of `Code.gs`, owner publication of the frontend, then a read-only/live acceptance check confirming Working → In Transit → Receiving → Received from genuine Approved movement evidence. Existing shipment rows with stale manual status are not rewritten by a read; they reconcile on an approved lifecycle write or an explicit evidence-matching reconciliation call.
+- Risks and next task: exception-based closure remains deliberately unavailable until P0-2. After P0-1 release acceptance, implement evidence-backed FBA variance resolution through maker-checker actions.
+
+### 2026-11-16 — FBA Transit-clearance production acceptance and Phase 2 handoff
+
+- Status: production acceptance complete for the first genuine shipment-linked Amazon receipt; Phase 2 remains in progress.
+- Owner release: backend `3.2-phase2-fba-transit-clearance.1` and frontend `20261116-record-movement-hotfix.1` were merged, deployed/published and accepted in live use.
+- Verified business result: shipment `SHIP-001` / Amazon reference `FBA15MRFBLH8` / destination `BOM5` is `Received`. Approved movement `MOV-456` records 98 units of `PRD-P001` and 140 units of `PRD-P005` from `FBA_TRANSIT` to the hidden non-stock endpoint `FBA_ACCEPTED`, with Amazon located evidence and a total of 238 units.
+- Verified stock rule: approval reduced FBA Transit by 238 units and did not add any quantity to `AMAZON_FBA`. Amazon FBA remains controlled only by the latest reviewed dated Inventory Ledger upload. `Movement_Headers`, `Movement_Lines`, `FBA_Shipments`, `FBA_Shipment_Lines` and `Audit_Trail` contain the linked records.
+- Chronology exception retained: `SHIP-001` was manually marked Received at 16:43 before `MOV-456` was created and approved at 18:39. The final records reconcile, but a future backend/UI guard must prevent Received closure until approved receipts and classified exceptions balance every dispatched sellable line.
+- Staff workflow finalized in `docs/FBA_INVENTORY_OPERATING_SOP.md`: plan has no stock effect; physical courier handover moves Warehouse to Transit; Amazon located evidence clears Transit only; the dated Inventory Ledger independently controls Amazon FBA; Avee and freebies never enter Syoat sellable FBA stock.
+- Documentation changed for this closeout: `README.md`, `docs/ARCHITECTURE.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, `docs/PHASE_2_PLAN.md`, `docs/STATUS.md` and `docs/CHANGELOG.md`.
+- Checks: production evidence was inspected read-only; the linked quantities, identifiers, approval and audit chronology reconcile; documentation consistency and `git diff --check` were run. No application code or live data was changed by this documentation closeout.
+- Production actions still required for this completed receipt: none. Staff should use the same flow only for genuine handover and Amazon located evidence.
+- Next recommended action: implement shipment status/closure enforcement first, then complete evidence-backed FBA variance resolution and the reviewed historical Transit cleanup before starting the channel-neutral marketplace reconciliation bridge.
 
 ### 2026-11-16 — Record Movement frontend crash hotfix prepared locally
 
@@ -397,19 +422,19 @@ Last updated: 2026-11-16
 
 ## Active phase
 
-Phase 1 is complete and stored in `PHASE_1_COMPLETION.md`. Current records identify backend `3.2-phase2-fba-freebies.1` and frontend build `20261113-fba-freebies.1`. Keerthana and Sai Ram's no-access task is closed under D-021; the four effective ERP users remain Lalith Kiran, Dharani, Pushpanjali and Zubedha.
+Phase 1 is complete and stored in `PHASE_1_COMPLETION.md`. Current records identify backend `3.2-phase2-fba-transit-clearance.1` and frontend build `20261116-record-movement-hotfix.1`. Keerthana and Sai Ram's no-access task is closed under D-021; the four effective ERP users remain Lalith Kiran, Dharani, Pushpanjali and Zubedha.
 
 Backend `3.2-phase2-fba-review.1` and frontend `20261028-fba-review.1` replace generic stock-count buttons on imported Amazon variances with `Review FBA Variance`. Manager-level Amazon roles classify each difference and save an evidence note without changing stock. Backend guards also block direct generic approve/edit/reject calls. Analytics uses the newest report import batch and shows 444 units of absolute drift for the current 2026-10-26 upload instead of the stale 1,042-unit historical total. Owner screenshots confirm the live build and workflow.
 
 The owner excluded staging from the current Phase 2 workflow under D-022. Prior staging resources, tests and the incomplete rollback rehearsal remain historical evidence, not an open gate. Work Package 2 may continue with read-only production discovery and local sanitized analysis; production correction still requires separate owner approval, backup, dry-run, bounded execution and immediate live reconciliation.
 
-FBA alignment is now an explicit Phase 2 bridge. The 2026-10-27 read-only baseline found 24 approved unlinked FBA Dispatch movements totalling 4,516 units, zero FBA Receipt movements, empty FBA shipment tables, a latest 2026-10-21 snapshot containing 1,701 sellable units, and 29 approved report-driven stock adjustments. `PHASE_2_FBA_ALIGNMENT.md` defines the controlled shipment -> dispatch -> receipt -> report comparison chain, and `INVENTORY_EXCEPTION_REGISTER.md` records the open risks. No production correction, deployment or migration occurred.
+FBA alignment is now an explicit Phase 2 bridge. The 2026-10-27 read-only baseline found 24 approved unlinked FBA Dispatch movements totalling 4,516 units, zero FBA Receipt movements, empty FBA shipment tables, a latest 2026-10-21 snapshot containing 1,701 sellable units, and 29 approved report-driven stock adjustments. That paragraph is a historical baseline, not current live state: historical shipment linking is complete and `MOV-456` has since cleared 238 genuine located units from Transit. `PHASE_2_FBA_ALIGNMENT.md` defines the controlled shipment -> dispatch -> receipt -> report comparison chain, and `INVENTORY_EXCEPTION_REGISTER.md` records the remaining risks.
 
 The owner approved a minimal open-shipment picker for Warehouse Operators. Production backend `3.2-phase2-fba-bridge.2` and frontend `20261027-fba-bridge.2` require a selected open shipment and entered Amazon reference for new FBA Dispatch drafts, expose only minimal plan data to Warehouse roles, and revalidate remaining planned quantity during approval. Report import uses the newest dated ending balance, rejects a repeated report date, rebuilds freshness from backend snapshots, and creates blocked Pending review variances without changing stock. All 74 non-socket automated tests pass. Coordinated deployment is verified; staff upload remains paused through functional live acceptance.
 
 Live Warehouse Operator acceptance passed on 2026-10-27. Zubedha opened Record Movement -> Ship Orders -> FBA Dispatch and saw the limited open-shipment selector, Amazon reference, destination FC, carrier/AWB and product entry fields. With no production shipment plan present, the form correctly displayed that a Warehouse Manager must create one first. No movement was submitted and no stock changed. Full Amazon-module visibility remained outside the tested operator workflow.
 
-The first production shipment chain was established without duplicating inventory. Amazon shipment `FBA15MRFBLH8` to `BOM5` matched existing approved dispatch `MOV-379` exactly: `PRD-P001` 98 units and `PRD-P005` 140 units. The owner created `SHIP-001`, linked `MOV-379`, and advanced the plan through Shipped to In Transit. The ERP displays 98/98 and 140/140 dispatched. Amazon evidence still showed zero located units/receiving, so no FBA Receipt was created and the shipment was deliberately not marked Received.
+Historical checkpoint: the first production shipment chain was established without duplicating inventory. Amazon shipment `FBA15MRFBLH8` to `BOM5` matched existing approved dispatch `MOV-379` exactly: `PRD-P001` 98 units and `PRD-P005` 140 units. The owner created `SHIP-001`, linked `MOV-379`, and advanced the plan through Shipped to In Transit. This checkpoint was later completed by Approved receipt `MOV-456` for all 238 units, as recorded at the top of this file.
 
 On 2026-10-27 the owner explicitly instructed the project to skip staging and work only in live for this Phase 2 FBA package. The controlled release order is Apps Script backend first, GitHub frontend second, then immediate live health/access/dispatch/report-safety verification. This exception does not authorize historical movement changes, and staff FBA report upload remains paused until live acceptance is complete.
 
@@ -422,7 +447,7 @@ Backend `3.1-phase2-wp1.6` retains request-scoped Sheet read reuse and adds a 30
 - Current backend: bound Google Apps Script connected to the live workbook.
 - The original supplied 2,145-line backend source was saved locally as `Code.gs`; that local file now contains the reviewed Work Package 2–7 changes and is no longer a byte-for-byte copy of the attachment.
 - Protected GitHub `main` is current through the owner-confirmed PR #8 merge; PR #1 remains the audited source/CI baseline and later protected PRs contain the reviewed Phase 2 FBA changes and closeout records.
-- The current recorded production backend is `3.2-phase2-fba-freebies.1`; the current live frontend is build `20261113-fba-freebies.1`. Source-control publication does not imply a new production deployment.
+- The current recorded production backend is `3.2-phase2-fba-transit-clearance.1`; the current live frontend is build `20261116-record-movement-hotfix.1`. Source-control publication does not imply a new Apps Script deployment.
 - Historical audit baseline: no package manifest, automated test suite, CI workflow, deployment guide, or staging configuration was present. The repository now contains the project foundation and required CI workflow.
 - Both committed JavaScript artifacts passed a basic Node syntax check during the audit.
 
@@ -470,16 +495,16 @@ This list records the original audit baseline for history. Later releases deploy
 
 ## Next recommended task
 
-Continue Phase 2 Work Package 2 with the same-date snapshot-replacement design while staff complete the real FBA shipment actions. FBA-011 is concluded under D-028 with permanent Avee upload exclusion and no Avee-to-Syoat mapping. The 720-unit historical freebie correction is designed but remains non-posting. Do not perform a production correction or historical rewrite without separate owner approval and the required safeguards.
+Implement evidence-derived FBA shipment status and closure enforcement so `Received` cannot precede balanced Approved receipt/exception evidence. Then complete maker-checker FBA variance resolution and the reviewed historical Transit cleanup. FBA-011 remains concluded under D-028 with permanent Avee exclusion; the 720-unit historical freebie correction remains designed but non-posting. Do not perform a production correction or historical rewrite without separate owner approval and the required safeguards.
 
 ## Production state
 
-- Source-control record: protected GitHub `main` includes the optional manual-freebie workflow through owner-confirmed PR #8. The original checkout's former local contents remain recoverable in stash `pre-sync-preservation-2026-11-12`.
-- Apps Script record: backend `3.2-phase2-fba-freebies.1` is the latest recorded deployed version. The completed one-time historical linking apply gate remains removed.
-- Frontend record: build `20261113-fba-freebies.1` is the latest recorded live frontend build.
+- Source-control record: protected GitHub `main` includes the Transit-only receipt rule and Record Movement hotfix through the owner-confirmed protected merges. The original checkout's former local contents remain recoverable in stash `pre-sync-preservation-2026-11-12`.
+- Apps Script record: backend `3.2-phase2-fba-transit-clearance.1` is the latest recorded deployed version. The completed one-time historical linking apply gate remains removed.
+- Frontend record: build `20261116-record-movement-hotfix.1` is the latest recorded live frontend build.
 - Live Google Sheet: PIN hashes/salts populated, readable PIN cells cleared, and 85 movement file references normalized.
 - Live Drive: the earlier migration audit reported 187 checked and private; the later read-only folder inventory observed at least 359 owner-only/not-shared files.
-- Deployment/health: the owner-run backend Version 58 deployment is healthy and returns `3.2-phase2-fba-freebies.1`; the live Founder UI displays the optional manual-freebie workflow. PR #8 CI passed before merge, the final historical-linking dry run had zero mutations/conflicts, the Phase 2 health audit had zero recovery/unresolved errors, and the effective login allowlist remains four authorized identities.
+- Deployment/health: the owner deployed `3.2-phase2-fba-transit-clearance.1`, published the corrected frontend and successfully recorded/approved genuine receipt `MOV-456`. Read-only production evidence confirms the 238-unit Transit-only effect and complete audit linkage. The final historical-linking dry run had zero mutations/conflicts, the Phase 2 health audit had zero recovery/unresolved errors, and the effective login allowlist remains four authorized identities.
 
 ## Handoff log
 

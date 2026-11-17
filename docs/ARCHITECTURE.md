@@ -17,7 +17,7 @@ Code.gs business logic
     +--> Google Drive (attachments and reports)
 ```
 
-The active frontend is `index.html` plus `syoat-app.js`. The redesign-named HTML/JS files are archived test artifacts and are excluded from the active architecture. `Code.gs` is the version-controlled canonical Apps Script backend source on `main`; the latest owner-confirmed production deployment is `3.2-phase2-fba-freebies.1`. Source control does not deploy Apps Script: deployment and production configuration remain explicit owner actions.
+The active frontend is `index.html` plus `syoat-app.js`. The redesign-named HTML/JS files are archived test artifacts and are excluded from the active architecture. `Code.gs` is the version-controlled canonical Apps Script backend source on `main`; the latest owner-confirmed production deployment is `3.2-phase2-fba-transit-clearance.1`. Source control does not deploy Apps Script: deployment and production configuration remain explicit owner actions.
 
 ## Target near-term system
 
@@ -102,7 +102,8 @@ Idempotency records must be persistent enough to cover retries beyond a short ca
 - Locations are explicit; `MAIN_WH`, `FBA_TRANSIT`, returns, damage, samples, and individual Amazon FCs are not interchangeable.
 - Approval revalidates available stock while holding the critical lock.
 - FBA shipment dispatch moves stock from warehouse to FBA transit.
-- Confirmed Amazon receipt moves accepted quantity from FBA transit to the specific FC.
+- Confirmed Amazon located/accepted evidence moves quantity from FBA transit to the hidden non-stock `FBA_ACCEPTED` evidence endpoint; it never adds to an FC or aggregate Amazon FBA stock.
+- Aggregate `AMAZON_FBA` is controlled only by the latest reviewed dated Amazon Inventory Ledger snapshot.
 - Short, excess, damaged, or lost quantities become explicit reconciliation exceptions, not silent adjustments.
 
 ## Evolution path

@@ -52,6 +52,7 @@ test("active frontend backend-only actions remain explicitly visible", () => {
     "getStock",
     "logChange",
     "ping",
+    "updateFbaShipmentStatus",
     "verifySession"
   ]);
 });
