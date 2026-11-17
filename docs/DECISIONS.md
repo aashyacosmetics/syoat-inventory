@@ -217,9 +217,16 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 ### D-034 — FBA shipment status is derived from approved evidence
 
 - Date: 2026-11-17
-- Status: accepted owner priority; local implementation complete, protected release pending
+- Status: accepted and owner-released on 2026-11-17
 - Decision: FBA shipment lifecycle is not a manual workflow control. It is derived from Approved linked movements: no dispatch is `Working`; dispatch without receipt is `In Transit`; partial receipt is `Receiving`; and `Received` requires the complete shipment plan to be dispatched and every dispatched unit to have Approved FBA Receipt evidence. Approval, reversal, link and unlink operations must resynchronize the stored status and `ClosedAt` with an audit trail. A manual API request may only reconcile to the exact evidence-derived result and cannot skip stages or force closure.
-- Consequence: a shipment label cannot move stock or conceal an open Transit balance. Existing stale manual labels may be displayed with their derived status but are not silently rewritten during reads. Until P0-2 provides a maker-checker exception-resolution record, shortage, loss, removal, excess and other classifications cannot satisfy closure; full Approved receipt evidence is required. The dated Inventory Ledger remains independently authoritative for aggregate Amazon FBA under D-033.
+- Consequence: a shipment label cannot move stock or conceal an open Transit balance. Existing stale manual labels may be displayed with their derived status but are not silently rewritten during reads. Shortage, loss, removal, excess and other classifications do not satisfy shipment closure; full Approved receipt evidence is required unless a future separately approved shipment-exception design changes that rule. P0-2 evidence resolution closes a report-variance row only and does not close a shipment. The dated Inventory Ledger remains independently authoritative for aggregate Amazon FBA under D-033.
+
+### D-035 — FBA variance resolution closes evidence, not inventory
+
+- Date: 2026-11-17
+- Status: accepted Phase 2 rule; local implementation prepared for protected review
+- Decision: Imported Amazon variance evidence is first classified by an authorized Amazon manager and remains `Pending`. A different authorized Amazon manager may then record an evidence reference and checker note to close the row as `Resolved`, or supersede it with identified later evidence as `Superseded`. The classifier cannot resolve their own row, an `Unexplained` classification cannot close, and a stale review timestamp fails closed.
+- Consequence: Resolution never changes stock, creates an adjustment movement or alters Approved history. Any genuine Transit clearance, loss, damage, removal or other inventory correction remains a separate evidence-backed movement under its own maker-checker, idempotency, recovery and audit controls. The dedicated resolution action provides the missing evidence lifecycle without turning Amazon snapshots into a second stock ledger.
 
 ## Open decisions
 

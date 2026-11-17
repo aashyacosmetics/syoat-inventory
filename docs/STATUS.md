@@ -2,17 +2,28 @@
 
 Last updated: 2026-11-17
 
+### 2026-11-17 — P0-2 non-posting FBA variance resolution prepared locally
+
+- Status: local application candidate implemented; no Google Sheet row, stock quantity, Apps Script deployment, frontend publication, push or production change was performed.
+- Backend candidate `3.2-phase2-fba-variance-resolution.1` adds `resolveFbaVariance` behind `amazon.reconciliation.resolve`. Founder, Co-Founder, Admin, Manager and Warehouse Manager may act as checker only when a different authorized manager already classified the Pending imported evidence. Unexplained classifications, stale review timestamps, missing evidence, maker-checker violations and repeat closure fail closed.
+- Resolution records the checker, evidence reference, note and time, then changes only the evidence-row status to `Resolved` or `Superseded`. It explicitly returns `stockChanged:false`, leaves `AdjustmentMovementID` blank, creates no movement and does not alter Amazon FBA, Transit, Warehouse or Approved history. Any actual inventory correction remains a separate evidence-backed movement.
+- Frontend candidate `20261117-fba-variance-resolution.1` exposes **Resolve Evidence** only to an eligible different checker, explains the zero-stock effect, blocks Unexplained rows and displays completed resolution evidence on the count card. It also carries the corrected automatic-status guidance, preventing the earlier manual “advance status” wording from returning.
+- Files changed: `Code.gs`, `syoat-app.js`, `index.html`, `config/api-catalog.json`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `docs/API_CATALOG.md`, `docs/ROLE_CAPABILITIES.md`, `docs/INVENTORY_DATA_DICTIONARY.md`, `docs/DECISIONS.md`, `docs/PHASE_2_PLAN.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/CHANGELOG.md` and this handoff.
+- Verification passed: 95/95 automated tests (94 in the normal sandbox plus the localhost isolation test with loopback permission), backend/frontend syntax, the 54-action API catalogue, environment-template safety and whitespace validation with Windows CR-at-EOL handling.
+- Production actions still required: protected review/merge, owner deployment of `Code.gs`, owner frontend publication, ping/build verification, and a genuine two-person acceptance using existing imported evidence. Do not resolve production evidence until the owner has reviewed which rows are current, superseded or still unexplained.
+- Risk and next recommended task: resolution deliberately does not correct stock. After P0-2 acceptance, begin P0-3 with a fresh read-only Transit baseline and reviewed dry-run for the historical freebie and evidence-supported Transit cleanup.
+
 ### 2026-11-17 — P0-1 evidence-derived shipment status and closure prepared locally
 
-- Status: local application candidate complete; no Google Sheet row, stock quantity, Apps Script deployment, frontend publication, commit or push was performed.
+- Status: owner merged, deployed/published and verified the live status/progress interface on 2026-11-17. The wording correction from local commit `19b3a48` is incorporated into the P0-2 candidate above, so it does not require a competing release branch.
 - Backend candidate `3.2-phase2-fba-status-closure.1` derives each shipment lifecycle from Approved linked movements. No Approved dispatch means `Working`; dispatch without receipt means `In Transit`; partial receipt means `Receiving`; `Received` requires every planned unit to be dispatched and every dispatched unit to have Approved FBA Receipt evidence.
 - Manual premature closure is blocked. The compatibility `updateFbaShipmentStatus` action can only reconcile a stale stored status to the exact evidence-derived status. Approval, reversal, historical linking and unlinking automatically resynchronize `Status` and `ClosedAt`, and every automatic change is logged and audited.
 - Frontend candidate `20261117-fba-status-closure.1` removes manual **Mark …** lifecycle buttons, shows dispatched/expected and received/dispatched quantities per product, explains the current closure evidence and includes the new `Receiving` state.
-- Scope boundary: classified shortage, loss, removal and other exception quantities are not yet allowed to close a shipment. That maker-checker resolution belongs to P0-2; until implemented, closure requires Approved receipt evidence for the full dispatched quantity.
+- Scope boundary: classified shortage, loss, removal and other exception quantities do not close a shipment. P0-2 resolves imported report evidence only; shipment closure continues to require Approved receipt evidence for the full dispatched quantity unless a future separately approved design changes that rule.
 - Files changed for P0-1: `Code.gs`, `syoat-app.js`, `index.html`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `docs/DECISIONS.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/ROLE_CAPABILITIES.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, `docs/PHASE_2_PLAN.md`, `docs/CHANGELOG.md` and this handoff.
 - Verification passed: 94/94 automated tests (including the localhost isolation test), backend/frontend syntax, the 53-action API catalogue, environment-template safety and whitespace validation with Windows CR-at-EOL handling.
-- Production actions still required: protected review/merge, owner deployment of `Code.gs`, owner publication of the frontend, then a read-only/live acceptance check confirming Working → In Transit → Receiving → Received from genuine Approved movement evidence. Existing shipment rows with stale manual status are not rewritten by a read; they reconcile on an approved lifecycle write or an explicit evidence-matching reconciliation call.
-- Risks and next task: exception-based closure remains deliberately unavailable until P0-2. After P0-1 release acceptance, implement evidence-backed FBA variance resolution through maker-checker actions.
+- Production actions still required for P0-1: none separately; publish the incorporated wording correction with the P0-2 frontend after its protected review. Existing shipment rows with stale manual status are not rewritten by a read; they reconcile on an approved lifecycle write or an explicit evidence-matching reconciliation call.
+- Risks and next task: the status lifecycle is accepted; P0-2 evidence-backed FBA variance resolution is the active implementation task above.
 
 ### 2026-11-16 — FBA Transit-clearance production acceptance and Phase 2 handoff
 

@@ -235,13 +235,13 @@ The read-only Amazon India inventory API snapshot on 2026-11-15 returned 1,428 S
 
 Production backend `3.2-phase2-fba-transit-clearance.1` and the corrected frontend flow are accepted. The picker shows only shipments with an Approved dispatched-but-not-received balance, auto-fills the internal shipment ID, Amazon reference and destination FC, restricts products/quantities to that balance, supports partial receipts and revalidates under the approval lock. `MOV-456` proves that approval clears Transit to the virtual acceptance-evidence endpoint and leaves snapshot-derived Amazon FBA unchanged.
 
-### P0-1 prepared locally - Status automation and closure equation
+### Completed - Status automation and closure equation
 
-Backend `3.2-phase2-fba-status-closure.1` and frontend `20261117-fba-status-closure.1` implement the receipt-only closure rule pending protected release. No Approved dispatch means `Working`; Approved dispatch without receipt means `In Transit`; any partial Approved receipt means `Receiving`; and `Received` requires the complete shipment plan to be dispatched and every dispatched unit to have Approved FBA Receipt evidence. Staff cannot manually skip or advance the lifecycle. Approval, reversal, correction linking and unlinking resynchronize the stored status and audit the change. Classified shortage/loss/removal/other closure is not available until P0-2 is implemented.
+Backend `3.2-phase2-fba-status-closure.1` and frontend `20261117-fba-status-closure.1` implement the receipt-only closure rule and were owner-released on 2026-11-17. No Approved dispatch means `Working`; Approved dispatch without receipt means `In Transit`; any partial Approved receipt means `Receiving`; and `Received` requires the complete shipment plan to be dispatched and every dispatched unit to have Approved FBA Receipt evidence. Staff cannot manually skip or advance the lifecycle. Approval, reversal, correction linking and unlinking resynchronize the stored status and audit the change.
 
-### P0 - Evidence-backed FBA variance resolution
+### P0-2 local candidate - Evidence-backed FBA variance resolution
 
-The existing Review action classifies evidence only. Add a separate maker-checker resolution that can create the correct linked receipt, sale-timing carry-forward, damage/loss, removal or approved one-time correction. It must never permit generic count approval or automatic unexplained adjustment.
+The existing Review action classifies evidence only. The prepared resolution action requires a different authorized Amazon manager to check an evidence reference and note, then closes the evidence row as `Resolved` or `Superseded`. `Unexplained` rows remain open and stale reviews fail closed. Resolution is deliberately non-posting: it creates no receipt, adjustment or stock delta. A genuine receipt, damage/loss, removal or other correction must be recorded separately through the applicable controlled movement workflow.
 
 ### P0 - Historical canonical-ledger migration
 

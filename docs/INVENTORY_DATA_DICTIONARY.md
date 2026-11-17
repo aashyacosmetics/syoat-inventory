@@ -141,12 +141,12 @@ Live header order:
 | `Difference` | Number | Required; zero allowed | `PhysicalQty - SystemQty`; derived, not manually authoritative. |
 | `CountedByEmail` | Text identity | Required; system-generated | Authenticated counter/import actor. |
 | `ApprovedByEmail` | Text identity | Conditional | Required for reviewed resolution/approval. |
-| `Status` | Enum | Required | Current values are Pending, Approved and Rejected. Imported FBA evidence needs a future non-stock-changing Superseded/Resolved state. |
+| `Status` | Enum | Required | Routine counts use Pending, Approved or Rejected. Imported FBA evidence additionally uses non-stock-changing Resolved or Superseded after maker-checker resolution. |
 | `Reason` | Text/classification | Required for new exceptions | Evidence category, not automatic permission to change stock. |
 | `AdjustmentMovementID` | Movement ID | Conditional | Present only when a reviewed count creates a traceable adjustment movement. |
 | `Notes` | Text | Optional | Review evidence. |
 
-A count row never changes stock directly. Only its separately created Approved adjustment movement can affect the ledger. Imported FBA report-variance rows must not use generic count approval.
+A count row never changes stock directly. Only its separately created Approved adjustment movement can affect the ledger. Imported FBA report-variance rows must not use generic count approval. Their classification remains Pending; a different authorized Amazon manager may close the evidence as Resolved or Superseded, with the checker identity and evidence reference retained in `Notes` and no `AdjustmentMovementID`.
 
 ## FBA shipments
 
@@ -236,7 +236,7 @@ Live header order: `ListName`, `Value`, `Meaning`
 3. The `Lists` movement-status vocabulary is stale (`Submitted` present, `Rejected` absent).
 4. Batch/expiry flags have no recorded enforcement effective date; historical blanks must not be bulk-invalidated.
 5. Approved historical lines with blank/non-positive UnitCost require an operational fallback or exception policy.
-6. FBA report evidence needs a non-stock-changing Superseded/Resolved lifecycle instead of generic count rejection.
+6. FBA report evidence now has a non-stock-changing Superseded/Resolved lifecycle; production release and acceptance remain required.
 7. Historical absent/archived product references must remain readable even when blocked from new entry.
 8. External marketplace status vocabularies must be mapped explicitly; unknown statuses fail without changing stock.
 

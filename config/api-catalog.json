@@ -338,6 +338,14 @@
       "targetCapability": "amazon.reconciliation.review"
     },
     {
+      "action": "resolveFbaVariance",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid session + central capability amazon.reconciliation.resolve; second authorized Amazon manager closes or supersedes classified evidence; no stock change",
+      "targetCapability": "amazon.reconciliation.resolve"
+    },
+    {
       "action": "createSupportTicket",
       "routes": [
         "POST"
