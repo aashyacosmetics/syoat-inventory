@@ -1,6 +1,6 @@
 # Role and Capability Matrix
 
-Status: production access policy remains unchanged; deployed backend `3.2-phase2-fba-transit-draft-preparation.1` retains the Founder-only historical FBA migration capability. Local candidate `3.2-phase2-inventory-baseline-audit.1` adds a Founder-only read-only baseline audit under `system.health.view`; the handler also enforces the exact Founder role.
+Status: production access policy remains unchanged; deployed backend `3.2-phase2-inventory-baseline-audit.1` includes the Founder-only read-only baseline audit under `system.health.view` and retains the Founder-only historical FBA migration capability. Local correction candidate `3.2-phase2-inventory-baseline-audit-classification.1` changes only audit classification; the handler continues to enforce the exact Founder role.
 
 ## Enforcement model
 

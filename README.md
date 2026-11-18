@@ -21,7 +21,7 @@ The present application is a static React frontend backed by Google Apps Script 
 - `syoat-theme.css` — application styling.
 - `index-redesign.html` and `syoat-app-redesign.js` — archived test artifacts from before the live-version edits; ignore and never publish them.
 - `images/` — product and brand images.
-- `Code.gs` — version-controlled canonical Apps Script backend source. The latest owner-confirmed production deployment is `3.2-phase2-fba-transit-draft-preparation.1`; local P0-4 candidate `3.2-phase2-inventory-baseline-audit.1` adds only a Founder-only read-only canonical baseline audit. Future deployment and every production execution step remain explicit owner actions.
+- `Code.gs` — version-controlled canonical Apps Script backend source. The latest owner-confirmed production deployment is `3.2-phase2-inventory-baseline-audit.1`; local correction candidate `3.2-phase2-inventory-baseline-audit-classification.1` keeps the audit read-only while treating Amazon FC identifiers as external evidence codes and rejected/reversed missing-product history as visible non-blocking exceptions. Future deployment and every production execution step remain explicit owner actions.
 - `docs/` — product, architecture, security, roadmap, decisions, status, and working procedures.
 
 ## Documentation map

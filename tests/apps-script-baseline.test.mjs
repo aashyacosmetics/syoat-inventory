@@ -74,7 +74,7 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-inventory-baseline-audit.1");
+  assert.equal(response.data.version, "3.2-phase2-inventory-baseline-audit-classification.1");
 });
 
 test("Founder inventory baseline audit reuses canonical stock and performs no writes", () => {
@@ -98,7 +98,7 @@ test("Founder inventory baseline audit reuses canonical stock and performs no wr
   });
 
   assert.equal(response.success, true);
-  assert.equal(response.data.auditVersion, "phase2-inventory-baseline-v1");
+  assert.equal(response.data.auditVersion, "phase2-inventory-baseline-v1.1");
   assert.equal(response.data.writesPerformed, 0);
   assert.equal(response.data.blockingExceptionCount, 0);
   assert.equal(response.data.stock.totalsByLocation.MAIN_WH, 20);
@@ -152,6 +152,42 @@ test("inventory baseline audit surfaces negative, orphan and duplicate exception
   assert.equal(response.data.duplicateKeys.productIDs[0].value, "TEST-P001");
   assert.equal(response.data.orphanMovementLines[0].issue, "MOVEMENT_HEADER_MISSING");
   assert.ok(response.data.blockingExceptionCount >= 3);
+});
+
+test("inventory baseline audit accepts external FC codes and preserves non-posting missing-product history", () => {
+  const sheets = authenticatedSheets();
+  sheets.Locations = objectsToRows(fixture.locations.filter(location => location.LocationID !== "TEST_FC"));
+  sheets.FBA_Shipments = objectsToRows([{
+    ShipmentID: "SHIP-NEW-FC", AmazonReferenceID: "FBA-NEW-FC", DestinationFC: "HYD9", Status: "Working",
+  }], ["ShipmentID", "AmazonReferenceID", "DestinationFC", "Status"]);
+  sheets.FBA_Shipment_Lines = objectsToRows([], ["ShipmentLineID", "ShipmentID", "ProductID", "ExpectedQty"]);
+  sheets.Movement_Headers = objectsToRows([{
+    MovementID: "MOV-REJECTED-HISTORY", MovementType: "Transfer", SourceLocationID: "MAIN_WH",
+    DestinationLocationID: "FBA_TRANSIT", Status: "Rejected",
+  }]);
+  sheets.Movement_Lines = objectsToRows([{
+    MovementLineID: "LINE-REJECTED-HISTORY", MovementID: "MOV-REJECTED-HISTORY",
+    ProductID: "RETIRED-PRODUCT", Quantity: 1, UnitCost: 1,
+  }]);
+  sheets.Stock_Counts = objectsToRows([], ["CountID", "LocationID", "ProductID", "SystemQty", "PhysicalQty", "Difference", "Status"]);
+  sheets.FBA_Ledger_Snapshots = objectsToRows([], ["SnapshotID", "ReportDate", "ProductID", "FC", "Qty"]);
+  const harness = createAppsScriptHarness(sheets);
+  const signedIn = login(harness).data;
+  const response = post(harness, { action: "getInventoryBaselineAudit", sessionToken: signedIn.sessionToken });
+
+  assert.equal(response.success, true);
+  assert.equal(response.data.blockingExceptionCount, 0);
+  assert.equal(response.data.exceptionCounts.shipmentIssues, 0);
+  assert.equal(response.data.exceptionCounts.orphanMovementLines, 0);
+  assert.equal(response.data.exceptionCounts.knownHistoricalExceptions, 1);
+  assert.deepEqual(response.data.knownHistoricalExceptions, [{
+    id: "LINE-REJECTED-HISTORY",
+    issue: "NON_POSTING_PRODUCT_MISSING",
+    movementID: "MOV-REJECTED-HISTORY",
+    movementStatus: "Rejected",
+    productID: "RETIRED-PRODUCT",
+  }]);
+  assert.equal(response.data.status, "baseline-valid-with-known-data-quality-exceptions");
 });
 
 function historicalTransitCleanupSheets() {

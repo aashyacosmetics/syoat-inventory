@@ -2,6 +2,16 @@
 
 Last updated: 2026-11-18
 
+### 2026-11-18 — P0-4 live baseline classifier correction prepared locally
+
+- Status: local backend correction ready for verification/review; production remains on owner-deployed `3.2-phase2-inventory-baseline-audit.1`. No Google Sheet row, stock quantity, frontend asset, Apps Script deployment or production configuration was changed by this task.
+- Live evidence: the Founder audit returned `writesPerformed:0`, `FBA_TRANSIT:811`, `AMAZON_FBA:1701`, `MAIN_WH:15438`, `RETURNS:4` and no negative balances. Its 31 blockers were classifier false positives: 29 legitimate external Amazon destination FC codes and two known Rejected non-posting lines (`MOV-002-L001` / `MOV-003-L001`) referencing retired products.
+- Change: backend `3.2-phase2-inventory-baseline-audit-classification.1` validates normalized external FC syntax instead of internal Locations membership. Future FC codes therefore require no deployment and do not change the snapshot-backed Locations–FC view. Rejected/Reversed missing-product references are returned in `knownHistoricalExceptions`; the same fault remains blocking for stock-affecting or Draft history. D-036 records the Phase 2 external-code and future Phase 3 owner-mapping boundary.
+- Files changed: `Code.gs`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `README.md`, `docs/ARCHITECTURE.md`, `docs/ROLE_CAPABILITIES.md`, `docs/DECISIONS.md`, `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/PHASE_2_PLAN.md`, `docs/CHANGELOG.md` and this handoff.
+- Checks performed: full repository suite passed 102/102, including future external FC acceptance, rejected-history classification, zero blockers, preservation of true orphan/negative/duplicate detection and the localhost staging-isolation test. Backend/frontend syntax, the 57-action API catalogue and environment-template isolation also passed.
+- Production actions still required: protected review/merge; owner deployment of corrected `Code.gs`; Founder rerun of `getInventoryBaselineAudit`; confirm version, `writesPerformed:0`, Transit 811, no negatives, `blockingExceptionCount:0`, two known historical exceptions and unchanged Locations–FC display; then run system health. No frontend publication or Sheet edit is required.
+- Risks and next recommended task: do not add Amazon FC codes to the Phase 2 Locations table merely to satisfy the old audit. Phase 3 per-FC stock requires a separately reviewed owner-controlled external-code mapping and must never create stock merely by adding a mapping.
+
 ### 2026-11-18 — P0-4 refreshed inventory baseline audit prepared locally
 
 - Status: local backend candidate complete; production remains unchanged. No Google Sheet row, stock quantity, Apps Script deployment, frontend publication or production configuration was changed.
