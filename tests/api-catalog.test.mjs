@@ -53,6 +53,7 @@ test("active frontend backend-only actions remain explicitly visible", () => {
     "getStock",
     "logChange",
     "ping",
+    "prepareHistoricalFbaTransitCleanupDrafts",
     "updateFbaShipmentStatus",
     "verifySession"
   ]);
@@ -97,7 +98,7 @@ test("only health and safe staff picker remain reachable through GET", () => {
 });
 
 test("every business write is POST-only", () => {
-  assert.equal(backend.writeActions.length, 27);
+  assert.equal(backend.writeActions.length, 28);
   assert.ok(backend.writeActions.every(action =>
     JSON.stringify(catalog.actions.find(item => item.action === action).routes) === JSON.stringify(["POST"])
   ));

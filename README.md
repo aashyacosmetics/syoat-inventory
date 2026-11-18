@@ -21,7 +21,7 @@ The present application is a static React frontend backed by Google Apps Script 
 - `syoat-theme.css` — application styling.
 - `index-redesign.html` and `syoat-app-redesign.js` — archived test artifacts from before the live-version edits; ignore and never publish them.
 - `images/` — product and brand images.
-- `Code.gs` — version-controlled canonical Apps Script backend source. The latest owner-confirmed production deployment is `3.2-phase2-fba-variance-resolution.1`; local P0-3 candidate `3.2-phase2-fba-transit-cleanup.1` remains read-only and undeployed. Future deployment remains an explicit owner action.
+- `Code.gs` — version-controlled canonical Apps Script backend source. The latest owner-confirmed production deployment is `3.2-phase2-fba-transit-cleanup.1`; local P0-3 candidate `3.2-phase2-fba-transit-draft-preparation.1` adds only disabled-by-default bounded Draft preparation. Future deployment and every production gate/execution step remain explicit owner actions.
 - `docs/` — product, architecture, security, roadmap, decisions, status, and working procedures.
 
 ## Documentation map

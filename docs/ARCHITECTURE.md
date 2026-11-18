@@ -17,7 +17,7 @@ Code.gs business logic
     +--> Google Drive (attachments and reports)
 ```
 
-The active frontend is `index.html` plus `syoat-app.js`. The redesign-named HTML/JS files are archived test artifacts and are excluded from the active architecture. `Code.gs` is the version-controlled canonical Apps Script backend source on `main`; the latest owner-confirmed production deployment is `3.2-phase2-fba-variance-resolution.1`. Local P0-3 candidate `3.2-phase2-fba-transit-cleanup.1` adds a Founder-only read-only dry run and no apply action. Source control does not deploy Apps Script: deployment and production configuration remain explicit owner actions.
+The active frontend is `index.html` plus `syoat-app.js`. The redesign-named HTML/JS files are archived test artifacts and are excluded from the active architecture. `Code.gs` is the version-controlled canonical Apps Script backend source on `main`; the latest owner-confirmed production deployment is `3.2-phase2-fba-transit-cleanup.1`. Local P0-3 candidate `3.2-phase2-fba-transit-draft-preparation.1` retains the read-only dry run and adds a Founder-only, disabled-by-default, bounded Draft-preparation command. It cannot approve a movement or change stock. Source control does not deploy Apps Script: deployment and production configuration remain explicit owner actions.
 
 ## Target near-term system
 

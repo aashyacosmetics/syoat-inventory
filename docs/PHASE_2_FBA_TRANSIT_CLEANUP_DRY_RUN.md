@@ -2,13 +2,13 @@
 
 Manifest ID: `FBA-TRANSIT-CLEANUP-2026-11-17-V1`
 
-Status: local Founder-only read-only candidate; **no apply action exists**
+Status: read-only dry run accepted in production; local disabled-by-default Draft-preparation candidate ready for protected review; **no approval/apply action exists**
 
 ## Purpose
 
 This P0-3 candidate refreshes the historical FBA Transit baseline after genuine dispatches and Transit-clearance receipts changed the live ledger. It validates the bounded freebie correction, excludes the preserved Avee exception, inventories existing Draft receipts and describes uncovered receipt evidence without writing a Sheet row or changing stock.
 
-The implementation is `getHistoricalFbaTransitCleanupDryRun`. It requires an authenticated Founder and the existing `amazon.shipments.historicalMigration` capability. It returns `applyAuthorized: false`, `applyActionAvailable: false` and `writesPerformed: 0`.
+The read-only implementation is `getHistoricalFbaTransitCleanupDryRun`. It requires an authenticated Founder and the existing `amazon.shipments.historicalMigration` capability. It returns `applyAuthorized: false`, `applyActionAvailable: false` and `writesPerformed: 0`. The owner subsequently deployed it and accepted a live zero-conflict result for the 4,911-unit baseline.
 
 ## Read-only live baseline — 2026-11-17
 
@@ -46,7 +46,27 @@ When no correction exists, the dry run proposes for owner review:
 - projected Transit change `-720`;
 - projected Warehouse and Amazon FBA change `0`.
 
-The candidate does not create these Drafts. A later preparation command requires a separate protected change, backup, owner approval, disabled-by-default gate and idempotent maker-checker execution.
+The local follow-up candidate can create these Drafts only through `prepareHistoricalFbaTransitCleanupDrafts`. Preparation is still non-posting: Draft status has no stock effect, and the command never approves a movement.
+
+## Draft-preparation contract
+
+The local backend `3.2-phase2-fba-transit-draft-preparation.1` uses one stable 33-entry sequence: freebie sequences 1–9 and historical/control receipt sequences 10–33. Entries never disappear from this sequence after a prior batch; an entry already represented by valid Draft/Approved evidence becomes a no-op. This prevents sequence drift and makes later batches safely resumable.
+
+Every preparation request must satisfy all of these gates:
+
+1. authenticated session with `amazon.shipments.historicalMigration` and exact role `Founder`;
+2. exact `manifestFingerprint` returned by the current dry run;
+3. exact `expectedCurrentTransitQty` returned by that reviewed dry run;
+4. confirmation text `PREPARE:<fingerprint>`;
+5. batch start within the fixed 1–33 sequence and batch size from 1 to 5;
+6. temporary Script Property `SYOAT_HISTORICAL_FBA_TRANSIT_DRAFTS_APPROVED_FINGERPRINT` equal to that fingerprint;
+7. a fresh zero-conflict preflight under the business-write lock.
+
+Each created aggregate writes child lines first and the `Draft` movement header as its commit marker, then records request checkpoints and audit/log evidence. Completed request IDs replay their prior result; a failed/in-progress request blocks a new retry until its recovery record is reviewed. Manifest-level reruns do not duplicate an existing valid Draft or Approved correction.
+
+Receipt Drafts use `FBA_TRANSIT -> FBA_ACCEPTED`. Freebie correction Drafts use `FBA_TRANSIT -> SAMPLES`. Both retain the shipment, Amazon reference, FC, source movement, manifest, fingerprint and sequence evidence. The result explicitly reports zero Warehouse delta, zero Amazon FBA delta, zero stock delta, zero approvals and zero movement-status edits.
+
+Apps Script-editor helpers `enableHistoricalFbaTransitDraftPreparationGate` and `disableHistoricalFbaTransitDraftPreparationGate` can set/remove only this release's fixed fingerprint. They are not web-app routes. The owner must remove the gate immediately after preparation.
 
 ## Receipt-evidence dry-run contract
 
@@ -80,15 +100,17 @@ Any mismatch appears in `conflicts` and sets `readyForOwnerReview: false`.
 
 ## Production boundary
 
-This candidate authorizes no production action. Before any later write:
+This local candidate authorizes no production action by itself. Before Draft preparation:
 
 1. run the reviewed dry run against a newly refreshed live baseline;
 2. create a current workbook backup;
 3. review every shipment/product proposal and existing Draft;
-4. implement preparation separately with a stable fingerprint, disabled gate and idempotent bounded batches;
-5. create Draft movements only;
-6. use a different authorized approver for maker-checker approval;
-7. reconcile Transit, Warehouse, Amazon FBA, movement history, recovery records and system health immediately afterward;
-8. separately resolve the 29-movement legacy Amazon FBA baseline without changing the rule that dated Amazon evidence controls FBA.
+4. merge and owner-deploy the reviewed preparation code;
+5. enable only the exact reviewed fingerprint and use batches of at most five fixed sequences;
+6. create Draft movements only, then immediately remove the gate;
+7. confirm system health is clean and all prepared records remain Draft with stock unchanged;
+8. use a different authorized approver for maker-checker review/approval in a separately confirmed step;
+9. reconcile Transit, Warehouse, Amazon FBA, movement history, recovery records and system health immediately afterward;
+10. separately resolve the 29-movement legacy Amazon FBA baseline without changing the rule that dated Amazon evidence controls FBA.
 
 Until those gates pass, the required production effect is exactly zero.
