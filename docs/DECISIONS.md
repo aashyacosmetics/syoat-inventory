@@ -228,6 +228,13 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 - Decision: Imported Amazon variance evidence is first classified by an authorized Amazon manager and remains `Pending`. A different authorized Amazon manager may then record an evidence reference and checker note to close the row as `Resolved`, or supersede it with identified later evidence as `Superseded`. The classifier cannot resolve their own row, an `Unexplained` classification cannot close, and a stale review timestamp fails closed.
 - Consequence: Resolution never changes stock, creates an adjustment movement or alters Approved history. Any genuine Transit clearance, loss, damage, removal or other inventory correction remains a separate evidence-backed movement under its own maker-checker, idempotency, recovery and audit controls. The dedicated resolution action provides the missing evidence lifecycle without turning Amazon snapshots into a second stock ledger.
 
+### D-036 — Amazon FC identity is external in Phase 2 and owner-mapped before Phase 3 stock use
+
+- Date: 2026-11-18
+- Status: accepted owner decision; audit-classification correction prepared locally
+- Decision: `FBA_Shipments.DestinationFC`, movement `AmazonDestinationFC` and snapshot `FC` retain Amazon's external fulfilment-centre code. Phase 2 must accept a normalized future Amazon FC code without requiring it to exist in the ERP `Locations` table or requiring a deployment. The Locations–FC screen continues to read the dated Inventory Ledger snapshot by its external `FC` value. A new code may be surfaced for owner review, but it is not automatically a stock-holding ERP location and adding or observing the code has no stock effect.
+- Consequence: the Phase 2 audit validates that a shipment FC is present and syntactically usable, not that it matches an internal `LocationID`. Aggregate `AMAZON_FBA` remains the snapshot-controlled quantity authority under D-033. Before Phase 3 uses individual FC stock locations, the owner must verify each external code and activate an explicit external-code-to-internal-location mapping; mapping creation itself cannot move stock. Historical FC formatting differences normalize under D-026, while the source code remains preserved as evidence.
+
 ## Open decisions
 
 ### Access and production-baseline decisions captured 2026-10-23

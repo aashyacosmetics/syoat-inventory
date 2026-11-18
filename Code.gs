@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-inventory-baseline-audit.1",
+  VERSION:               "3.2-phase2-inventory-baseline-audit-classification.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -5080,6 +5080,7 @@ function getInventoryBaselineAudit(staff) {
 
   const orphanMovementLines = [];
   const invalidMovementLines = [];
+  const knownHistoricalExceptions = [];
   const trackingExceptions = [];
   const approvedLinesMissingUnitCost = [];
   lines.forEach(row => {
@@ -5087,7 +5088,18 @@ function getInventoryBaselineAudit(staff) {
     const header = headerById[String(row.MovementID || "")];
     const product = productById[String(row.ProductID || "")];
     if (!header) orphanMovementLines.push(baselineAuditIssue(lineID, "MOVEMENT_HEADER_MISSING", { movementID: String(row.MovementID || "") }));
-    if (!product) orphanMovementLines.push(baselineAuditIssue(lineID, "PRODUCT_MISSING", { productID: String(row.ProductID || "") }));
+    if (!product) {
+      const headerStatus = String((header && header.Status) || "");
+      if (header && ["Rejected", "Reversed"].includes(headerStatus)) {
+        knownHistoricalExceptions.push(baselineAuditIssue(lineID, "NON_POSTING_PRODUCT_MISSING", {
+          movementID: String(row.MovementID || ""),
+          movementStatus: headerStatus,
+          productID: String(row.ProductID || ""),
+        }));
+      } else {
+        orphanMovementLines.push(baselineAuditIssue(lineID, "PRODUCT_MISSING", { productID: String(row.ProductID || "") }));
+      }
+    }
     const quantity = parseFloat(row.Quantity);
     if (!isFinite(quantity) || quantity <= 0) invalidMovementLines.push(baselineAuditIssue(lineID, "QUANTITY_NOT_POSITIVE"));
     if (approvedHeaderIds[String(row.MovementID || "")]) {
@@ -5127,7 +5139,10 @@ function getInventoryBaselineAudit(staff) {
   const shipmentIssues = [];
   shipments.forEach(row => {
     if (!shipmentStatuses.includes(String(row.Status || ""))) shipmentIssues.push(baselineAuditIssue(row.ShipmentID, "STATUS_INVALID", { status: String(row.Status || "") }));
-    if (row.DestinationFC && !locationById[String(row.DestinationFC)]) shipmentIssues.push(baselineAuditIssue(row.ShipmentID, "DESTINATION_LOCATION_UNKNOWN", { locationID: String(row.DestinationFC) }));
+    const destinationFCSource = String(row.DestinationFC || "").trim();
+    const destinationFC = normalizeFbaDestinationFC(destinationFCSource);
+    if (!destinationFCSource) shipmentIssues.push(baselineAuditIssue(row.ShipmentID, "DESTINATION_FC_MISSING"));
+    else if (!/^[A-Z0-9]{3,10}$/.test(destinationFC)) shipmentIssues.push(baselineAuditIssue(row.ShipmentID, "DESTINATION_FC_INVALID", { destinationFC: destinationFCSource }));
   });
   shipmentLines.forEach(row => {
     if (!shipmentById[String(row.ShipmentID || "")]) shipmentIssues.push(baselineAuditIssue(row.ShipmentLineID, "SHIPMENT_HEADER_MISSING", { shipmentID: String(row.ShipmentID || "") }));
@@ -5175,14 +5190,15 @@ function getInventoryBaselineAudit(staff) {
     stockCountIssues: stockCountIssues.length,
     shipmentIssues: shipmentIssues.length,
     snapshotIssues: snapshotIssues.length,
+    knownHistoricalExceptions: knownHistoricalExceptions.length,
     approvedLinesMissingUnitCost: approvedLinesMissingUnitCost.length,
     trackingExceptions: trackingExceptions.length,
   };
   const blockingExceptionCount = duplicateCount + negativeBalances.length + masterDataIssues.length + orphanMovementLines.length + invalidMovementHeaders.length + invalidMovementLines.length + stockCountIssues.length + shipmentIssues.length + snapshotIssues.length;
-  const knownDataQualityExceptionCount = approvedLinesMissingUnitCost.length + trackingExceptions.length;
+  const knownDataQualityExceptionCount = knownHistoricalExceptions.length + approvedLinesMissingUnitCost.length + trackingExceptions.length;
 
   return {
-    auditVersion: "phase2-inventory-baseline-v1",
+    auditVersion: "phase2-inventory-baseline-v1.1",
     generatedAt: now(),
     writesPerformed: 0,
     status: blockingExceptionCount
@@ -5217,6 +5233,7 @@ function getInventoryBaselineAudit(staff) {
     stockCountIssues: stockCountIssues,
     shipmentIssues: shipmentIssues,
     snapshotIssues: snapshotIssues,
+    knownHistoricalExceptions: knownHistoricalExceptions,
     approvedLinesMissingUnitCost: approvedLinesMissingUnitCost.sort(),
     trackingExceptions: trackingExceptions,
     exceptionCounts: exceptionCounts,
