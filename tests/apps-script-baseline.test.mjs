@@ -74,7 +74,152 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-fba-variance-resolution.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-transit-cleanup.1");
+});
+
+function historicalTransitCleanupSheets() {
+  const source = createAppsScriptHarness({});
+  const linkingManifest = JSON.parse(JSON.stringify(source.evaluate("HISTORICAL_FBA_LINKING_MANIFEST")));
+  const freebieManifest = JSON.parse(JSON.stringify(source.evaluate("HISTORICAL_FBA_FREEBIE_CORRECTION_MANIFEST")));
+  const freebiesByMovement = new Map(freebieManifest.map(entry => [entry.sourceMovementID, entry.lines]));
+  const headers = [];
+  const lines = [];
+  const shipments = [];
+  const shipmentLines = [];
+
+  function addDispatch(movementID, shipmentID, reference, destinationFC, plannedLines, freebieLines = []) {
+    headers.push({
+      MovementID: movementID,
+      MovementDateTime: "2026-11-01 10:00:00",
+      MovementType: "FBA Dispatch",
+      SourceLocationID: "MAIN_WH",
+      DestinationLocationID: "FBA_TRANSIT",
+      ReferenceType: "Amazon FBA",
+      ReferenceNumber: reference,
+      AmazonShipmentID: shipmentID,
+      AmazonDestinationFC: destinationFC,
+      Status: "Approved",
+      Notes: "Synthetic historical evidence",
+    });
+    const allLines = plannedLines.concat(freebieLines);
+    let fallbackIndex = 1;
+    allLines.forEach(([productID, quantity]) => {
+      let lineID = movementID + "-L" + String(fallbackIndex).padStart(3, "0");
+      if (movementID === "MOV-088" && productID === "PRD-P001") lineID = "MOV-088-L001";
+      lines.push({ MovementLineID: lineID, MovementID: movementID, ProductID: productID, Quantity: quantity });
+      fallbackIndex += 1;
+    });
+  }
+
+  addDispatch("MOV-379", "SHIP-001", "FBA15MRFBLH8", "BOM5", [["PRD-P001", 98], ["PRD-P005", 140]]);
+  shipments.push({ ShipmentID: "SHIP-001", AmazonReferenceID: "FBA15MRFBLH8", DestinationFC: "BOM5", Status: "In Transit" });
+  shipmentLines.push(
+    { ShipmentLineID: "SHIP-001-L001", ShipmentID: "SHIP-001", ProductID: "PRD-P001", ExpectedQty: 98 },
+    { ShipmentLineID: "SHIP-001-L002", ShipmentID: "SHIP-001", ProductID: "PRD-P005", ExpectedQty: 140 },
+  );
+
+  linkingManifest.forEach(entry => {
+    addDispatch(entry.movementID, entry.shipmentID, entry.sourceReference, entry.destinationFC, entry.lines, freebiesByMovement.get(entry.movementID) || []);
+    shipments.push({
+      ShipmentID: entry.shipmentID,
+      AmazonReferenceID: entry.amazonReferenceID,
+      DestinationFC: entry.destinationFC,
+      Status: "In Transit",
+    });
+    entry.lines.forEach(([productID, quantity], index) => shipmentLines.push({
+      ShipmentLineID: entry.shipmentID + "-L" + String(index + 1).padStart(3, "0"),
+      ShipmentID: entry.shipmentID,
+      ProductID: productID,
+      ExpectedQty: quantity,
+    }));
+  });
+
+  return {
+    Products: objectsToRows([
+      { ProductID: "PRD-F001", Status: "Active", ItemType: "Freebie" },
+      { ProductID: "PRD-F002", Status: "Active", ItemType: "Freebie" },
+    ], ["ProductID", "Status", "ItemType"]),
+    Movement_Headers: objectsToRows(headers, [
+      "MovementID", "MovementDateTime", "MovementType", "SourceLocationID", "DestinationLocationID",
+      "ReferenceType", "ReferenceNumber", "AmazonShipmentID", "AmazonDestinationFC", "Status", "Notes",
+    ]),
+    Movement_Lines: objectsToRows(lines, ["MovementLineID", "MovementID", "ProductID", "Quantity"]),
+    FBA_Shipments: objectsToRows(shipments, ["ShipmentID", "AmazonReferenceID", "DestinationFC", "Status"]),
+    FBA_Shipment_Lines: objectsToRows(shipmentLines, ["ShipmentLineID", "ShipmentID", "ProductID", "ExpectedQty"]),
+  };
+}
+
+test("P0-3 historical Transit cleanup dry run is exact, Founder-only and non-posting", () => {
+  const harness = createAppsScriptHarness(historicalTransitCleanupSheets());
+  const beforeHeaders = harness.call("sheetToObjects", "Movement_Headers").length;
+  const beforeLines = harness.call("sheetToObjects", "Movement_Lines").length;
+  const result = JSON.parse(JSON.stringify(harness.call(
+    "getHistoricalFbaTransitCleanupDryRun",
+    {},
+    { Email: "founder@example.invalid", Role: "Founder" },
+  )));
+
+  assert.equal(result.dryRun, true);
+  assert.equal(result.applyAuthorized, false);
+  assert.equal(result.applyActionAvailable, false);
+  assert.equal(result.readyForOwnerReview, true);
+  assert.deepEqual(result.conflicts, []);
+  assert.equal(result.summary.currentTransitQty, 4516);
+  assert.equal(result.summary.legacyCohortDispatchQty, 4516);
+  assert.equal(result.summary.eligibleHistoricalEvidenceQty, 3756);
+  assert.equal(result.summary.excludedLegacyAveeQty, 40);
+  assert.equal(result.summary.historicalFreebieQty, 720);
+  assert.equal(result.summary.proposedFreebieCorrectionQty, 720);
+  assert.equal(result.summary.proposedFreebieDraftHeaders, 9);
+  assert.equal(result.summary.proposedFreebieDraftLines, 13);
+  assert.equal(result.summary.proposedAdditionalReceiptQty, 3756);
+  assert.equal(result.summary.projectedTransitAfterFreebieCorrection, 3796);
+  assert.equal(result.summary.projectedWarehouseDelta, 0);
+  assert.equal(result.summary.projectedAmazonFbaDelta, 0);
+  assert.equal(result.summary.writesPerformed, 0);
+  assert.equal(harness.call("sheetToObjects", "Movement_Headers").length, beforeHeaders);
+  assert.equal(harness.call("sheetToObjects", "Movement_Lines").length, beforeLines);
+  assert.throws(() => harness.call(
+    "getHistoricalFbaTransitCleanupDryRun",
+    {},
+    { Email: "manager@example.invalid", Role: "Manager" },
+  ), /Founder-only/);
+});
+
+test("P0-3 historical Transit cleanup derives newer shipment Transit from approved movements", () => {
+  const harness = createAppsScriptHarness(historicalTransitCleanupSheets());
+  harness.call("appendRow", "Movement_Headers", {
+    MovementID: "MOV-NEW-001",
+    MovementDateTime: "2026-11-17 10:00:00",
+    MovementType: "FBA Dispatch",
+    SourceLocationID: "MAIN_WH",
+    DestinationLocationID: "FBA_TRANSIT",
+    ReferenceType: "Amazon FBA",
+    ReferenceNumber: "FBA15NEWTEST1",
+    AmazonShipmentID: "SHIP-NEW-001",
+    AmazonDestinationFC: "BOM5",
+    Status: "Approved",
+    Notes: "Synthetic newer shipment evidence",
+  });
+  harness.call("appendRow", "Movement_Lines", {
+    MovementLineID: "MOV-NEW-001-L001",
+    MovementID: "MOV-NEW-001",
+    ProductID: "PRD-P001",
+    Quantity: 50,
+  });
+
+  const result = JSON.parse(JSON.stringify(harness.call(
+    "getHistoricalFbaTransitCleanupDryRun",
+    {},
+    { Email: "founder@example.invalid", Role: "Founder" },
+  )));
+
+  assert.equal(result.readyForOwnerReview, true);
+  assert.deepEqual(result.conflicts, []);
+  assert.equal(result.summary.currentTransitQty, 4566);
+  assert.equal(result.summary.newShipmentDispatchQty, 50);
+  assert.equal(result.summary.newShipmentTransitClearanceQty, 0);
+  assert.equal(result.summary.newShipmentOutstandingTransitQty, 50);
 });
 
 test("FBA Dispatch frontend exposes an optional manual-freebie section without mixing transit stock", () => {

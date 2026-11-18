@@ -21,7 +21,7 @@ The present application is a static React frontend backed by Google Apps Script 
 - `syoat-theme.css` — application styling.
 - `index-redesign.html` and `syoat-app-redesign.js` — archived test artifacts from before the live-version edits; ignore and never publish them.
 - `images/` — product and brand images.
-- `Code.gs` — version-controlled canonical Apps Script backend source. The latest owner-confirmed production deployment is `3.2-phase2-fba-transit-clearance.1`; future deployment remains an explicit owner action.
+- `Code.gs` — version-controlled canonical Apps Script backend source. The latest owner-confirmed production deployment is `3.2-phase2-fba-variance-resolution.1`; local P0-3 candidate `3.2-phase2-fba-transit-cleanup.1` remains read-only and undeployed. Future deployment remains an explicit owner action.
 - `docs/` — product, architecture, security, roadmap, decisions, status, and working procedures.
 
 ## Documentation map
@@ -47,6 +47,7 @@ The present application is a static React frontend backed by Google Apps Script 
 - [FBA inventory operating SOP](docs/FBA_INVENTORY_OPERATING_SOP.md)
 - [Phase 2 non-posting FBA receipt and variance manifest](docs/PHASE_2_FBA_RECEIPT_MANIFEST.md)
 - [Phase 2 historical FBA freebie correction manifest](docs/PHASE_2_FBA_FREEBIE_CORRECTION.md)
+- [Phase 2 historical FBA Transit cleanup dry run](docs/PHASE_2_FBA_TRANSIT_CLEANUP_DRY_RUN.md)
 - [Phase 2 historical FBA shipment linking](docs/PHASE_2_FBA_HISTORICAL_LINKING.md)
 - [Phase 2 WP1 stabilization and staging foundation](docs/PHASE_2_WP1_STABILIZATION.md)
 - [Phase 2 staging and rollback evidence record](docs/PHASE_2_STAGING_RECORD.md)

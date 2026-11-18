@@ -1,6 +1,6 @@
 # Role and Capability Matrix
 
-Status: production access policy remains unchanged; deployed backend `3.2-phase2-fba-freebies.1` retains the Founder-only historical FBA migration capability, keeps that completed migration disabled, and adds the linked manual-freebie workflow described below.
+Status: production access policy remains unchanged; deployed backend `3.2-phase2-fba-variance-resolution.1` retains the Founder-only historical FBA migration capability. Local candidate `3.2-phase2-fba-transit-cleanup.1` adds only a read-only P0-3 dry run and no apply action.
 
 ## Enforcement model
 
@@ -79,7 +79,7 @@ These feature settings are an additional gate. They do not replace the server-si
 - FBA shipment lifecycle is backend-derived from Approved dispatch/receipt evidence for every role. Amazon managers may reconcile metadata and link corrections within their capability, but cannot manually force `In Transit`, `Receiving` or `Received`; premature closure fails closed.
 - Imported FBA report variances use the dedicated `amazon.reconciliation.review` capability for Founder/Co-Founder/Admin/Manager/Warehouse Manager. Review records one classification and evidence note only; it does not approve a count or change stock. Generic count approve, edit and reject actions are blocked for these rows.
 - A different Founder/Co-Founder/Admin/Manager/Warehouse Manager uses `amazon.reconciliation.resolve` to close classified evidence as `Resolved` or `Superseded`. The classifier cannot resolve their own review, `Unexplained` evidence cannot close, and resolution never changes stock or creates an adjustment movement.
-- Historical FBA linking dry-run and apply actions use `amazon.shipments.historicalMigration` and then require exact `Founder` role in the handler. Co-Founder and every other role fail closed. Apply additionally requires the reviewed manifest fingerprint, explicit confirmation and a separately configured enable property.
+- Historical FBA linking and Transit-cleanup dry runs use `amazon.shipments.historicalMigration` and then require exact `Founder` role in the handler. Co-Founder and every other role fail closed. The P0-3 Transit-cleanup candidate has no apply action. The older completed linking apply additionally requires the reviewed manifest fingerprint, explicit confirmation and a separately configured enable property.
 - Movement and count approval/reversal retain their existing role and maker-checker checks.
 - Movement creation still uses movement-type feature settings and explicitly blocks Operations Manager.
 - Opening balances retain their top-tier restriction.
@@ -99,7 +99,7 @@ Module-specific data remains restricted. Staff, support, purchasing, Amazon and 
 
 ## Action-level source
 
-The exact mapping of all 54 routed actions is in:
+The exact mapping of all 55 routed actions is in:
 
 - `Code.gs` → `ACTION_CAPABILITIES`
 - `config/api-catalog.json`

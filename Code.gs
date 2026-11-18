@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-variance-resolution.1",
+  VERSION:               "3.2-phase2-fba-transit-cleanup.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -107,6 +107,7 @@ const ACTION_CAPABILITIES = {
   getFbaReceiptShipmentOptions: "inventory.movements.create",
   getFbaLedgerSnapshots:       "amazon.reconciliation.view",
   getHistoricalFbaLinkingDryRun: "amazon.shipments.historicalMigration",
+  getHistoricalFbaTransitCleanupDryRun: "amazon.shipments.historicalMigration",
   getOperationalFile:          "inventory.files.view",
   getSystemHealth:             "system.health.view",
   createMovement:              "inventory.movements.create",
@@ -332,6 +333,7 @@ function handleAuthenticatedAction(action, body, email) {
   if (action === "getFbaReceiptShipmentOptions") return ok(getFbaReceiptShipmentOptions(staff));
   if (action === "getFbaLedgerSnapshots") return ok(getFbaLedgerSnapshots(body));
   if (action === "getHistoricalFbaLinkingDryRun") return ok(getHistoricalFbaLinkingDryRun(body, staff));
+  if (action === "getHistoricalFbaTransitCleanupDryRun") return ok(getHistoricalFbaTransitCleanupDryRun(body, staff));
   if (action === "getOperationalFile") return ok(getOperationalFile(body, staff));
   if (action === "getSystemHealth")    return ok(getSystemHealth(staff));
 
@@ -3737,6 +3739,363 @@ function buildHistoricalFbaLinkingPlan(includeInternal) {
       updateLink: entry.updateLink,
       conflicts: entry.conflicts,
     })),
+  };
+}
+
+// P0-3 reviewed historical Transit cleanup. This first release is deliberately
+// read-only: it refreshes the live baseline, validates the bounded evidence and
+// describes future Draft movements, but exposes no preparation/apply action.
+const HISTORICAL_FBA_TRANSIT_CLEANUP_CONFIG = {
+  MANIFEST_ID: "FBA-TRANSIT-CLEANUP-2026-11-17-V1",
+  FREEBIE_REFERENCE_TYPE: "Historical FBA Freebie Correction",
+};
+
+const HISTORICAL_FBA_FREEBIE_CORRECTION_MANIFEST = [
+  [1,"MOV-108","HSHIP-007","FBA15M27SQ7H","FBA15M27SQ7H","BOM5",[["PRD-F001",72]]],
+  [2,"MOV-125","HSHIP-009","FBA15M322THO","FBA15M322TH0","HYD8",[["PRD-F001",36]]],
+  [3,"MOV-144","HSHIP-010","FBA15M3THR38","FBA15M3THR38","PNQ3",[["PRD-F001",36]]],
+  [4,"MOV-161","HSHIP-011","FBA15M3QDFV1","FBA15M3QDFV1","BLR7",[["PRD-F001",36]]],
+  [5,"MOV-218","HSHIP-016","FBA15M83W07Q","FBA15M83W07Q","DEL4",[["PRD-F001",72],["PRD-F002",80]]],
+  [6,"MOV-225","HSHIP-017","FBA15M8SZTON","FBA15M8SZT0N","BLR8",[["PRD-F001",72],["PRD-F002",80]]],
+  [7,"MOV-231","HSHIP-018","FBA15M9RVFSQ","FBA15M9RVFSQ","BLR7",[["PRD-F001",36],["PRD-F002",40]]],
+  [8,"MOV-239","HSHIP-019","FBA15MBD201D","FBA15MBD201D","HYD8",[["PRD-F001",40],["PRD-F002",40]]],
+  [9,"MOV-258","HSHIP-020","FBA15MD4S73W","FBA15MD4S73W","BOM5",[["PRD-F002",80]]],
+].map(function (row) {
+  return {
+    seq: row[0], sourceMovementID: row[1], shipmentID: row[2],
+    sourceReference: row[3], amazonReferenceID: row[4], destinationFC: row[5],
+    lines: row[6],
+  };
+});
+
+// This one preserved Approved line was historically mapped to Syoat shampoo,
+// while the reviewed Amazon evidence identifies it as Avee. D-028 requires it
+// to remain immutable external evidence and never become a Syoat receipt.
+const HISTORICAL_FBA_TRANSIT_EXCLUSIONS = [
+  {
+    shipmentID: "HSHIP-005",
+    sourceMovementID: "MOV-088",
+    sourceMovementLineID: "MOV-088-L001",
+    productID: "PRD-P001",
+    quantity: 40,
+    classification: "EXCLUDED_LEGACY_AVEE",
+  },
+];
+
+function historicalFbaTransitCleanupFingerprint() {
+  return sha256Base64Url(JSON.stringify(stableRequestValue({
+    manifestID: HISTORICAL_FBA_TRANSIT_CLEANUP_CONFIG.MANIFEST_ID,
+    freebies: HISTORICAL_FBA_FREEBIE_CORRECTION_MANIFEST,
+    exclusions: HISTORICAL_FBA_TRANSIT_EXCLUSIONS,
+  })));
+}
+
+function historicalFbaQtyByProduct(lines) {
+  return (lines || []).reduce(function (totals, line) {
+    const productID = String(line.ProductID || line.productID || "");
+    if (!productID) return totals;
+    totals[productID] = (totals[productID] || 0) + (parseFloat(line.Quantity || line.quantity) || 0);
+    return totals;
+  }, {});
+}
+
+function historicalFbaQtyTotal(totals) {
+  return Object.keys(totals || {}).reduce(function (sum, productID) {
+    return sum + (Number(totals[productID]) || 0);
+  }, 0);
+}
+
+function getHistoricalFbaTransitCleanupDryRun(body, staff) {
+  requireHistoricalFbaMigrationOwner(staff);
+  return buildHistoricalFbaTransitCleanupPlan();
+}
+
+function buildHistoricalFbaTransitCleanupPlan() {
+  requireSheetColumns(SHEETS.PRODUCTS, ["ProductID", "Status", "ItemType"]);
+  requireSheetColumns(SHEETS.FBA_SHIPMENTS, ["ShipmentID", FBA_SHIPMENT_AMAZON_REFERENCE_FIELD, "DestinationFC"]);
+  requireSheetColumns(SHEETS.FBA_SHIPMENT_LINES, ["ShipmentID", "ProductID", "ExpectedQty"]);
+  requireSheetColumns(SHEETS.MOV_HEADERS, [
+    "MovementID", "MovementType", "SourceLocationID", "DestinationLocationID",
+    "ReferenceType", "ReferenceNumber", "AmazonShipmentID", "AmazonDestinationFC", "Status", "Notes",
+  ]);
+  requireSheetColumns(SHEETS.MOV_LINES, ["MovementLineID", "MovementID", "ProductID", "Quantity"]);
+
+  const products = sheetToObjects(SHEETS.PRODUCTS);
+  const shipments = sheetToObjects(SHEETS.FBA_SHIPMENTS);
+  const shipmentLines = sheetToObjects(SHEETS.FBA_SHIPMENT_LINES);
+  const movements = sheetToObjects(SHEETS.MOV_HEADERS);
+  const movementLines = sheetToObjects(SHEETS.MOV_LINES);
+  const conflicts = [];
+
+  const transitByProduct = {};
+  getStock({ locationId: "FBA_TRANSIT" }).forEach(function (row) {
+    transitByProduct[String(row.ProductID || "")] = Number(row.Quantity) || 0;
+  });
+  const currentTransitTotal = historicalFbaQtyTotal(transitByProduct);
+
+  ["PRD-F001", "PRD-F002"].forEach(function (productID) {
+    const product = products.find(function (row) { return String(row.ProductID || "") === productID; });
+    if (!product) conflicts.push("Freebie product is missing: " + productID + ".");
+    else if (String(product.Status || "") !== "Active" || String(product.ItemType || "") !== "Freebie") {
+      conflicts.push("Freebie product is not Active ItemType=Freebie: " + productID + ".");
+    }
+  });
+
+  const freebieEntries = HISTORICAL_FBA_FREEBIE_CORRECTION_MANIFEST.map(function (entry) {
+    const entryConflicts = [];
+    const movement = movements.find(function (row) { return String(row.MovementID || "") === entry.sourceMovementID; });
+    const shipment = shipments.find(function (row) { return String(row.ShipmentID || "") === entry.shipmentID; });
+    const sourceQty = historicalFbaQtyByProduct(movementLines.filter(function (line) {
+      return String(line.MovementID || "") === entry.sourceMovementID &&
+        entry.lines.some(function (expected) { return expected[0] === String(line.ProductID || ""); });
+    }));
+    if (!movement) entryConflicts.push("Source movement is missing.");
+    if (movement && String(movement.Status || "") !== "Approved") entryConflicts.push("Source movement is not Approved.");
+    if (movement && String(movement.MovementType || "") !== "FBA Dispatch") entryConflicts.push("Source movement is not FBA Dispatch.");
+    if (movement && (String(movement.SourceLocationID || "") !== "MAIN_WH" || String(movement.DestinationLocationID || "") !== "FBA_TRANSIT")) {
+      entryConflicts.push("Source movement route is not MAIN_WH to FBA_TRANSIT.");
+    }
+    if (movement && String(movement.AmazonShipmentID || "") !== entry.shipmentID) entryConflicts.push("Source movement shipment link changed.");
+    if (movement && String(movement.ReferenceNumber || "").trim().toUpperCase() !== entry.sourceReference) entryConflicts.push("Preserved source reference changed.");
+    if (movement && movement.AmazonDestinationFC && normalizeFbaDestinationFC(movement.AmazonDestinationFC) !== normalizeFbaDestinationFC(entry.destinationFC)) {
+      entryConflicts.push("Source movement destination FC changed.");
+    }
+    if (!shipment) entryConflicts.push("ERP shipment is missing.");
+    if (shipment && normalizeAmazonReferenceID(shipment[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD], false) !== entry.amazonReferenceID) {
+      entryConflicts.push("ERP shipment Amazon reference changed.");
+    }
+    if (shipment && normalizeFbaDestinationFC(shipment.DestinationFC) !== normalizeFbaDestinationFC(entry.destinationFC)) {
+      entryConflicts.push("ERP shipment destination FC changed.");
+    }
+    entry.lines.forEach(function (expected) {
+      if (Number(sourceQty[expected[0]] || 0) !== Number(expected[1])) entryConflicts.push("Freebie quantity changed for " + expected[0] + ".");
+    });
+
+    const existingCorrections = movements.filter(function (row) {
+      return String(row.ReferenceType || "") === HISTORICAL_FBA_TRANSIT_CLEANUP_CONFIG.FREEBIE_REFERENCE_TYPE &&
+        String(row.AmazonShipmentID || "") === entry.shipmentID &&
+        String(row.Notes || "").includes(HISTORICAL_FBA_TRANSIT_CLEANUP_CONFIG.MANIFEST_ID) &&
+        String(row.Notes || "").includes(entry.sourceMovementID);
+    });
+    if (existingCorrections.length > 1) entryConflicts.push("Multiple historical freebie corrections already exist.");
+    existingCorrections.forEach(function (row) {
+      if (String(row.MovementType || "") !== "Samples" || String(row.SourceLocationID || "") !== "FBA_TRANSIT" || String(row.DestinationLocationID || "") !== "SAMPLES") {
+        entryConflicts.push("Existing correction route or type differs from the reviewed contract.");
+      }
+    });
+    entryConflicts.forEach(function (problem) { conflicts.push(entry.sourceMovementID + ": " + problem); });
+    return {
+      seq: entry.seq,
+      sourceMovementID: entry.sourceMovementID,
+      shipmentID: entry.shipmentID,
+      sourceReference: entry.sourceReference,
+      amazonReferenceID: entry.amazonReferenceID,
+      destinationFC: entry.destinationFC,
+      lines: entry.lines.map(function (line) { return { productID: line[0], quantity: line[1] }; }),
+      existingCorrectionMovementIDs: existingCorrections.map(function (row) { return row.MovementID; }),
+      proposeDraft: existingCorrections.length === 0,
+      conflicts: entryConflicts,
+    };
+  });
+
+  HISTORICAL_FBA_TRANSIT_EXCLUSIONS.forEach(function (excluded) {
+    const line = movementLines.find(function (row) { return String(row.MovementLineID || "") === excluded.sourceMovementLineID; });
+    const movement = movements.find(function (row) { return String(row.MovementID || "") === excluded.sourceMovementID; });
+    if (!line || String(line.MovementID || "") !== excluded.sourceMovementID || String(line.ProductID || "") !== excluded.productID || Number(line.Quantity) !== excluded.quantity) {
+      conflicts.push("Legacy Avee exclusion source line changed: " + excluded.sourceMovementLineID + ".");
+    }
+    if (!movement || String(movement.Status || "") !== "Approved" || String(movement.AmazonShipmentID || "") !== excluded.shipmentID) {
+      conflicts.push("Legacy Avee exclusion source movement changed: " + excluded.sourceMovementID + ".");
+    }
+  });
+
+  const legacyCohort = [{ shipmentID: "SHIP-001", movementID: "MOV-379" }].concat(
+    HISTORICAL_FBA_LINKING_MANIFEST.map(function (entry) { return { shipmentID: entry.shipmentID, movementID: entry.movementID }; })
+  );
+  const legacyShipmentIDs = {};
+  legacyCohort.forEach(function (entry) { legacyShipmentIDs[entry.shipmentID] = true; });
+
+  const receiptEntries = legacyCohort.map(function (cohort) {
+    const shipment = shipments.find(function (row) { return String(row.ShipmentID || "") === cohort.shipmentID; });
+    const planQty = historicalFbaQtyByProduct(shipmentLines.filter(function (line) { return String(line.ShipmentID || "") === cohort.shipmentID; }).map(function (line) {
+      return { ProductID: line.ProductID, Quantity: line.ExpectedQty };
+    }));
+    const exclusions = HISTORICAL_FBA_TRANSIT_EXCLUSIONS.filter(function (row) { return row.shipmentID === cohort.shipmentID; });
+    exclusions.forEach(function (row) { planQty[row.productID] = Number(planQty[row.productID] || 0) - row.quantity; });
+    Object.keys(planQty).forEach(function (productID) {
+      if (planQty[productID] < 0) conflicts.push(cohort.shipmentID + ": excluded quantity exceeds shipment plan for " + productID + ".");
+      if (planQty[productID] === 0) delete planQty[productID];
+    });
+
+    const approvedHeaders = movements.filter(function (row) {
+      return String(row.AmazonShipmentID || "") === cohort.shipmentID && String(row.MovementType || "") === "FBA Receipt" && String(row.Status || "") === "Approved";
+    });
+    const draftHeaders = movements.filter(function (row) {
+      return String(row.AmazonShipmentID || "") === cohort.shipmentID && String(row.MovementType || "") === "FBA Receipt" && String(row.Status || "") === "Draft";
+    });
+    approvedHeaders.concat(draftHeaders).forEach(function (row) {
+      if (String(row.SourceLocationID || "") !== "FBA_TRANSIT" || String(row.DestinationLocationID || "") !== "FBA_ACCEPTED") {
+        conflicts.push(cohort.shipmentID + ": FBA Receipt route differs from FBA_TRANSIT to FBA_ACCEPTED: " + row.MovementID + ".");
+      }
+    });
+    const approvedQty = historicalFbaQtyByProduct(movementLines.filter(function (line) {
+      return approvedHeaders.some(function (header) { return header.MovementID === line.MovementID; });
+    }));
+    const draftQty = historicalFbaQtyByProduct(movementLines.filter(function (line) {
+      return draftHeaders.some(function (header) { return header.MovementID === line.MovementID; });
+    }));
+    const proposedLines = [];
+    Object.keys(planQty).forEach(function (productID) {
+      const remaining = Number(planQty[productID] || 0) - Number(approvedQty[productID] || 0);
+      const uncovered = remaining - Number(draftQty[productID] || 0);
+      if (remaining < 0) conflicts.push(cohort.shipmentID + ": Approved receipt exceeds eligible evidence for " + productID + ".");
+      if (uncovered < 0) conflicts.push(cohort.shipmentID + ": Draft receipt exceeds remaining evidence for " + productID + ".");
+      if (uncovered > 0) proposedLines.push({ productID: productID, quantity: uncovered });
+    });
+    Object.keys(approvedQty).concat(Object.keys(draftQty)).forEach(function (productID) {
+      if (!Object.prototype.hasOwnProperty.call(planQty, productID)) conflicts.push(cohort.shipmentID + ": receipt contains excluded or unexpected product " + productID + ".");
+    });
+    return {
+      shipmentID: cohort.shipmentID,
+      amazonReferenceID: shipment ? normalizeAmazonReferenceID(shipment[FBA_SHIPMENT_AMAZON_REFERENCE_FIELD], false) : "",
+      destinationFC: shipment ? normalizeFbaDestinationFC(shipment.DestinationFC) : "",
+      eligibleEvidenceQty: historicalFbaQtyTotal(planQty),
+      approvedReceiptQty: historicalFbaQtyTotal(approvedQty),
+      existingDraftReceiptQty: historicalFbaQtyTotal(draftQty),
+      existingDraftMovementIDs: draftHeaders.map(function (row) { return row.MovementID; }),
+      proposedLines: proposedLines,
+      proposedQty: proposedLines.reduce(function (sum, line) { return sum + line.quantity; }, 0),
+      proposeDraft: proposedLines.length > 0,
+    };
+  });
+
+  const freebieRequiredByProduct = historicalFbaQtyByProduct(HISTORICAL_FBA_FREEBIE_CORRECTION_MANIFEST.reduce(function (lines, entry) {
+    return lines.concat(entry.lines.map(function (line) { return { ProductID: line[0], Quantity: line[1] }; }));
+  }, []));
+  const existingFreebieCorrectionQty = historicalFbaQtyByProduct(movementLines.filter(function (line) {
+    return movements.some(function (header) {
+      return header.MovementID === line.MovementID &&
+        String(header.ReferenceType || "") === HISTORICAL_FBA_TRANSIT_CLEANUP_CONFIG.FREEBIE_REFERENCE_TYPE &&
+        String(header.Status || "") === "Approved";
+    });
+  }));
+  const proposedFreebieQty = {};
+  Object.keys(freebieRequiredByProduct).forEach(function (productID) {
+    proposedFreebieQty[productID] = Number(freebieRequiredByProduct[productID] || 0) - Number(existingFreebieCorrectionQty[productID] || 0);
+    if (proposedFreebieQty[productID] < 0) conflicts.push("Approved historical freebie correction exceeds the reviewed manifest for " + productID + ".");
+    if (Number(transitByProduct[productID] || 0) < proposedFreebieQty[productID]) conflicts.push("Current Transit is insufficient for reviewed freebie correction " + productID + ".");
+  });
+
+  const legacyDispatchQty = legacyCohort.reduce(function (sum, cohort) {
+    const header = movements.find(function (row) { return String(row.MovementID || "") === cohort.movementID; });
+    if (!header || String(header.Status || "") !== "Approved" || String(header.MovementType || "") !== "FBA Dispatch" ||
+        String(header.SourceLocationID || "") !== "MAIN_WH" || String(header.DestinationLocationID || "") !== "FBA_TRANSIT" ||
+        String(header.AmazonShipmentID || "") !== cohort.shipmentID) {
+      conflicts.push(cohort.movementID + ": legacy dispatch evidence changed.");
+      return sum;
+    }
+    return sum + historicalFbaQtyTotal(historicalFbaQtyByProduct(movementLines.filter(function (line) { return line.MovementID === cohort.movementID; })));
+  }, 0);
+  const eligibleEvidenceQty = receiptEntries.reduce(function (sum, entry) { return sum + entry.eligibleEvidenceQty; }, 0);
+  const approvedReceiptQty = receiptEntries.reduce(function (sum, entry) { return sum + entry.approvedReceiptQty; }, 0);
+  const existingDraftReceiptQty = receiptEntries.reduce(function (sum, entry) { return sum + entry.existingDraftReceiptQty; }, 0);
+  const proposedReceiptQty = receiptEntries.reduce(function (sum, entry) { return sum + entry.proposedQty; }, 0);
+  const excludedLegacyQty = HISTORICAL_FBA_TRANSIT_EXCLUSIONS.reduce(function (sum, entry) { return sum + entry.quantity; }, 0);
+  const freebieManifestQty = historicalFbaQtyTotal(freebieRequiredByProduct);
+  const legacyOutstandingQty = legacyDispatchQty - approvedReceiptQty - historicalFbaQtyTotal(existingFreebieCorrectionQty);
+  const legacyMovementIDs = {};
+  legacyCohort.forEach(function (entry) { legacyMovementIDs[entry.movementID] = true; });
+  const newDispatchHeaders = movements.filter(function (row) {
+    return String(row.Status || "") === "Approved" && String(row.MovementType || "") === "FBA Dispatch" &&
+      String(row.SourceLocationID || "") === "MAIN_WH" && String(row.DestinationLocationID || "") === "FBA_TRANSIT" &&
+      !legacyMovementIDs[String(row.MovementID || "")];
+  });
+  const newReceiptHeaders = movements.filter(function (row) {
+    return String(row.Status || "") === "Approved" && String(row.MovementType || "") === "FBA Receipt" &&
+      String(row.SourceLocationID || "") === "FBA_TRANSIT" && String(row.DestinationLocationID || "") === "FBA_ACCEPTED" &&
+      !legacyShipmentIDs[String(row.AmazonShipmentID || "")];
+  });
+  const newDispatchQty = historicalFbaQtyTotal(historicalFbaQtyByProduct(movementLines.filter(function (line) {
+    return newDispatchHeaders.some(function (header) { return header.MovementID === line.MovementID; });
+  })));
+  const newReceiptQty = historicalFbaQtyTotal(historicalFbaQtyByProduct(movementLines.filter(function (line) {
+    return newReceiptHeaders.some(function (header) { return header.MovementID === line.MovementID; });
+  })));
+  const newShipmentOutstandingQty = newDispatchQty - newReceiptQty;
+  if (legacyOutstandingQty !== eligibleEvidenceQty - approvedReceiptQty + excludedLegacyQty + freebieManifestQty - historicalFbaQtyTotal(existingFreebieCorrectionQty)) {
+    conflicts.push("Legacy Transit classification no longer reconciles to dispatch, receipt, exclusion and freebie evidence.");
+  }
+  if (newShipmentOutstandingQty < 0) conflicts.push("Current Transit is below the reviewed legacy outstanding quantity.");
+  if (currentTransitTotal !== legacyOutstandingQty + newShipmentOutstandingQty) {
+    conflicts.push("Current Transit contains an unexplained movement outside the reviewed legacy and new-shipment cohorts.");
+  }
+
+  const legacyFbaAdjustments = movements.filter(function (row) {
+    return String(row.Status || "") === "Approved" && String(row.MovementType || "") === "Stock Adjustment" &&
+      (String(row.SourceLocationID || "") === "AMAZON_FBA" || String(row.DestinationLocationID || "") === "AMAZON_FBA");
+  });
+  const projectedTransitByProduct = Object.assign({}, transitByProduct);
+  Object.keys(proposedFreebieQty).forEach(function (productID) {
+    projectedTransitByProduct[productID] = Number(projectedTransitByProduct[productID] || 0) - Math.max(0, proposedFreebieQty[productID]);
+  });
+
+  return {
+    manifestID: HISTORICAL_FBA_TRANSIT_CLEANUP_CONFIG.MANIFEST_ID,
+    manifestFingerprint: historicalFbaTransitCleanupFingerprint(),
+    dryRun: true,
+    applyAuthorized: false,
+    applyActionAvailable: false,
+    readyForOwnerReview: conflicts.length === 0,
+    conflicts: conflicts,
+    summary: {
+      currentTransitQty: currentTransitTotal,
+      legacyCohortDispatchQty: legacyDispatchQty,
+      approvedTransitClearanceQty: approvedReceiptQty,
+      legacyOutstandingTransitQty: legacyOutstandingQty,
+      newShipmentDispatchQty: newDispatchQty,
+      newShipmentTransitClearanceQty: newReceiptQty,
+      newShipmentOutstandingTransitQty: newShipmentOutstandingQty,
+      eligibleHistoricalEvidenceQty: eligibleEvidenceQty,
+      remainingEvidenceQty: eligibleEvidenceQty - approvedReceiptQty,
+      existingDraftReceiptQty: existingDraftReceiptQty,
+      proposedAdditionalReceiptQty: proposedReceiptQty,
+      excludedLegacyAveeQty: excludedLegacyQty,
+      historicalFreebieQty: freebieManifestQty,
+      proposedFreebieCorrectionQty: historicalFbaQtyTotal(proposedFreebieQty),
+      proposedFreebieDraftHeaders: freebieEntries.filter(function (entry) { return entry.proposeDraft; }).length,
+      proposedFreebieDraftLines: freebieEntries.filter(function (entry) { return entry.proposeDraft; }).reduce(function (sum, entry) { return sum + entry.lines.length; }, 0),
+      proposedReceiptDraftHeaders: receiptEntries.filter(function (entry) { return entry.proposeDraft; }).length,
+      proposedReceiptDraftLines: receiptEntries.reduce(function (sum, entry) { return sum + entry.proposedLines.length; }, 0),
+      legacyFbaAdjustmentMovements: legacyFbaAdjustments.length,
+      projectedTransitAfterFreebieCorrection: historicalFbaQtyTotal(projectedTransitByProduct),
+      projectedWarehouseDelta: 0,
+      projectedAmazonFbaDelta: 0,
+      writesPerformed: 0,
+    },
+    transitByProduct: Object.keys(transitByProduct).sort().map(function (productID) {
+      return {
+        productID: productID,
+        currentQty: transitByProduct[productID],
+        proposedFreebieDelta: -(Math.max(0, proposedFreebieQty[productID] || 0)),
+        projectedAfterFreebieCorrection: projectedTransitByProduct[productID],
+      };
+    }),
+    freebieEntries: freebieEntries,
+    receiptEntries: receiptEntries,
+    exclusions: HISTORICAL_FBA_TRANSIT_EXCLUSIONS.map(function (entry) {
+      return {
+        shipmentID: entry.shipmentID,
+        sourceMovementID: entry.sourceMovementID,
+        sourceMovementLineID: entry.sourceMovementLineID,
+        productID: entry.productID,
+        quantity: entry.quantity,
+        classification: entry.classification,
+      };
+    }),
+    pendingDesign: {
+      amazonFbaLegacyAdjustmentMovements: legacyFbaAdjustments.length,
+      requirement: "Replace or supersede the legacy Amazon FBA adjustment basis separately; Transit clearance never adds to AMAZON_FBA.",
+    },
   };
 }
 
