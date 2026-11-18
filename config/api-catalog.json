@@ -206,7 +206,7 @@
       "routes": [
         "POST"
       ],
-      "currentGate": "Valid Founder session + central capability amazon.shipments.historicalMigration; read-only P0-3 Transit baseline and bounded correction preflight; no apply action exists",
+      "currentGate": "Valid Founder session + central capability amazon.shipments.historicalMigration; read-only P0-3 Transit baseline and bounded Draft-preparation preflight",
       "targetCapability": "amazon.shipments.historicalMigration"
     },
     {
@@ -439,6 +439,14 @@
         "POST"
       ],
       "currentGate": "Valid Founder session + exact manifest fingerprint/confirmation + separately enabled Script Property; locked idempotent batch of at most five shipments",
+      "targetCapability": "amazon.shipments.historicalMigration"
+    },
+    {
+      "action": "prepareHistoricalFbaTransitCleanupDrafts",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid Founder session + exact reviewed manifest fingerprint and Transit total + explicit PREPARE confirmation + separately enabled Script Property; locked idempotent batch of at most five fixed entries; creates Drafts only",
       "targetCapability": "amazon.shipments.historicalMigration"
     }
   ]

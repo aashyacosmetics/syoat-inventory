@@ -74,7 +74,7 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-fba-transit-cleanup.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-transit-draft-preparation.1");
 });
 
 function historicalTransitCleanupSheets() {
@@ -135,10 +135,11 @@ function historicalTransitCleanupSheets() {
   });
 
   return {
-    Products: objectsToRows([
-      { ProductID: "PRD-F001", Status: "Active", ItemType: "Freebie" },
-      { ProductID: "PRD-F002", Status: "Active", ItemType: "Freebie" },
-    ], ["ProductID", "Status", "ItemType"]),
+    Products: objectsToRows([...new Set(lines.map(line => line.ProductID))].map(productID => ({
+      ProductID: productID,
+      Status: "Active",
+      ItemType: productID.startsWith("PRD-F") ? "Freebie" : "Finished Product",
+    })), ["ProductID", "Status", "ItemType"]),
     Movement_Headers: objectsToRows(headers, [
       "MovementID", "MovementDateTime", "MovementType", "SourceLocationID", "DestinationLocationID",
       "ReferenceType", "ReferenceNumber", "AmazonShipmentID", "AmazonDestinationFC", "Status", "Notes",
@@ -162,6 +163,8 @@ test("P0-3 historical Transit cleanup dry run is exact, Founder-only and non-pos
   assert.equal(result.dryRun, true);
   assert.equal(result.applyAuthorized, false);
   assert.equal(result.applyActionAvailable, false);
+  assert.equal(result.preparationEnabled, false);
+  assert.equal(result.preparationActionAvailable, true);
   assert.equal(result.readyForOwnerReview, true);
   assert.deepEqual(result.conflicts, []);
   assert.equal(result.summary.currentTransitQty, 4516);
@@ -177,6 +180,7 @@ test("P0-3 historical Transit cleanup dry run is exact, Founder-only and non-pos
   assert.equal(result.summary.projectedWarehouseDelta, 0);
   assert.equal(result.summary.projectedAmazonFbaDelta, 0);
   assert.equal(result.summary.writesPerformed, 0);
+  assert.equal(result.preparationEntries.length, 33);
   assert.equal(harness.call("sheetToObjects", "Movement_Headers").length, beforeHeaders);
   assert.equal(harness.call("sheetToObjects", "Movement_Lines").length, beforeLines);
   assert.throws(() => harness.call(
@@ -184,6 +188,77 @@ test("P0-3 historical Transit cleanup dry run is exact, Founder-only and non-pos
     {},
     { Email: "manager@example.invalid", Role: "Manager" },
   ), /Founder-only/);
+});
+
+test("P0-3 historical Transit cleanup prepares only bounded idempotent Drafts behind the owner gate", () => {
+  const harness = createAppsScriptHarness(historicalTransitCleanupSheets());
+  const founder = { Email: "founder@example.invalid", Role: "Founder" };
+  const preview = harness.call("buildHistoricalFbaTransitCleanupPlan");
+  const baseRequest = {
+    requestId: "local-transit-draft-disabled-0001",
+    manifestFingerprint: preview.manifestFingerprint,
+    confirmation: "PREPARE:" + preview.manifestFingerprint,
+    expectedCurrentTransitQty: preview.summary.currentTransitQty,
+    batchStartSequence: 1,
+    batchSize: 5,
+  };
+  assert.throws(() => harness.call("handleWrite", "prepareHistoricalFbaTransitCleanupDrafts", baseRequest, {
+    Email: "cofounder@example.invalid",
+    Role: "Co-Founder",
+  }), /Founder-only/);
+  assert.throws(() => harness.call("handleWrite", "prepareHistoricalFbaTransitCleanupDrafts", baseRequest, founder), /disabled/i);
+  assert.equal(harness.call("listWriteRecoveryRecords").length, 0);
+
+  const enableProperty = harness.evaluate("HISTORICAL_FBA_TRANSIT_CLEANUP_CONFIG.PREPARATION_ENABLE_PROPERTY");
+  harness.properties.set(enableProperty, preview.manifestFingerprint);
+  const stockBefore = JSON.stringify(harness.call("getStock", {}));
+  let start = 1;
+  let requestNumber = 1;
+  let firstRequest;
+  let firstResponse;
+  const totals = { draftHeaders: 0, draftLines: 0, receiptDraftHeaders: 0, freebieDraftHeaders: 0 };
+  while (start) {
+    const request = {
+      ...baseRequest,
+      requestId: "local-transit-draft-batch-" + String(requestNumber).padStart(4, "0"),
+      batchStartSequence: start,
+    };
+    const output = harness.call("handleWrite", "prepareHistoricalFbaTransitCleanupDrafts", request, founder);
+    const response = JSON.parse(output.getContent());
+    assert.equal(response.success, true, JSON.stringify(response));
+    Object.keys(totals).forEach(key => { totals[key] += response.data.prepared[key]; });
+    if (!firstRequest) { firstRequest = request; firstResponse = response; }
+    start = response.data.nextSequence;
+    requestNumber += 1;
+  }
+
+  assert.deepEqual(totals, { draftHeaders: 33, draftLines: 88, receiptDraftHeaders: 24, freebieDraftHeaders: 9 });
+  const preparedHeaders = harness.call("sheetToObjects", "Movement_Headers").filter(row => String(row.Notes || "").includes(preview.manifestID));
+  assert.equal(preparedHeaders.length, 33);
+  assert.equal(preparedHeaders.every(row => row.Status === "Draft" && !row.ApprovedByEmail && !row.ApprovedAt), true);
+  assert.equal(JSON.stringify(harness.call("getStock", {})), stockBefore);
+
+  const after = harness.call("buildHistoricalFbaTransitCleanupPlan");
+  assert.equal(after.readyForOwnerReview, true, JSON.stringify(after.conflicts));
+  assert.equal(after.summary.existingDraftReceiptQty, 3756);
+  assert.equal(after.summary.proposedAdditionalReceiptQty, 0);
+  assert.equal(after.summary.existingDraftFreebieQty, 720);
+  assert.equal(after.summary.proposedFreebieCorrectionQty, 0);
+  assert.equal(after.preparationEntries.filter(entry => entry.proposeDraft).length, 0);
+
+  const replay = JSON.parse(harness.call("handleWrite", "prepareHistoricalFbaTransitCleanupDrafts", firstRequest, founder).getContent());
+  assert.equal(replay.success, true);
+  assert.equal(replay.data.idempotentReplay, true);
+  assert.deepEqual({ ...replay.data, idempotentReplay: undefined }, { ...firstResponse.data, idempotentReplay: undefined });
+
+  const noOp = JSON.parse(harness.call("handleWrite", "prepareHistoricalFbaTransitCleanupDrafts", {
+    ...firstRequest,
+    requestId: "local-transit-draft-noop-0001",
+  }, founder).getContent());
+  assert.equal(noOp.success, true, JSON.stringify(noOp));
+  assert.equal(noOp.data.prepared.draftHeaders, 0);
+  assert.equal(noOp.data.stockDelta, 0);
+  assert.equal(noOp.data.approvalsPerformed, 0);
 });
 
 test("P0-3 historical Transit cleanup derives newer shipment Transit from approved movements", () => {
