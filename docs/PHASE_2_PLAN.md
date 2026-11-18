@@ -8,7 +8,7 @@ Make the movement ledger and current stock trustworthy for every product and ope
 
 Phase 2 corrects inventory configuration, movement lifecycle, stock counts, adjustments, returns, damage, samples, combos, batch/expiry handling and existing historical exceptions. It also establishes one inventory-only lifecycle for warehouse-fulfilled marketplace orders, so dispatch, delivery, cancellation and return evidence reconcile consistently across FirstCry, Flipkart, Myntra, JioMart, the website/Shopify and future channels. It makes Record Movement a guided visual workflow and redesigns inventory Analytics so employees can understand actions, balances and exceptions with minimal training. It does not build the full Amazon shipment/FC lifecycle planned for Phase 3, broader marketplace operations planned for Phase 4, or accounting.
 
-## Current Phase 2 checkpoint and remaining order — 2026-11-16
+## Current Phase 2 checkpoint and remaining order — 2026-11-18
 
 Completed and production-accepted:
 
@@ -19,19 +19,20 @@ Completed and production-accepted:
 - Shipment-linked FBA Receipt with approval-time balance validation.
 - D-033 Transit-only Amazon acceptance: genuine `MOV-456` cleared 238 units from `FBA_TRANSIT` without increasing `AMAZON_FBA`.
 - Record Movement frontend crash correction and live acceptance of the genuine receipt flow.
+- P0-1 evidence-derived shipment lifecycle and P0-2 non-posting two-account variance resolution, including a clean post-acceptance recovery/system-health audit.
 
 Remaining work, in recommended order:
 
 1. **P0 — Shipment status/closure enforcement: released and accepted.** Backend `3.2-phase2-fba-status-closure.1` and frontend `20261117-fba-status-closure.1` derive Working/In Transit/Receiving/Received from Approved linked dispatch/receipt evidence and block manual premature closure. The owner merged, deployed/published and verified the live status/progress interface on 2026-11-17. Its small wording correction is included in the P0-2 frontend candidate so a later publication cannot restore stale manual-advance guidance.
-2. **P0 — Resolve FBA variances through maker-checker actions: local candidate prepared.** Backend `3.2-phase2-fba-variance-resolution.1` and frontend `20261117-fba-variance-resolution.1` keep imported rows as evidence only. One manager classifies; a different authorized Amazon manager records an evidence reference and closes as Resolved or Superseded. Unexplained and stale reviews fail closed. Resolution never changes stock or creates an adjustment; any inventory correction remains a separate controlled movement.
-3. **P0 — Finish the reviewed historical Transit cleanup.** Refresh the current baseline after `MOV-456`, then execute only owner-approved, backed-up, dry-run and idempotent corrections: the 720-unit historical freebie correction, remaining evidence-supported Syoat receipt/exception treatment and safe replacement/supersession of the 29 legacy snapshot adjustments. Avee remains excluded and Approved history remains immutable.
+2. **P0 — Resolve FBA variances through maker-checker actions: released and accepted.** Backend `3.2-phase2-fba-variance-resolution.1` and frontend `20261117-fba-variance-resolution.1` keep imported rows as evidence only. Genuine `CNT-086` acceptance used two authorized accounts, closed the evidence with stock unchanged and created no adjustment. The follow-up health audit was clean.
+3. **P0 — Finish the reviewed historical Transit cleanup: read-only candidate prepared.** Local backend `3.2-phase2-fba-transit-cleanup.1` refreshes the 4,911-unit current Transit baseline, validates the exact 720-unit freebie correction, excludes the 40-unit Avee line, accounts for 376 Approved and 251 Draft receipt units and reports 3,129 additional uncovered receipt-evidence units. It has no apply action and performs zero writes. Preparation/apply code, backup, owner review, maker-checker execution and the separate 29-adjustment Amazon-baseline design remain pending.
 4. **P0 — Prove the current inventory baseline.** Re-run the canonical per-product/location reconciliation after historical cleanup and close every negative, orphan, duplicate, invalid-state, cost, batch/expiry and unexplained balance exception or record an explicit owner acceptance.
 5. **P1 — Implement same-date FBA snapshot supersession.** Re-uploading the same report date must replace/supersede its unresolved evidence batch instead of stacking variances. Preserve report cutoff, upload time, checksum and audit history.
 6. **P1 — Complete the channel-neutral marketplace inventory bridge.** Define and implement idempotent reservation, dispatch, delivery, pre-dispatch cancellation and return/inspection events for FirstCry first, then Flipkart, Myntra, JioMart and website/Shopify. Daily marketplace events remain independent of irregular FBA snapshots and exclude revenue/accounting.
 7. **P1 — Complete general movement lifecycle gaps.** Finish draft edit, reject, reversal, maker-checker, evidence and negative-stock rules for receipts, returns, damage, samples, combo assembly and approved adjustments.
 8. **P2 — Complete master-data and usability work.** Finish product/location/BOM, batch/expiry and unit-cost contracts; guided Record Movement review/impact preview; inventory Analytics drill-down; exception/staleness alerts; and staff UAT/training evidence.
 
-The next action is protected review and owner release of item 2. After acceptance, the next implementation task is item 3, beginning with a fresh read-only Transit baseline and exact dry run. No historical migration or variance adjustment should start until its exact current dry run and rollback/recovery sequence are reviewed by the owner.
+The next action is protected review of item 3's read-only dry run, followed by an owner-run production dry run after deployment. No preparation/apply action exists yet, and no historical correction should start until the exact live output, backup and rollback/recovery sequence are separately reviewed by the owner.
 
 ## Non-negotiable boundaries
 

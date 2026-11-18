@@ -14,13 +14,13 @@ This catalogue is the Phase 1 baseline for the Apps Script API. It records every
 
 ## Summary
 
-- 54 unique backend actions.
+- 55 unique backend actions.
 - Only `ping` and `getAppLogins` are routed by public `doGet`.
 - 4 session actions are handled directly by `doPost` (`login`, `logout`, `confirmPin`, and `verifySession`).
 - 21 business reads pass through the authenticated POST router.
 - 27 writes pass through the authenticated POST router.
 - No business-data read or write is routed through GET.
-- 15 backend actions have no caller in the current frontend.
+- 16 backend actions have no caller in the current frontend.
 
 Only `ping`, a strictly minimal staff picker, and the PIN-login entry are reachable without an authenticated session. Login-attempt logging is an internal effect of the login service rather than a public command.
 
@@ -54,6 +54,7 @@ Only `ping`, a strictly minimal staff picker, and the PIN-login entry are reacha
 | `getFbaReceiptShipmentOptions` | POST | Valid session + central capability inventory.movements.create; returns minimal dispatched-not-received shipment fields only | current | `inventory.movements.create` |
 | `getFbaLedgerSnapshots` | POST | Valid session + central capability amazon.reconciliation.view | current | `amazon.reconciliation.view` |
 | `getHistoricalFbaLinkingDryRun` | POST | Valid Founder session + central capability amazon.shipments.historicalMigration; read-only reviewed manifest preflight | none | `amazon.shipments.historicalMigration` |
+| `getHistoricalFbaTransitCleanupDryRun` | POST | Valid Founder session + central capability amazon.shipments.historicalMigration; read-only P0-3 Transit baseline and bounded correction preflight; no apply action exists | none | `amazon.shipments.historicalMigration` |
 | `getOperationalFile` | POST | Valid session + central capability inventory.files.view; movement ownership/scope and stored file reference are revalidated | current | `inventory.files.view` |
 | `getSystemHealth` | POST | Valid Founder/Co-Founder session + central capability system.health.view | current | `system.health.view` |
 | `createMovement` | POST | Valid session + central capability inventory.movements.create; existing handler domain rules also apply | current | `inventory.movements.create` |
@@ -103,6 +104,7 @@ The following actions have no literal caller in `syoat-app.js`:
 - `logChange`
 - `verifySession`
 - `getHistoricalFbaLinkingDryRun`
+- `getHistoricalFbaTransitCleanupDryRun`
 - `applyHistoricalFbaShipmentLinks`
 
 These require an explicit retain, migrate, or remove decision during the secured router work. `createSalesOrder` contains financial-looking fields such as payment status and unit price; it must not be expanded into daily sales accounting under the agreed project scope.

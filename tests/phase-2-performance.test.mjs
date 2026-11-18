@@ -223,7 +223,7 @@ test("API responses expose safe server duration metadata", () => {
   const response = harness.callJson("doGet", { parameter: { action: "ping" } });
 
   assert.equal(response.success, true);
-  assert.equal(response.data.version, "3.2-phase2-fba-variance-resolution.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-transit-cleanup.1");
   assert.equal(Number.isFinite(response.serverDurationMs), true);
   assert.ok(response.serverDurationMs >= 0);
   assert.equal(Object.hasOwn(response, "pin"), false);

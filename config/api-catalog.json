@@ -202,6 +202,14 @@
       "targetCapability": "amazon.shipments.historicalMigration"
     },
     {
+      "action": "getHistoricalFbaTransitCleanupDryRun",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid Founder session + central capability amazon.shipments.historicalMigration; read-only P0-3 Transit baseline and bounded correction preflight; no apply action exists",
+      "targetCapability": "amazon.shipments.historicalMigration"
+    },
+    {
       "action": "getOperationalFile",
       "routes": [
         "POST"
