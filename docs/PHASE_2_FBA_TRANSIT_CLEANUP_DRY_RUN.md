@@ -2,7 +2,21 @@
 
 Manifest ID: `FBA-TRANSIT-CLEANUP-2026-11-17-V1`
 
-Status: read-only dry run accepted in production; local disabled-by-default Draft-preparation candidate ready for protected review; **no approval/apply action exists**
+Status: production cleanup accepted on 2026-11-18; Draft preparation gate removed; final read-only dry run clean
+
+## Production closeout — 2026-11-18
+
+The owner executed the reviewed workflow against a current backup. The exact-fingerprint gate prepared the fixed sequence in seven bounded batches and was immediately removed. Every Draft was inspected before maker-checker approval.
+
+- nine freebie corrections cleared 400 Wooden Combs and 320 Bath Loofahs from `FBA_TRANSIT` to `SAMPLES`;
+- 21 receipt movements cleared the remaining 3,380 evidence-supported historical/control units from `FBA_TRANSIT` to hidden `FBA_ACCEPTED`;
+- combined Approved historical/control receipt clearance is 3,756 units;
+- final `FBA_TRANSIT` is 811 units: 40 preserved legacy Avee plus 771 newer genuine-shipment Transit;
+- `MAIN_WH` and `AMAZON_FBA` were unchanged by the cleanup;
+- the final dry run returned zero conflicts, zero remaining evidence, zero proposed Drafts and zero writes;
+- the final system-health audit returned no recovery items and no unresolved errors.
+
+The separate 29-movement legacy Amazon FBA snapshot basis remains open under FBA-004 and is not authorized for reversal or supersession by this closeout.
 
 ## Purpose
 

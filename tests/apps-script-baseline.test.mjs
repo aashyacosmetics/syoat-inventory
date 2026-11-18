@@ -74,7 +74,84 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-fba-transit-draft-preparation.1");
+  assert.equal(response.data.version, "3.2-phase2-inventory-baseline-audit.1");
+});
+
+test("Founder inventory baseline audit reuses canonical stock and performs no writes", () => {
+  const sheets = authenticatedSheets();
+  sheets.Stock_Counts = objectsToRows([], [
+    "CountID", "CountDateTime", "LocationID", "ProductID", "SystemQty", "PhysicalQty",
+    "Difference", "CountedByEmail", "ApprovedByEmail", "Status", "Reason", "AdjustmentMovementID", "Notes",
+  ]);
+  sheets.FBA_Ledger_Snapshots = objectsToRows([], [
+    "SnapshotID", "ReportDate", "ProductID", "FC", "Qty", "Sold", "UploadedByEmail", "UploadedAt",
+  ]);
+  const harness = createAppsScriptHarness(sheets);
+  const signedIn = login(harness).data;
+  const before = JSON.stringify(Object.fromEntries(
+    [...harness.spreadsheet.sheets].map(([name, sheet]) => [name, sheet.values])
+  ));
+
+  const response = post(harness, {
+    action: "getInventoryBaselineAudit",
+    sessionToken: signedIn.sessionToken,
+  });
+
+  assert.equal(response.success, true);
+  assert.equal(response.data.auditVersion, "phase2-inventory-baseline-v1");
+  assert.equal(response.data.writesPerformed, 0);
+  assert.equal(response.data.blockingExceptionCount, 0);
+  assert.equal(response.data.stock.totalsByLocation.MAIN_WH, 20);
+  assert.deepEqual(response.data.stock.negativeBalances, []);
+  assert.equal(response.data.exceptionCounts.approvedLinesMissingUnitCost, 1);
+  const after = JSON.stringify(Object.fromEntries(
+    [...harness.spreadsheet.sheets].map(([name, sheet]) => [name, sheet.values])
+  ));
+  assert.equal(after, before);
+});
+
+test("inventory baseline audit is denied to non-Founder staff", () => {
+  const sheets = authenticatedSheets();
+  sheets.Stock_Counts = objectsToRows([], ["CountID", "LocationID", "ProductID", "SystemQty", "PhysicalQty", "Difference", "Status"]);
+  sheets.FBA_Ledger_Snapshots = objectsToRows([], ["SnapshotID", "ReportDate", "ProductID", "FC", "Qty"]);
+  const harness = createAppsScriptHarness(sheets);
+  const signedIn = login(harness, TEST_PIN, "warehouse@example.invalid").data;
+  const response = post(harness, {
+    action: "getInventoryBaselineAudit",
+    sessionToken: signedIn.sessionToken,
+  });
+  assert.equal(response.success, false);
+  assert.match(response.error, /^Forbidden:/);
+});
+
+test("inventory baseline audit surfaces negative, orphan and duplicate exceptions", () => {
+  const sheets = authenticatedSheets();
+  const duplicateProduct = { ...fixture.products[0] };
+  sheets.Products = objectsToRows([...fixture.products, duplicateProduct]);
+  sheets.Movement_Headers = objectsToRows([
+    {
+      MovementID: "MOV-AUDIT-001", MovementType: "Transfer", SourceLocationID: "MAIN_WH",
+      DestinationLocationID: "FBA_TRANSIT", Status: "Approved",
+    },
+  ]);
+  sheets.Movement_Lines = objectsToRows([
+    { MovementLineID: "LINE-AUDIT-001", MovementID: "MOV-AUDIT-001", ProductID: "TEST-P001", Quantity: 5, UnitCost: 2 },
+    { MovementLineID: "LINE-AUDIT-ORPHAN", MovementID: "MOV-MISSING", ProductID: "TEST-P001", Quantity: 1, UnitCost: 2 },
+  ]);
+  sheets.Stock_Counts = objectsToRows([], ["CountID", "LocationID", "ProductID", "SystemQty", "PhysicalQty", "Difference", "Status"]);
+  sheets.FBA_Ledger_Snapshots = objectsToRows([], ["SnapshotID", "ReportDate", "ProductID", "FC", "Qty"]);
+  const harness = createAppsScriptHarness(sheets);
+  const signedIn = login(harness).data;
+  const response = post(harness, { action: "getInventoryBaselineAudit", sessionToken: signedIn.sessionToken });
+
+  assert.equal(response.success, true);
+  assert.equal(response.data.status, "attention");
+  assert.deepEqual(response.data.stock.negativeBalances, [
+    { productID: "TEST-P001", locationID: "MAIN_WH", quantity: -5 },
+  ]);
+  assert.equal(response.data.duplicateKeys.productIDs[0].value, "TEST-P001");
+  assert.equal(response.data.orphanMovementLines[0].issue, "MOVEMENT_HEADER_MISSING");
+  assert.ok(response.data.blockingExceptionCount >= 3);
 });
 
 function historicalTransitCleanupSheets() {

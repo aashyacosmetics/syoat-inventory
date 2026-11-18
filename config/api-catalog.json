@@ -226,6 +226,14 @@
       "targetCapability": "system.health.view"
     },
     {
+      "action": "getInventoryBaselineAudit",
+      "routes": [
+        "POST"
+      ],
+      "currentGate": "Valid Founder session + central capability system.health.view; read-only canonical inventory baseline proof",
+      "targetCapability": "system.health.view"
+    },
+    {
       "action": "createMovement",
       "routes": [
         "POST"

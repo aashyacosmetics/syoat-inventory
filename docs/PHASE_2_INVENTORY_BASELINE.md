@@ -4,6 +4,23 @@ Captured: 2026-11-13
 
 Status: Work Package 2 read-only baseline in progress. This record contains schema, counts and sanitized aggregate diagnostics only. It does not authorize a live correction.
 
+## 2026-11-18 refreshed-baseline candidate
+
+P0-3 is production-accepted and canonical `FBA_TRANSIT` is now 811, exactly 40 preserved Avee units plus 771 newer genuine-shipment units. The older 2026-11-13 workbook figures below remain historical evidence and must not be treated as the current baseline.
+
+Local backend candidate `3.2-phase2-inventory-baseline-audit.1` adds Founder-only `getInventoryBaselineAudit`. The read reuses `getStockFromRows()` and reports every replayed product/location balance, location totals, negatives, duplicate identifiers/business keys, orphan movement lines, invalid movement/count/shipment states, stock-count arithmetic mismatches, shipment-link integrity, approved-line UnitCost gaps and tracking-policy gaps. It returns `writesPerformed:0`, has no frontend caller and performs no append, update or Script Property mutation.
+
+Production proof still required after protected review and owner deployment:
+
+1. run `getInventoryBaselineAudit` through an authenticated Founder session;
+2. preserve the complete JSON result as owner review evidence without copying credentials or private file references;
+3. confirm `writesPerformed:0`, current `FBA_TRANSIT:811`, zero negative balances and zero blocking integrity exceptions;
+4. classify every reported UnitCost or tracking-policy gap under the legacy effective-date/exception rules rather than bulk-editing history;
+5. rerun `auditPhase2SystemHealth()` and require empty recovery/error arrays;
+6. update this document with the refreshed row counts, exact location totals and accepted exception disposition.
+
+No baseline result authorizes reversal or supersession of the 29 legacy Amazon FBA snapshot adjustments. That remains a separate same-date, non-posting design after this proof is accepted.
+
 ## Source and safety boundary
 
 - Source: live operational workbook `1uO8M6uvz4HKIgXZOIFUJVG7qRjPL-0Tv-niPq05zeaY`.
