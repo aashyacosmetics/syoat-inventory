@@ -2,6 +2,26 @@
 
 Last updated: 2026-11-18
 
+### 2026-11-18 — P0-4 refreshed inventory baseline audit prepared locally
+
+- Status: local backend candidate complete; production remains unchanged. No Google Sheet row, stock quantity, Apps Script deployment, frontend publication or production configuration was changed.
+- Backend `3.2-phase2-inventory-baseline-audit.1` adds Founder-only `getInventoryBaselineAudit` under the centrally classified `system.health.view` capability. It reuses `getStockFromRows()` rather than introducing a second stock calculation and returns `writesPerformed:0`.
+- Audit coverage: sanitized row/status counts; every canonical product/location balance and location total; negative balances; duplicate product/location/movement/count/shipment/snapshot keys; orphan movement lines; invalid movement/count/shipment references and states; stock-count arithmetic; shipment-link integrity; approved-line UnitCost gaps; and batch/expiry policy gaps.
+- Files changed: `Code.gs`, `README.md`, `config/api-catalog.json`, `tests/api-catalog.test.mjs`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `docs/API_CATALOG.md`, `docs/ARCHITECTURE.md`, `docs/ROLE_CAPABILITIES.md`, `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/CHANGELOG.md` and this handoff. Existing P0-3 closeout documentation changes remain preserved in the same worktree.
+- Checks performed: 101/101 automated tests passed (99 in the restricted run plus 2 localhost staging-isolation tests with loopback permission), including canonical totals, no mutation, Founder-only denial and detection of negatives/duplicates/orphans. Backend/frontend syntax, the 57-action API catalogue, environment-template isolation and `git diff --check` also passed.
+- Production actions still required: protected owner review/merge; owner deployment of `Code.gs`; authenticated Founder call to `getInventoryBaselineAudit`; confirm `writesPerformed:0`, Transit 811, zero negative balances and zero blocking exceptions; classify non-blocking UnitCost/tracking gaps; then run system health and record the accepted refreshed totals. No frontend publication is required.
+- Risks and next recommended task: the audit must not be used as an automatic correction instruction. The 29 legacy Amazon FBA snapshot adjustments remain untouched until the refreshed baseline is accepted and a separate same-date non-posting supersession design is reviewed.
+
+### 2026-11-18 — P0-3 historical FBA Transit cleanup accepted in production
+
+- Status: complete and production-accepted. The owner backed up the workbook, deployed backend `3.2-phase2-fba-transit-draft-preparation.1`, accepted the exact zero-conflict Founder dry run, enabled only fingerprint `MSunZ8CzA3shGENXSg6hfqjIsZ-wnxjRrEu3m5BhvBQ`, prepared the fixed sequence in seven bounded batches, removed the gate and reviewed every resulting Draft before maker-checker approval.
+- Freebie correction: nine Approved movements `MOV-478`–`MOV-486` cleared 400 Wooden Combs and 320 Bath Loofahs from `FBA_TRANSIT` to `SAMPLES`. `MAIN_WH` and `AMAZON_FBA` were unchanged.
+- Historical receipt clearance: the two existing Drafts `MOV-473`/`MOV-476` and 19 prepared Drafts `MOV-487`–`MOV-505` cleared 3,380 evidence-supported units from `FBA_TRANSIT` to the hidden `FBA_ACCEPTED` endpoint. Together with the earlier 376 Approved units, historical/control receipt clearance is now 3,756. No receipt added stock to `AMAZON_FBA`.
+- Final reconciliation: `FBA_TRANSIT` moved from 4,911 to **811** exactly. The remainder is **40** preserved legacy Avee units plus **771** newer genuine-shipment Transit. The final Founder dry run returned `conflicts:[]`, `remainingEvidenceQty:0`, zero proposed Drafts, zero writes, `projectedWarehouseDelta:0` and `projectedAmazonFbaDelta:0`.
+- Recovery and health: duplicate report-date attempts and one maker-checker rejection for Pushpa approving her own `MOV-473` were reviewed with empty checkpoints and retained as `RESOLVED_NO_RETRY`. The final `auditPhase2SystemHealth()` at 2026-11-18 16:38:24 IST returned `recoveryRequired:[]` and `unresolvedErrors:[]`.
+- Production actions still required for P0-3: none. Do not clear the 40 Avee units as Syoat stock, and do not treat the 811-unit residual as an adjustment instruction.
+- Risks and next recommended task: the separate 29-movement legacy Amazon FBA snapshot basis remains open under FBA-004. Proceed to P0 current-baseline proof before designing any supersession; preserve the dated Inventory Ledger as the Amazon FBA authority.
+
 ### 2026-11-18 — P0-3 bounded historical Transit Draft preparation ready for review
 
 - Status: local backend candidate complete and ready for protected review. No Google Sheet row, stock balance, Apps Script deployment, frontend publication or production configuration was changed by this coding task.

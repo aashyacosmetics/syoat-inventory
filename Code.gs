@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-fba-transit-draft-preparation.1",
+  VERSION:               "3.2-phase2-inventory-baseline-audit.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -110,6 +110,7 @@ const ACTION_CAPABILITIES = {
   getHistoricalFbaTransitCleanupDryRun: "amazon.shipments.historicalMigration",
   getOperationalFile:          "inventory.files.view",
   getSystemHealth:             "system.health.view",
+  getInventoryBaselineAudit:   "system.health.view",
   createMovement:              "inventory.movements.create",
   approveMovement:             "inventory.movements.approve",
   reverseMovement:             "inventory.movements.reverse",
@@ -337,6 +338,7 @@ function handleAuthenticatedAction(action, body, email) {
   if (action === "getHistoricalFbaTransitCleanupDryRun") return ok(getHistoricalFbaTransitCleanupDryRun(body, staff));
   if (action === "getOperationalFile") return ok(getOperationalFile(body, staff));
   if (action === "getSystemHealth")    return ok(getSystemHealth(staff));
+  if (action === "getInventoryBaselineAudit") return ok(getInventoryBaselineAudit(staff));
 
   return handleWrite(action, body, staff);
 }
@@ -5007,6 +5009,219 @@ function operationalErrorResponse(error, action) {
   const expected = isExpectedClientError(message);
   const errorId = expected ? "" : recordOperationalError(error, action);
   return err(expected ? safeClientErrorMessage(error) : "The request could not be completed safely.", errorId);
+}
+
+function baselineAuditDuplicateValues(rows, field) {
+  const counts = {};
+  rows.forEach(row => {
+    const value = String(row[field] == null ? "" : row[field]).trim();
+    if (value) counts[value] = (counts[value] || 0) + 1;
+  });
+  return Object.keys(counts)
+    .filter(value => counts[value] > 1)
+    .sort()
+    .map(value => ({ value: value, count: counts[value] }));
+}
+
+function baselineAuditBoolean(value) {
+  return value === true || value === 1 || /^(true|yes|1)$/i.test(String(value || "").trim());
+}
+
+function baselineAuditIssue(id, issue, extra) {
+  return Object.assign({ id: String(id || ""), issue: issue }, extra || {});
+}
+
+// Founder-only, read-only Phase 2 baseline proof. This intentionally reuses
+// getStockFromRows so the audit and the staff inventory dashboard cannot drift
+// into separate stock calculations. It performs no append/update/property write.
+function getInventoryBaselineAudit(staff) {
+  requireRole(staff, ["Founder"]);
+  const products = sheetToObjects(SHEETS.PRODUCTS);
+  const locations = sheetToObjects(SHEETS.LOCATIONS);
+  const headers = sheetToObjects(SHEETS.MOV_HEADERS);
+  const lines = sheetToObjects(SHEETS.MOV_LINES);
+  const counts = sheetToObjects(SHEETS.STOCK_COUNTS);
+  const shipments = sheetToObjects(SHEETS.FBA_SHIPMENTS);
+  const shipmentLines = sheetToObjects(SHEETS.FBA_SHIPMENT_LINES);
+  const snapshots = sheetToObjects(SHEETS.FBA_LEDGER_SNAPSHOTS);
+  const stockBalances = getStockFromRows({}, headers, lines)
+    .map(row => ({
+      productID: String(row.ProductID || ""),
+      locationID: String(row.LocationID || ""),
+      quantity: parseFloat(row.Quantity) || 0,
+    }))
+    .sort((left, right) => (left.locationID + "|" + left.productID).localeCompare(right.locationID + "|" + right.productID));
+
+  const productById = {};
+  const locationById = {};
+  const headerById = {};
+  const shipmentById = {};
+  products.forEach(row => { if (row.ProductID) productById[String(row.ProductID)] = row; });
+  locations.forEach(row => { if (row.LocationID) locationById[String(row.LocationID)] = row; });
+  headers.forEach(row => { if (row.MovementID && !headerById[String(row.MovementID)]) headerById[String(row.MovementID)] = row; });
+  shipments.forEach(row => { if (row.ShipmentID && !shipmentById[String(row.ShipmentID)]) shipmentById[String(row.ShipmentID)] = row; });
+
+  const knownEndpoints = Object.assign({}, locationById);
+  VIRTUAL_LOCATIONS.forEach(locationID => { knownEndpoints[locationID] = { LocationID: locationID }; });
+  const movementStatuses = ["Draft", "Approved", "Rejected", "Reversed"];
+  const countStatuses = ["Pending", "Approved", "Rejected", "Resolved", "Superseded"];
+  const shipmentStatuses = ["Working", "Shipped", "In Transit", "Receiving", "Received"];
+  const masterDataIssues = [];
+  products.forEach(row => {
+    if (!String(row.ProductID || "").trim()) masterDataIssues.push(baselineAuditIssue("", "PRODUCT_ID_MISSING"));
+    if (!["Active", "Archived"].includes(String(row.Status || ""))) masterDataIssues.push(baselineAuditIssue(row.ProductID, "PRODUCT_STATUS_INVALID", { status: String(row.Status || "") }));
+  });
+  locations.forEach(row => {
+    if (!String(row.LocationID || "").trim()) masterDataIssues.push(baselineAuditIssue("", "LOCATION_ID_MISSING"));
+    if (!["Active", "Archived"].includes(String(row.Status || ""))) masterDataIssues.push(baselineAuditIssue(row.LocationID, "LOCATION_STATUS_INVALID", { status: String(row.Status || "") }));
+  });
+  const approvedHeaderIds = {};
+  headers.forEach(row => { if (String(row.Status) === "Approved" && String(row.MovementType) !== "Reversal") approvedHeaderIds[String(row.MovementID)] = true; });
+
+  const orphanMovementLines = [];
+  const invalidMovementLines = [];
+  const trackingExceptions = [];
+  const approvedLinesMissingUnitCost = [];
+  lines.forEach(row => {
+    const lineID = row.MovementLineID;
+    const header = headerById[String(row.MovementID || "")];
+    const product = productById[String(row.ProductID || "")];
+    if (!header) orphanMovementLines.push(baselineAuditIssue(lineID, "MOVEMENT_HEADER_MISSING", { movementID: String(row.MovementID || "") }));
+    if (!product) orphanMovementLines.push(baselineAuditIssue(lineID, "PRODUCT_MISSING", { productID: String(row.ProductID || "") }));
+    const quantity = parseFloat(row.Quantity);
+    if (!isFinite(quantity) || quantity <= 0) invalidMovementLines.push(baselineAuditIssue(lineID, "QUANTITY_NOT_POSITIVE"));
+    if (approvedHeaderIds[String(row.MovementID || "")]) {
+      const unitCost = parseFloat(row.UnitCost);
+      if (!isFinite(unitCost) || unitCost <= 0) approvedLinesMissingUnitCost.push(String(lineID || ""));
+      if (product) {
+        const missing = [];
+        if (baselineAuditBoolean(product.TrackBatch) && !String(row.BatchNumber || "").trim()) missing.push("BATCH");
+        if (baselineAuditBoolean(product.TrackExpiry) && !String(row.ExpiryDate || "").trim()) missing.push("EXPIRY");
+        if (missing.length) trackingExceptions.push(baselineAuditIssue(lineID, "TRACKING_FIELDS_MISSING", { productID: String(row.ProductID || ""), missing: missing }));
+      }
+    }
+  });
+
+  const invalidMovementHeaders = [];
+  headers.forEach(row => {
+    const movementID = row.MovementID;
+    if (!movementStatuses.includes(String(row.Status || ""))) invalidMovementHeaders.push(baselineAuditIssue(movementID, "STATUS_INVALID", { status: String(row.Status || "") }));
+    if (!knownEndpoints[String(row.SourceLocationID || "")]) invalidMovementHeaders.push(baselineAuditIssue(movementID, "SOURCE_LOCATION_UNKNOWN", { locationID: String(row.SourceLocationID || "") }));
+    if (!knownEndpoints[String(row.DestinationLocationID || "")]) invalidMovementHeaders.push(baselineAuditIssue(movementID, "DESTINATION_LOCATION_UNKNOWN", { locationID: String(row.DestinationLocationID || "") }));
+    if (row.AmazonShipmentID && !shipmentById[String(row.AmazonShipmentID)]) invalidMovementHeaders.push(baselineAuditIssue(movementID, "FBA_SHIPMENT_UNKNOWN", { shipmentID: String(row.AmazonShipmentID) }));
+  });
+
+  const stockCountIssues = [];
+  counts.forEach(row => {
+    const countID = row.CountID;
+    if (!productById[String(row.ProductID || "")]) stockCountIssues.push(baselineAuditIssue(countID, "PRODUCT_MISSING", { productID: String(row.ProductID || "") }));
+    if (!locationById[String(row.LocationID || "")]) stockCountIssues.push(baselineAuditIssue(countID, "LOCATION_MISSING", { locationID: String(row.LocationID || "") }));
+    if (!countStatuses.includes(String(row.Status || ""))) stockCountIssues.push(baselineAuditIssue(countID, "STATUS_INVALID", { status: String(row.Status || "") }));
+    const systemQty = parseFloat(row.SystemQty);
+    const physicalQty = parseFloat(row.PhysicalQty);
+    const difference = parseFloat(row.Difference);
+    if (![systemQty, physicalQty, difference].every(isFinite)) stockCountIssues.push(baselineAuditIssue(countID, "QUANTITY_INVALID"));
+    else if (Math.abs((physicalQty - systemQty) - difference) > 0.000001) stockCountIssues.push(baselineAuditIssue(countID, "DIFFERENCE_MISMATCH"));
+  });
+
+  const shipmentIssues = [];
+  shipments.forEach(row => {
+    if (!shipmentStatuses.includes(String(row.Status || ""))) shipmentIssues.push(baselineAuditIssue(row.ShipmentID, "STATUS_INVALID", { status: String(row.Status || "") }));
+    if (row.DestinationFC && !locationById[String(row.DestinationFC)]) shipmentIssues.push(baselineAuditIssue(row.ShipmentID, "DESTINATION_LOCATION_UNKNOWN", { locationID: String(row.DestinationFC) }));
+  });
+  shipmentLines.forEach(row => {
+    if (!shipmentById[String(row.ShipmentID || "")]) shipmentIssues.push(baselineAuditIssue(row.ShipmentLineID, "SHIPMENT_HEADER_MISSING", { shipmentID: String(row.ShipmentID || "") }));
+    if (!productById[String(row.ProductID || "")]) shipmentIssues.push(baselineAuditIssue(row.ShipmentLineID, "PRODUCT_MISSING", { productID: String(row.ProductID || "") }));
+    const expectedQty = parseFloat(row.ExpectedQty);
+    if (!isFinite(expectedQty) || expectedQty <= 0) shipmentIssues.push(baselineAuditIssue(row.ShipmentLineID, "EXPECTED_QUANTITY_NOT_POSITIVE"));
+  });
+
+  const snapshotIssues = [];
+  snapshots.forEach(row => {
+    if (!String(row.SnapshotID || "").trim()) snapshotIssues.push(baselineAuditIssue("", "SNAPSHOT_ID_MISSING"));
+    if (!productById[String(row.ProductID || "")]) snapshotIssues.push(baselineAuditIssue(row.SnapshotID, "PRODUCT_MISSING", { productID: String(row.ProductID || "") }));
+    const quantity = parseFloat(row.Qty);
+    if (!isFinite(quantity) || quantity < 0) snapshotIssues.push(baselineAuditIssue(row.SnapshotID, "QUANTITY_INVALID"));
+  });
+
+  const duplicateKeys = {
+    productIDs: baselineAuditDuplicateValues(products, "ProductID"),
+    productSKUs: baselineAuditDuplicateValues(products, "SKU"),
+    locationIDs: baselineAuditDuplicateValues(locations, "LocationID"),
+    movementIDs: baselineAuditDuplicateValues(headers, "MovementID"),
+    movementLineIDs: baselineAuditDuplicateValues(lines, "MovementLineID"),
+    countIDs: baselineAuditDuplicateValues(counts, "CountID"),
+    shipmentIDs: baselineAuditDuplicateValues(shipments, "ShipmentID"),
+    amazonReferences: baselineAuditDuplicateValues(shipments, "AmazonReferenceID"),
+    shipmentLineIDs: baselineAuditDuplicateValues(shipmentLines, "ShipmentLineID"),
+    snapshotIDs: baselineAuditDuplicateValues(snapshots, "SnapshotID"),
+  };
+  const duplicateCount = Object.keys(duplicateKeys).reduce((sum, key) => sum + duplicateKeys[key].length, 0);
+  const negativeBalances = stockBalances.filter(row => row.quantity < 0);
+  const totalsByLocation = {};
+  stockBalances.forEach(row => { totalsByLocation[row.locationID] = (totalsByLocation[row.locationID] || 0) + row.quantity; });
+  const statusCounts = rows => rows.reduce((result, row) => {
+    const status = String(row.Status || "(blank)");
+    result[status] = (result[status] || 0) + 1;
+    return result;
+  }, {});
+  const exceptionCounts = {
+    duplicateKeys: duplicateCount,
+    negativeBalances: negativeBalances.length,
+    masterDataIssues: masterDataIssues.length,
+    orphanMovementLines: orphanMovementLines.length,
+    invalidMovementHeaders: invalidMovementHeaders.length,
+    invalidMovementLines: invalidMovementLines.length,
+    stockCountIssues: stockCountIssues.length,
+    shipmentIssues: shipmentIssues.length,
+    snapshotIssues: snapshotIssues.length,
+    approvedLinesMissingUnitCost: approvedLinesMissingUnitCost.length,
+    trackingExceptions: trackingExceptions.length,
+  };
+  const blockingExceptionCount = duplicateCount + negativeBalances.length + masterDataIssues.length + orphanMovementLines.length + invalidMovementHeaders.length + invalidMovementLines.length + stockCountIssues.length + shipmentIssues.length + snapshotIssues.length;
+  const knownDataQualityExceptionCount = approvedLinesMissingUnitCost.length + trackingExceptions.length;
+
+  return {
+    auditVersion: "phase2-inventory-baseline-v1",
+    generatedAt: now(),
+    writesPerformed: 0,
+    status: blockingExceptionCount
+      ? "attention"
+      : (knownDataQualityExceptionCount ? "baseline-valid-with-known-data-quality-exceptions" : "ok"),
+    rowCounts: {
+      products: products.length,
+      locations: locations.length,
+      movementHeaders: headers.length,
+      movementLines: lines.length,
+      stockCounts: counts.length,
+      fbaShipments: shipments.length,
+      fbaShipmentLines: shipmentLines.length,
+      fbaLedgerSnapshots: snapshots.length,
+    },
+    statusCounts: {
+      movements: statusCounts(headers),
+      stockCounts: statusCounts(counts),
+      fbaShipments: statusCounts(shipments),
+    },
+    stock: {
+      balanceCount: stockBalances.length,
+      totalsByLocation: totalsByLocation,
+      balances: stockBalances,
+      negativeBalances: negativeBalances,
+    },
+    duplicateKeys: duplicateKeys,
+    masterDataIssues: masterDataIssues,
+    orphanMovementLines: orphanMovementLines,
+    invalidMovementHeaders: invalidMovementHeaders,
+    invalidMovementLines: invalidMovementLines,
+    stockCountIssues: stockCountIssues,
+    shipmentIssues: shipmentIssues,
+    snapshotIssues: snapshotIssues,
+    approvedLinesMissingUnitCost: approvedLinesMissingUnitCost.sort(),
+    trackingExceptions: trackingExceptions,
+    exceptionCounts: exceptionCounts,
+    blockingExceptionCount: blockingExceptionCount,
+  };
 }
 
 function getSystemHealth(staff) {

@@ -4,7 +4,7 @@
 
 The Phase 2 staging candidate adds `serverDurationMs` to both success and error envelopes. It is a non-negative execution duration only; it contains no request body, identity, PIN, PIN hash/salt, session token, file reference or business data. The active frontend combines this with browser round-trip duration in memory for Founder/Co-Founder System Health review. Refresh/logout clears the browser aggregate, and no performance record is written to the workbook or Drive.
 
-Generated/verified from local sources on 2026-11-03.
+Generated/verified from local sources on 2026-11-18.
 
 ## Purpose
 
@@ -14,13 +14,13 @@ This catalogue is the Phase 1 baseline for the Apps Script API. It records every
 
 ## Summary
 
-- 56 unique backend actions.
+- 57 unique backend actions.
 - Only `ping` and `getAppLogins` are routed by public `doGet`.
 - 4 session actions are handled directly by `doPost` (`login`, `logout`, `confirmPin`, and `verifySession`).
-- 21 business reads pass through the authenticated POST router.
+- 22 business reads pass through the authenticated POST router.
 - 28 writes pass through the authenticated POST router.
 - No business-data read or write is routed through GET.
-- 17 backend actions have no caller in the current frontend.
+- 18 backend actions have no caller in the current frontend.
 
 Only `ping`, a strictly minimal staff picker, and the PIN-login entry are reachable without an authenticated session. Login-attempt logging is an internal effect of the login service rather than a public command.
 
@@ -57,6 +57,7 @@ Only `ping`, a strictly minimal staff picker, and the PIN-login entry are reacha
 | `getHistoricalFbaTransitCleanupDryRun` | POST | Valid Founder session + central capability amazon.shipments.historicalMigration; read-only P0-3 Transit baseline and bounded Draft-preparation preflight | none | `amazon.shipments.historicalMigration` |
 | `getOperationalFile` | POST | Valid session + central capability inventory.files.view; movement ownership/scope and stored file reference are revalidated | current | `inventory.files.view` |
 | `getSystemHealth` | POST | Valid Founder/Co-Founder session + central capability system.health.view | current | `system.health.view` |
+| `getInventoryBaselineAudit` | POST | Valid Founder session + central capability system.health.view; read-only canonical inventory baseline proof | none | `system.health.view` |
 | `createMovement` | POST | Valid session + central capability inventory.movements.create; existing handler domain rules also apply | current | `inventory.movements.create` |
 | `approveMovement` | POST | Valid session + central capability inventory.movements.approve; existing handler domain rules also apply | current | `inventory.movements.approve` |
 | `reverseMovement` | POST | Valid session + central capability inventory.movements.reverse; existing handler domain rules also apply | current | `inventory.movements.reverse` |

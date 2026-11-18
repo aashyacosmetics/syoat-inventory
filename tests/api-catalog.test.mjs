@@ -45,6 +45,7 @@ test("active frontend backend-only actions remain explicitly visible", () => {
     "getFeatureSettings",
     "getHistoricalFbaLinkingDryRun",
     "getHistoricalFbaTransitCleanupDryRun",
+    "getInventoryBaselineAudit",
     "getLists",
     "getLocations",
     "getProducts",
