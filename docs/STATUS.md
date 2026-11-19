@@ -1,6 +1,17 @@
 # Current Status and Handoff
 
-Last updated: 2026-11-18
+Last updated: 2026-11-19
+
+### 2026-11-19 — P0-4 refreshed inventory baseline accepted in production
+
+- Status: complete and production-accepted. The owner merged PR #18, deployed backend `3.2-phase2-inventory-baseline-audit-classification.1` through the existing web-app deployment and ran the audit from an authenticated Founder session. No frontend publication or Sheet edit was required.
+- Accepted baseline: audit `phase2-inventory-baseline-v1.1` returned status `baseline-valid-with-known-data-quality-exceptions`, `writesPerformed:0`, `blockingExceptionCount:0`, no negative balances, no orphan movement lines and no shipment issues. Exact location totals are `FBA_TRANSIT:811`, `AMAZON_FBA:1701`, `MAIN_WH:15438` and `RETURNS:4`.
+- Exception disposition: `MOV-002-L001` / `MOV-003-L001` remain two visible non-posting historical exceptions because their parent movements are Rejected. The 356 approved-line UnitCost gaps and 739 tracking gaps remain known historical data-quality exceptions and are not bulk-edit or stock-correction instructions. External Amazon FC codes remain independent of the Phase 2 Locations master under D-036; Locations–FC continues to use snapshot FC evidence.
+- Recovery and health: `auditPhase2SystemHealth()` at 2026-11-19 14:41:31 IST returned `recoveryRequired:[]` and `unresolvedErrors:[]`.
+- Files changed in this closeout: `README.md`, `docs/ARCHITECTURE.md`, `docs/ROLE_CAPABILITIES.md`, `docs/DECISIONS.md`, `docs/PHASE_2_INVENTORY_BASELINE.md`, `docs/PHASE_2_PLAN.md`, `docs/INVENTORY_EXCEPTION_REGISTER.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, `docs/CHANGELOG.md` and this handoff. No application source changed.
+- Checks performed: documentation-only diff review and whitespace validation. The released code was already verified at 102/102 plus syntax, the 57-action API catalogue and environment isolation before merge.
+- Production actions still required for P0-4: none. Preserve the 811 Transit baseline and the 29 legacy Amazon FBA snapshot adjustments until a separately reviewed same-date supersession design exists.
+- Next recommended task: begin P1 same-date FBA snapshot supersession with a read-only design/manifest. Do not reverse, net or rewrite the historical adjustment basis during design.
 
 ### 2026-11-18 — P0-4 live baseline classifier correction prepared locally
 

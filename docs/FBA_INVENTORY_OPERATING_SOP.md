@@ -2,7 +2,7 @@
 
 Status: Phase 2 production operating procedure and staff-training baseline. It does not authorize a historical migration, generic count approval or unexplained stock correction.
 
-Last reviewed: 2026-11-16
+Last reviewed: 2026-11-19
 
 ## 1. Accuracy objective
 
@@ -219,17 +219,17 @@ The 4,516-unit table below is the read-only historical baseline captured before 
 
 | Category | Units | Current treatment |
 | --- | ---: | --- |
-| Historical Syoat receipt candidates supported by shipment evidence | 3,616 | Non-posting until the snapshot basis is safely replaced |
-| Open 140-unit lip-balm receipt | 140 | Keep open until accepted evidence is final |
+| Historical Syoat receipt candidates supported by shipment evidence | 3,616 | Cleared from Transit through reviewed Approved receipt evidence during P0-3 |
+| Previously open 140-unit lip-balm receipt | 140 | Cleared only after genuine Amazon-located evidence was confirmed |
 | Legacy Avee-to-Syoat exception | 40 | Never receive or map to Syoat FBA |
-| Historical freebies incorrectly included in Transit | 720 | Separate reviewed correction to the Samples sink; not an FBA receipt |
-| **Total** | **4,516** | Fully explained, but not yet posted/cleared |
+| Historical freebies incorrectly included in Transit | 720 | Cleared to the Samples sink through reviewed maker-checker movements; never treated as FBA receipts |
+| **Total** | **4,516** | Historical baseline fully explained; current accepted Transit is 811 |
 
 The 2026-11-12 ledger upload created current review batch `CNT-071` to `CNT-078`. Their combined net difference is -24 units and combined absolute difference is 374 units. They remain Pending evidence and must not be approved as ordinary counts.
 
 The read-only Amazon India inventory API snapshot on 2026-11-15 returned 1,428 Syoat fulfillable, 38 reserved and 2 unfulfillable units, with inbound quantities reported separately. This is newer than the dated ledger and is operational monitoring evidence, not a replacement for the same-date reconciliation.
 
-## 6. High-priority system work still required
+## 6. Completed P0 controls and remaining Phase 2 work
 
 ### Completed - Shipment-linked FBA Receipt workflow
 
@@ -239,22 +239,15 @@ Production backend `3.2-phase2-fba-transit-clearance.1` and the corrected fronte
 
 Backend `3.2-phase2-fba-status-closure.1` and frontend `20261117-fba-status-closure.1` implement the receipt-only closure rule and were owner-released on 2026-11-17. No Approved dispatch means `Working`; Approved dispatch without receipt means `In Transit`; any partial Approved receipt means `Receiving`; and `Received` requires the complete shipment plan to be dispatched and every dispatched unit to have Approved FBA Receipt evidence. Staff cannot manually skip or advance the lifecycle. Approval, reversal, correction linking and unlinking resynchronize the stored status and audit the change.
 
-### P0-2 local candidate - Evidence-backed FBA variance resolution
+### Completed - Evidence-backed FBA variance resolution
 
-The existing Review action classifies evidence only. The prepared resolution action requires a different authorized Amazon manager to check an evidence reference and note, then closes the evidence row as `Resolved` or `Superseded`. `Unexplained` rows remain open and stale reviews fail closed. Resolution is deliberately non-posting: it creates no receipt, adjustment or stock delta. A genuine receipt, damage/loss, removal or other correction must be recorded separately through the applicable controlled movement workflow.
+Production backend `3.2-phase2-fba-variance-resolution.1` and frontend `20261117-fba-variance-resolution.1` are accepted. The Review action classifies evidence only. A different authorized Amazon manager must check an evidence reference and note before closing the row as `Resolved` or `Superseded`. `Unexplained` rows remain open and stale reviews fail closed. Genuine `CNT-086` proved that resolution creates no receipt, adjustment or stock delta. A genuine receipt, damage/loss, removal or other correction must be recorded separately through the applicable controlled movement workflow.
 
-### P0 - Historical canonical-ledger migration
+### Completed - Historical FBA Transit cleanup and baseline proof
 
-Prepare one non-posting, same-date migration manifest that:
+P0-3 cleared 3,380 remaining historical receipt units and 720 historical freebie units through reviewed Drafts and different-account approval. Earlier Approved clearances plus those movements brought `FBA_TRANSIT` to 811: exactly 40 preserved Avee units plus 771 newer genuine-shipment units. Warehouse and Amazon FBA remained unchanged.
 
-1. posts only the reviewed historical Syoat receipt candidates;
-2. compensates/replaces the 29 legacy snapshot adjustments without deleting history or double counting;
-3. applies the separate 720-unit freebie correction;
-4. keeps the 140 open lip balms open;
-5. excludes the 40-unit Avee exception;
-6. proves per-product Warehouse, Transit and FBA before/after totals and zero unexplained creation.
-
-Execution requires an owner-approved backup, dry run, protected code review, disabled-by-default idempotent batches, maker-checker approval and immediate reconciliation.
+P0-4 audit `phase2-inventory-baseline-v1.1` then confirmed `MAIN_WH:15438`, `FBA_TRANSIT:811`, `AMAZON_FBA:1701` and `RETURNS:4` with zero writes, zero blockers and zero negative balances. The 29 legacy Amazon snapshot adjustments remain immutable evidence until the separately reviewed P1 supersession design exists.
 
 ### P1 - Same-date snapshot replacement
 
