@@ -2,6 +2,17 @@
 
 Last updated: 2026-11-19
 
+### 2026-11-19 — P1 same-date Amazon FBA snapshot supersession prepared locally
+
+- Status: local backend/frontend candidate complete; production remains unchanged. No Google Sheet row, stock quantity, movement, private file, Script Property, Apps Script deployment or frontend publication was changed by this task.
+- Behavior: backend `3.2-phase2-fba-snapshot-supersession.1` binds every dated Inventory Ledger to a full SHA-256 checksum/import key. An exact active duplicate fails without writes. A corrected same-date file requires the currently active import key, creates the corrected Pending evidence, marks only the prior active Pending batch `Superseded`, preserves resolved/rejected history and raw snapshot rows, then commits the new active marker last. Current FC/history reads expose one active batch per cutoff date.
+- Frontend: build `20261119-fba-snapshot-supersession.1` detects an existing active same-date import, explains the evidence-only effect, requires explicit replacement confirmation, sends the active import token, reports superseded rows and reloads ledger history. Remaining Monday-only labels were corrected to irregular dated-snapshot language.
+- Inventory boundary: supersession creates no movement and changes neither Warehouse, Transit nor Amazon FBA. The accepted baseline remains `MAIN_WH:15438`, `FBA_TRANSIT:811`, `AMAZON_FBA:1701`, `RETURNS:4`; the 29 legacy Amazon adjustment movements remain untouched. D-037 records the import-specific exception to ordinary manual evidence resolution.
+- Files changed: `Code.gs`, `syoat-app.js`, `index.html`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `README.md`, `docs/ARCHITECTURE.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/DECISIONS.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, `docs/PHASE_2_PLAN.md`, `docs/ROLE_CAPABILITIES.md`, `docs/CHANGELOG.md` and this handoff.
+- Checks performed: backend/frontend syntax passed; full repository suite passed 104/104 including exact-duplicate denial, explicit-token replacement, one active corrected snapshot, preserved raw history, Pending-only supersession, zero stock/movement effect, API/catalogue consistency, environment isolation and localhost staging isolation; whitespace validation passed.
+- Production actions still required: protected review/merge; owner deployment of `Code.gs`; owner publication of `index.html` and `syoat-app.js`; verify ping/backend and frontend build versions; back up the workbook; use only the next genuine corrected same-date Amazon Inventory Ledger (never dummy evidence) to confirm replacement, exact-duplicate denial, one active FC snapshot, prior Pending rows `Superseded`, unchanged location totals and clean write-recovery/system-health results.
+- Risks and next recommended task: interrupted multi-row writes intentionally stop in recovery before the active marker changes; inspect and resolve recovery rather than retrying blindly. Do not use P1 to reverse/net the 29 historical adjustments or reopen resolved/rejected evidence. After genuine production acceptance, proceed to P1 marketplace daily-event reconciliation.
+
 ### 2026-11-19 — P0-4 refreshed inventory baseline accepted in production
 
 - Status: complete and production-accepted. The owner merged PR #18, deployed backend `3.2-phase2-inventory-baseline-audit-classification.1` through the existing web-app deployment and ran the audit from an authenticated Founder session. No frontend publication or Sheet edit was required.

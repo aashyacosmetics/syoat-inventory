@@ -17,7 +17,7 @@ Code.gs business logic
     +--> Google Drive (attachments and reports)
 ```
 
-The active frontend is `index.html` plus `syoat-app.js`. The redesign-named HTML/JS files are archived test artifacts and are excluded from the active architecture. `Code.gs` is the version-controlled canonical Apps Script backend source on `main`; the latest owner-confirmed production deployment is `3.2-phase2-inventory-baseline-audit-classification.1`. Its Founder-only zero-write audit distinguishes external Amazon FC codes and non-posting rejected/reversed history from blocking integrity faults. Source control does not deploy Apps Script: deployment and production configuration remain explicit owner actions.
+The active frontend is `index.html` plus `syoat-app.js`. The redesign-named HTML/JS files are archived test artifacts and are excluded from the active architecture. `Code.gs` is the version-controlled canonical Apps Script backend source; the latest owner-confirmed production deployment is `3.2-phase2-inventory-baseline-audit-classification.1`, while local candidate `3.2-phase2-fba-snapshot-supersession.1` adds same-date snapshot replacement without posting stock. Source control does not deploy Apps Script: deployment and production configuration remain explicit owner actions.
 
 ## Target near-term system
 
@@ -103,7 +103,7 @@ Idempotency records must be persistent enough to cover retries beyond a short ca
 - Approval revalidates available stock while holding the critical lock.
 - FBA shipment dispatch moves stock from warehouse to FBA transit.
 - Confirmed Amazon located/accepted evidence moves quantity from FBA transit to the hidden non-stock `FBA_ACCEPTED` evidence endpoint; it never adds to an FC or aggregate Amazon FBA stock.
-- Aggregate `AMAZON_FBA` is controlled only by the latest reviewed dated Amazon Inventory Ledger snapshot.
+- Aggregate `AMAZON_FBA` is controlled only by the latest active dated Amazon Inventory Ledger snapshot. A corrected same-date import requires explicit active-import confirmation, preserves the old raw batch and supersedes only its unresolved evidence without creating a movement or stock delta.
 - Short, excess, damaged, or lost quantities become explicit reconciliation exceptions, not silent adjustments.
 
 ## Evolution path
