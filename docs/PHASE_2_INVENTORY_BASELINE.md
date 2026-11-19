@@ -190,8 +190,8 @@ These are not part of the completed historical-linking migration. They show that
 ## Verified exceptions from this pass
 
 - Two rejected historical lines, `MOV-002-L001` and `MOV-003-L001`, reference absent products `PRD-F003` and `PRD-F004`. They have no stock effect because their headers are Rejected, but the history needs an explicit retention/legacy-reference rule.
-- 611 Approved lines for products currently flagged `TrackBatch=TRUE` and `TrackExpiry=TRUE` have blank batch and expiry values. This may include records created before the current tracking policy; Work Packages 3 and 7 must define effective-date and legacy handling before classifying them as invalid.
-- 262 Approved lines have no positive line-level UnitCost. Stock quantity is unaffected, but operational valuation is incomplete.
+- At the original 2026-11-13 capture, 611 Approved lines for products then flagged `TrackBatch=TRUE` and `TrackExpiry=TRUE` had blank batch and expiry values. This historical count is superseded for current planning by the accepted 2026-11-19 audit's 739 tracking-policy exceptions; effective-date and legacy handling are still required before remediation.
+- At the original 2026-11-13 capture, 262 Approved lines had no positive line-level UnitCost. This historical count is superseded for current planning by the accepted 2026-11-19 audit's 356 approved-line UnitCost gaps. Stock quantity is unaffected, but operational valuation remains incomplete.
 - 24 stock counts remain Pending and require classification before any count/adjustment remediation.
 - The 4,516-unit Transit balance remains unexplained by receipts and is the highest material reconciliation item. Historical shipment linking improved metadata only and did not change this balance.
 
