@@ -251,7 +251,15 @@ P0-4 audit `phase2-inventory-baseline-v1.1` then confirmed `MAIN_WH:15438`, `FBA
 
 ### P1 - Same-date snapshot replacement
 
-When the same report date is uploaded again before any reviews are resolved, replace/supersede that report batch safely rather than stacking duplicate evidence. Never add multiple snapshot variances together.
+When a corrected file has the same report cutoff date as the active upload:
+
+1. Verify that it is genuinely the corrected Amazon Inventory Ledger Summary file and that the displayed report cutoff is correct.
+2. Review the warning showing the currently active same-date import and press the replacement confirmation only if that is the batch being corrected.
+3. Upload once. An exact duplicate is rejected; do not keep retrying it.
+4. Confirm the new dated batch is the one shown in Locations–FC and that the earlier active Pending rows show `Superseded`.
+5. Confirm Warehouse, Transit and Amazon FBA totals did not change and no movement was created. Then run the normal system-health check.
+
+The older raw snapshot, private file, checksum, cutoff/upload times, count rows and audit history are retained. Resolved/rejected evidence is never reopened, multiple snapshot variances are never added together, and the separate 29 historical Amazon adjustments are not reversed or netted by this workflow.
 
 ## 7. Staff teaching checklist
 

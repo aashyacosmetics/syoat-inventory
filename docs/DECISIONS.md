@@ -235,6 +235,13 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 - Decision: `FBA_Shipments.DestinationFC`, movement `AmazonDestinationFC` and snapshot `FC` retain Amazon's external fulfilment-centre code. Phase 2 must accept a normalized future Amazon FC code without requiring it to exist in the ERP `Locations` table or requiring a deployment. The Locations–FC screen continues to read the dated Inventory Ledger snapshot by its external `FC` value. A new code may be surfaced for owner review, but it is not automatically a stock-holding ERP location and adding or observing the code has no stock effect.
 - Consequence: the Phase 2 audit validates that a shipment FC is present and syntactically usable, not that it matches an internal `LocationID`. Aggregate `AMAZON_FBA` remains the snapshot-controlled quantity authority under D-033. Before Phase 3 uses individual FC stock locations, the owner must verify each external code and activate an explicit external-code-to-internal-location mapping; mapping creation itself cannot move stock. Historical FC formatting differences normalize under D-026, while the source code remains preserved as evidence.
 
+### D-037 — A corrected same-date FBA file supersedes only its active unresolved evidence
+
+- Date: 2026-11-19
+- Status: accepted Phase 2 rule; local implementation prepared for protected review
+- Decision: the full report checksum and report cutoff date identify an FBA Inventory Ledger import. An exact retry of the active file is rejected. A different file for the same cutoff can replace the active snapshot only after the authenticated uploader explicitly confirms the currently active import key. The new import creates the corrected Pending evidence and becomes the sole active batch returned to FC views. Pending rows from the immediately previous active batch become non-posting `Superseded` evidence; resolved, rejected and already superseded rows remain immutable.
+- Consequence: raw snapshot rows, private source files, checksums, cutoff/upload timestamps, count history and audit events are preserved. Supersession creates no movement and changes neither Warehouse, Transit nor Amazon FBA quantities. The date-specific active-import property is written last as the commit marker; an interrupted multi-row write remains visible through write recovery rather than being silently retried. This special import replacement does not weaken D-035's different-person rule for manual evidence classification/resolution and does not reverse, net or rewrite the 29 legacy Amazon adjustment movements.
+
 ## Open decisions
 
 ### Access and production-baseline decisions captured 2026-10-23

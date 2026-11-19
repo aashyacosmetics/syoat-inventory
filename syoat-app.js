@@ -17,7 +17,7 @@ const SYOAT_LOGO = "syoat-logo.png";
 // Keep this identical to the ?v= cache-buster in index.html — it is printed on
 // the login screen and in the console, so a stale value mislabels every
 // troubleshooting screenshot. (Was left at 20260712-live5 until 2026-08-06.)
-const BUILD_VERSION = "20261117-fba-variance-resolution.1";
+const BUILD_VERSION = "20261119-fba-snapshot-supersession.1";
 try { console.log("%cSyoat ERP — build " + BUILD_VERSION, "color:#bd5d38;font-weight:bold;font-size:14px"); } catch (e) {}
 
 // ─────────────────────────────────────────────────────────────
@@ -4215,6 +4215,7 @@ function FbaReconcileTab(props) {
   var _u = React.useState([]), unmapped = _u[0], setUnmapped = _u[1];
   var _av = React.useState([]), ignoredAvee = _av[0], setIgnoredAvee = _av[1];
   var _d = React.useState(""), reportDate = _d[0], setReportDate = _d[1];
+  var _sup = React.useState(null), sameDateImport = _sup[0], setSameDateImport = _sup[1];
   var _e = React.useState(""), error = _e[0], setError = _e[1];
   var _b = React.useState(false), busy = _b[0], setBusy = _b[1];
   var _o = React.useState(false), drag = _o[0], setDrag = _o[1];
@@ -4279,12 +4280,12 @@ function FbaReconcileTab(props) {
     } catch (e) { setReconCounts([]); }
   }
 
-  // --- Weekly ledger history (2026-07-24) ------------------------------
-  // Uploads happen once a week (Monday mornings) — this is a set of Monday
-  // snapshots, never a daily series. `ledgerHistory` holds every row ever
-  // saved to FBA_Ledger_Snapshots; `prevWeekQty` looks up the Monday BEFORE
-  // the current one for a given product+FC, so Locations–FC/Recommendations/
-  // Analytics can show a real "vs last Monday" delta instead of a bare number.
+  // --- Dated ledger history (2026-07-24) -------------------------------
+  // Uploads are irregular, often weekly — this is a set of report-cutoff
+  // snapshots, never a daily series. The backend returns only the active batch
+  // for each report cutoff, so a corrected same-date upload never stacks with
+  // the evidence it superseded. Preserved older rows remain server-side audit
+  // history. `prevWeekQty` compares the prior distinct cutoff.
   var _ledgerHist = React.useState(null), ledgerHistory = _ledgerHist[0], setLedgerHistory = _ledgerHist[1];
   async function loadLedgerHistory() {
     try {
@@ -4330,7 +4331,7 @@ function FbaReconcileTab(props) {
   function prevWeekQty(productID, fc) {
     var dates = ledgerHistoryDates();
     if (dates.length < 2) return null;
-    var prevDate = dates[dates.length - 2]; // second-most-recent Monday
+    var prevDate = dates[dates.length - 2]; // second-most-recent cutoff
     var row = (ledgerHistory || []).find(function (r) { return r.ProductID === productID && r.FC === fc && ledgerDate(r.ReportDate) === prevDate; });
     return row ? { qty: parseFloat(row.Qty) || 0, date: prevDate } : null;
   }
@@ -4428,8 +4429,8 @@ function FbaReconcileTab(props) {
       if (shipments === null) loadShipments();
       if (amzMovs === null) loadAmazonAnalytics();
     }
-    // Locations–FC, Recommendations, and Analytics all need weekly ledger
-    // history for their "vs last Monday" deltas/trend.
+    // Locations–FC, Recommendations, and Analytics all need dated ledger
+    // history for their prior-snapshot deltas/trend.
     if ((sub === "upload" || sub === "fc" || sub === "reco" || sub === "analytics") && ledgerHistory === null) loadLedgerHistory();
   }, [sub]);
 
@@ -4520,19 +4521,22 @@ function FbaReconcileTab(props) {
         var snapshot = { reportDate: rd, reportDays: reportDays, savedAt: new Date().toISOString().slice(0, 16).replace("T", " "), products: snapProducts };
         setLedger(snapshot);
         payloadRef.current = { text: text, name: file.name, mime: isTab ? "text/plain" : "text/csv" };
+        var activeSameDateRow = (ledgerHistory || []).find(function (row) { return ledgerDate(row.ReportDate) === rd && row.ImportKey; });
+        setSameDateImport(activeSameDateRow ? { importKey: activeSameDateRow.ImportKey, reportDate: rd } : null);
         setReportDate(rd); setPreview(mapped); setUnmapped(unm); setIgnoredAvee(Object.keys(ignoredAveeByAsin).sort()); setStep("preview");
       } catch (err) { setError("Couldn't read the file: " + err.message); }
     };
     reader.readAsText(file);
   }
   function confirmImport() {
+    if (sameDateImport && !window.confirm("Replace the active " + reportDate + " snapshot with this corrected file? The earlier upload will remain in audit history, only unresolved evidence will be superseded, and stock will not change.")) return;
     setBusy(true);
     (async function () {
       try {
         var items = preview.filter(function (x) { return x.delta !== 0; }).map(function (x) { return { productID: x.productID, ledgerQty: x.ledger }; });
         // Flatten the FULL per-product-per-FC breakdown (not just the delta
         // products) so week-over-week history has every FC's real number for
-        // this Monday's upload, not only the ones that happened to need an
+        // this dated upload, not only the ones that happened to need an
         // adjustment. Source: the same `ledger` state Locations–FC/Recommendations
         // already read from.
         var fcSnapshot = [];
@@ -4547,18 +4551,18 @@ function FbaReconcileTab(props) {
         // empty/corrupt parse).
         if (!items.length && !fcSnapshot.length) { notify("✅ FBA already matches the ledger — nothing to adjust."); resetUp(); if (props.onCountCreated) props.onCountCreated(); return; }
         var fp = payloadRef.current || {};
-        var res = await apiWritePost("createFbaReconciliation", user.email, { items: items, fileText: fp.text, fileName: fp.name, fileMime: fp.mime, reportDate: reportDate, fcSnapshot: fcSnapshot });
-        notify("✅ Report saved. " + (res.pendingReviewCount != null ? res.pendingReviewCount : items.length) + " variance(s) need review; stock was not changed." + (res.ignoredAveeRows ? " " + res.ignoredAveeRows + " Avee row(s) were ignored." : "") + (res.ledgerArchived ? " Ledger archived privately in Drive." : ""));
+        var res = await apiWritePost("createFbaReconciliation", user.email, { items: items, fileText: fp.text, fileName: fp.name, fileMime: fp.mime, reportDate: reportDate, fcSnapshot: fcSnapshot, supersedeImportKey: sameDateImport ? sameDateImport.importKey : "" });
+        notify("✅ Report saved. " + (res.pendingReviewCount != null ? res.pendingReviewCount : items.length) + " variance(s) need review; stock was not changed." + (res.supersededReviewCount ? " " + res.supersededReviewCount + " unresolved row(s) from the earlier same-date upload were superseded." : "") + (res.ignoredAveeRows ? " " + res.ignoredAveeRows + " Avee row(s) were ignored." : "") + (res.ledgerArchived ? " Ledger archived privately in Drive." : ""));
+        await loadLedgerHistory();
         resetUp(); if (props.onCountCreated) props.onCountCreated();
       } catch (e) { notify("❌ " + e.message); }
       setBusy(false);
     })();
   }
-  function resetUp() { setStep("upload"); setPreview([]); setUnmapped([]); setIgnoredAvee([]); setError(""); setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
+  function resetUp() { setStep("upload"); setPreview([]); setUnmapped([]); setIgnoredAvee([]); setSameDateImport(null); setError(""); setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
 
-  // Freshness chip (2026-07-24): uploads only ever happen weekly, Monday
-  // mornings — so "how stale is our data" is a meaningful, always-visible
-  // signal here, not decoration. >8 days means a Monday was likely missed.
+  // Freshness chip: uploads are irregular, often weekly. The gap between the
+  // latest report cutoff and today is a meaningful, always-visible signal.
   var daysSinceUpload = null;
   if (ledger && ledger.reportDate) {
     var _rd = new Date(ledger.reportDate);
@@ -4566,8 +4570,8 @@ function FbaReconcileTab(props) {
   }
   var freshChip = daysSinceUpload === null
     ? /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, color: "#c9b49a" } }, "No ledger uploaded yet")
-    : /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: daysSinceUpload > 8 ? "#f0a882" : "#c9e6b4", background: daysSinceUpload > 8 ? "#5a3a24" : "#2f4a30", padding: "3px 9px", borderRadius: 20 } }, daysSinceUpload > 8 ? "⚠️ " + daysSinceUpload + "d since last Monday upload" : daysSinceUpload + "d since last Monday upload");
-  var hero = /*#__PURE__*/React.createElement("div", { style: { background: "linear-gradient(140deg,#241b14,#463017)", borderRadius: 18, padding: "18px", marginBottom: 14, color: "#f2e7d5" } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } }, /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 46, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 32, color: "#241b14" })), /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 600 } }, "Amazon FBA"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Weekly Monday ledger · FC stock · shipments · analytics"))), /*#__PURE__*/React.createElement("div", { style: { marginTop: 12, display: "flex", justifyContent: "flex-end" } }, freshChip));
+    : /*#__PURE__*/React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: daysSinceUpload > 8 ? "#f0a882" : "#c9e6b4", background: daysSinceUpload > 8 ? "#5a3a24" : "#2f4a30", padding: "3px 9px", borderRadius: 20 } }, daysSinceUpload > 8 ? "⚠️ " + daysSinceUpload + "d since last FBA upload" : daysSinceUpload + "d since last FBA upload");
+  var hero = /*#__PURE__*/React.createElement("div", { style: { background: "linear-gradient(140deg,#241b14,#463017)", borderRadius: 18, padding: "18px", marginBottom: 14, color: "#f2e7d5" } }, /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } }, /*#__PURE__*/React.createElement("div", { style: { width: 46, height: 46, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /*#__PURE__*/React.createElement(AmazonIcon, { size: 32, color: "#241b14" })), /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 21, fontWeight: 600 } }, "Amazon FBA"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: "#c9b49a", marginTop: 1 } }, "Dated ledger · FC stock · shipments · analytics"))), /*#__PURE__*/React.createElement("div", { style: { marginTop: 12, display: "flex", justifyContent: "flex-end" } }, freshChip));
 
   var SUBS = [{ k: "upload", l: "⬆️ Upload" }, { k: "fc", l: "🏬 Locations – FC" }, { k: "reco", l: "📦 Recommendations" }, { k: "shipments", l: "🚢 Shipments" }, { k: "analytics", l: "📊 Analytics" }];
   var subnav = /*#__PURE__*/React.createElement("div", { style: { display: "flex", background: "#f5ecdc", border: "1px solid #e7d9c4", borderRadius: 13, padding: 4, gap: 3, marginBottom: 14 } }, SUBS.map(function (x) { var on = sub === x.k; return /*#__PURE__*/React.createElement("button", { key: x.k, onClick: function () { setSub(x.k); }, style: { flex: 1, border: "none", background: on ? "#2a201a" : "transparent", color: on ? "#f4ead8" : "#6f6152", padding: "9px 4px", borderRadius: 9, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", boxShadow: on ? "0 1px 4px rgba(0,0,0,0.15)" : "none" } }, x.l); }));
@@ -4577,9 +4581,9 @@ function FbaReconcileTab(props) {
   function uploadTab() {
     if (step === "preview") {
       var totAdj = preview.filter(function (x) { return x.delta !== 0; }).length;
-      return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", margin: "2px 2px 10px" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 600 } }, "Reconcile preview"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680" } }, reportDate ? "Ledger date " + reportDate : "")), /*#__PURE__*/React.createElement("div", { style: { ...card, padding: "6px 14px 10px" } }, /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, padding: "9px 0", borderBottom: "1px solid #e7d9c4", fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "#a89680", fontWeight: 700 } }, /*#__PURE__*/React.createElement("span", null, "Product"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "System"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Ledger"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Δ")), preview.map(function (x) { var dc = x.delta === 0 ? "#a89680" : x.delta > 0 ? "#5f7a4f" : "#b23a2e"; return /*#__PURE__*/React.createElement("div", { key: x.productID, style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #f0ebe2", fontSize: 12.5 } }, /*#__PURE__*/React.createElement("span", { style: { fontWeight: 600, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (x.name || x.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600, color: "#6f6152" } }, x.sys), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600 } }, x.ledger), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 700, color: dc } }, x.delta > 0 ? "+" + x.delta : x.delta)); })), ignoredAvee.length > 0 && /*#__PURE__*/React.createElement("div", { style: { background: "#edf4e8", border: "1px solid #c7d8bb", borderRadius: 12, padding: "10px 13px", marginTop: 10, fontSize: 11.5, color: "#49613d" } }, /*#__PURE__*/React.createElement("b", null, "Avee excluded: "), ignoredAvee.length + " ASIN(s) were ignored and are not included in Syoat counts, FC stock or analytics."), unmapped.length > 0 && /*#__PURE__*/React.createElement("div", { style: { background: "#f4e7c8", border: "1px solid #e8d09a", borderRadius: 12, padding: "10px 13px", marginTop: 10, fontSize: 11.5, color: "#6b5326" } }, /*#__PURE__*/React.createElement("b", null, "⚠️ " + unmapped.length + " unmapped Syoat ASIN(s) — not adjusted: "), unmapped.map(function (u) { return u.asin + " (" + u.qty + ")"; }).join(", ")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#6f6152", margin: "12px 2px" } }, totAdj + " product(s) will get an adjustment count at Amazon FBA, pending Manager approval in the Stock Count tab."), /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 } }, /*#__PURE__*/React.createElement("button", { onClick: resetUp, disabled: busy, style: { border: "1px solid #e0d2bd", background: "transparent", color: "#6f6152", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 600, cursor: "pointer" } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: confirmImport, disabled: busy, style: { border: "none", background: busy ? "#c8b9a3" : "#2a201a", color: "#f4ead8", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, cursor: busy ? "wait" : "pointer" } }, busy ? "Saving…" : "Confirm · create " + totAdj + " count(s)")));
+      return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", margin: "2px 2px 10px" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 600 } }, "Reconcile preview"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#a89680" } }, reportDate ? "Ledger date " + reportDate : "")), sameDateImport && /*#__PURE__*/React.createElement("div", { style: { background: "#f4e7c8", border: "1px solid #e8d09a", borderRadius: 12, padding: "11px 13px", marginBottom: 10, fontSize: 11.5, color: "#6b5326", lineHeight: 1.5 } }, /*#__PURE__*/React.createElement("b", null, "Corrected same-date report: "), "The earlier upload stays in audit history. This file becomes the active snapshot and only unresolved earlier evidence is superseded. Stock does not change."), /*#__PURE__*/React.createElement("div", { style: { ...card, padding: "6px 14px 10px" } }, /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, padding: "9px 0", borderBottom: "1px solid #e7d9c4", fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", color: "#a89680", fontWeight: 700 } }, /*#__PURE__*/React.createElement("span", null, "Product"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "System"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Ledger"), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center" } }, "Δ")), preview.map(function (x) { var dc = x.delta === 0 ? "#a89680" : x.delta > 0 ? "#5f7a4f" : "#b23a2e"; return /*#__PURE__*/React.createElement("div", { key: x.productID, style: { display: "grid", gridTemplateColumns: "1.6fr .7fr .7fr .7fr", gap: 6, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #f0ebe2", fontSize: 12.5 } }, /*#__PURE__*/React.createElement("span", { style: { fontWeight: 600, color: "#2c211a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, (x.name || x.productID).replace("Syoat ", "")), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600, color: "#6f6152" } }, x.sys), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 600 } }, x.ledger), /*#__PURE__*/React.createElement("span", { style: { textAlign: "center", fontFamily: "Fraunces,serif", fontWeight: 700, color: dc } }, x.delta > 0 ? "+" + x.delta : x.delta)); })), ignoredAvee.length > 0 && /*#__PURE__*/React.createElement("div", { style: { background: "#edf4e8", border: "1px solid #c7d8bb", borderRadius: 12, padding: "10px 13px", marginTop: 10, fontSize: 11.5, color: "#49613d" } }, /*#__PURE__*/React.createElement("b", null, "Avee excluded: "), ignoredAvee.length + " ASIN(s) were ignored and are not included in Syoat counts, FC stock or analytics."), unmapped.length > 0 && /*#__PURE__*/React.createElement("div", { style: { background: "#f4e7c8", border: "1px solid #e8d09a", borderRadius: 12, padding: "10px 13px", marginTop: 10, fontSize: 11.5, color: "#6b5326" } }, /*#__PURE__*/React.createElement("b", null, "⚠️ " + unmapped.length + " unmapped Syoat ASIN(s) — not adjusted: "), unmapped.map(function (u) { return u.asin + " (" + u.qty + ")"; }).join(", ")), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: "#6f6152", margin: "12px 2px" } }, totAdj + " product(s) will get a pending Amazon evidence row. This does not change stock."), /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 } }, /*#__PURE__*/React.createElement("button", { onClick: resetUp, disabled: busy, style: { border: "1px solid #e0d2bd", background: "transparent", color: "#6f6152", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 600, cursor: "pointer" } }, "Cancel"), /*#__PURE__*/React.createElement("button", { onClick: confirmImport, disabled: busy, style: { border: "none", background: busy ? "#c8b9a3" : "#2a201a", color: "#f4ead8", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, cursor: busy ? "wait" : "pointer" } }, busy ? "Saving…" : sameDateImport ? "Confirm · replace same-date snapshot" : "Confirm · create " + totAdj + " evidence row(s)")));
     }
-    return /*#__PURE__*/React.createElement("div", null, sectionHead("⬆️", "Upload Weekly Ledger", "Amazon publishes this once a week, Monday mornings — one upload = one Monday snapshot, not a daily feed"), guide, /*#__PURE__*/React.createElement("div", { onDragOver: function (e) { e.preventDefault(); setDrag(true); }, onDragLeave: function () { setDrag(false); }, onDrop: function (e) { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }, onClick: function () { if (fileRef.current) fileRef.current.click(); }, style: { border: "2px dashed " + (drag ? "#bd5d38" : "#e0d2bd"), borderRadius: 16, padding: "40px 20px", textAlign: "center", cursor: "pointer", background: drag ? "#bd5d3808" : "#f5ecdc" } }, /*#__PURE__*/React.createElement("input", { ref: fileRef, type: "file", accept: ".csv,.txt,.tsv", style: { display: "none" }, onChange: function (e) { handleFile(e.target.files[0]); } }), /*#__PURE__*/React.createElement("div", { style: { fontSize: 34 } }, "⬆️"), /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 15, color: "#2c211a", marginTop: 8 } }, "Choose Ledger file or drop here"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680", marginTop: 4 } }, "CSV or TXT · nothing changes until you confirm the preview")), error && /*#__PURE__*/React.createElement("div", { style: { background: "#f3dcd5", border: "1px solid #e3b7ad", borderRadius: 12, padding: "12px 15px", marginTop: 12, fontSize: 12.5, color: "#b23a2e", fontWeight: 600 } }, "❌ " + error));
+    return /*#__PURE__*/React.createElement("div", null, sectionHead("⬆️", "Upload FBA Inventory Ledger", "Irregular dated snapshot — often weekly, with no fixed upload day"), guide, /*#__PURE__*/React.createElement("div", { onDragOver: function (e) { e.preventDefault(); setDrag(true); }, onDragLeave: function () { setDrag(false); }, onDrop: function (e) { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }, onClick: function () { if (fileRef.current) fileRef.current.click(); }, style: { border: "2px dashed " + (drag ? "#bd5d38" : "#e0d2bd"), borderRadius: 16, padding: "40px 20px", textAlign: "center", cursor: "pointer", background: drag ? "#bd5d3808" : "#f5ecdc" } }, /*#__PURE__*/React.createElement("input", { ref: fileRef, type: "file", accept: ".csv,.txt,.tsv", style: { display: "none" }, onChange: function (e) { handleFile(e.target.files[0]); } }), /*#__PURE__*/React.createElement("div", { style: { fontSize: 34 } }, "⬆️"), /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, fontSize: 15, color: "#2c211a", marginTop: 8 } }, "Choose Ledger file or drop here"), /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "#a89680", marginTop: 4 } }, "CSV or TXT · nothing changes until you confirm the preview")), error && /*#__PURE__*/React.createElement("div", { style: { background: "#f3dcd5", border: "1px solid #e3b7ad", borderRadius: 12, padding: "12px 15px", marginTop: 12, fontSize: 12.5, color: "#b23a2e", fontWeight: 600 } }, "❌ " + error));
   }
 
   function emptyLedger(msg) { return /*#__PURE__*/React.createElement("div", { style: { ...card, textAlign: "center", padding: 30, color: "#a89680", fontSize: 13 } }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 26, marginBottom: 8 } }, "🏬"), msg, /*#__PURE__*/React.createElement("button", { onClick: function () { setSub("upload"); }, style: { display: "block", margin: "14px auto 0", border: "none", background: "#2a201a", color: "#f4ead8", borderRadius: 11, padding: "9px 18px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" } }, "Go to Upload")); }
@@ -4620,7 +4624,7 @@ function FbaReconcileTab(props) {
       if (last && last.region === r) last.count++; else regionSpans.push({ region: r, count: 1 });
     });
 
-    var head = sectionHead("🏬", "Fulfilment-Centre Stock", "From the " + (ledger.reportDate || "latest") + " Monday upload (" + days + "-day report)");
+    var head = sectionHead("🏬", "Fulfilment-Centre Stock", "From the " + (ledger.reportDate || "latest") + " dated upload (" + days + "-day report)");
 
     // ---- Mobile: dropdown cards, collapsed by default ----
     var mobile = /*#__PURE__*/React.createElement("div", { className: "syoat-mobile-only" }, rows.map(function (r) {
@@ -4896,10 +4900,10 @@ function FbaReconcileTab(props) {
             shipRows.length > 8 && /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 6 } }, "Showing 8 lowest-accuracy of " + shipRows.length + " shipments."));
     var head2 = { icon: "🎯", label: "Shipment plan accuracy", value: shipments === null ? "…" : (shipRows.length === 0 ? "—" : overallPct + "%"), sub: shipRows.length === 0 ? "no shipments yet" : "average across " + shipRows.length + " shipment(s)", c: overallPct >= 90 ? "#5f7a4f" : overallPct >= 50 ? "#a97b52" : "#b23a2e" };
 
-    // --- Panel 3: FBA stock health per FC — now a real Monday-to-Monday
+    // --- Panel 3: FBA stock health per FC — real snapshot-to-snapshot
     // trend, using FBA_Ledger_Snapshots history (2026-07-24) instead of the
     // single-snapshot view this shipped with earlier today. Uploads are
-    // weekly, so each point below is one Monday, not a daily series.
+    // history, so each point below is one report cutoff, not a daily series.
     var healthCounts = { ship: 0, ok: 0, idle: 0 };
     if (ledger && ledger.products && ledger.products.length) {
       var days = ledger.reportDays || 1;
@@ -4930,7 +4934,7 @@ function FbaReconcileTab(props) {
                 /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 7, borderRadius: 5, background: "#f5ecdc", overflow: "hidden" } }, /*#__PURE__*/React.createElement("div", { style: { height: "100%", borderRadius: 5, width: Math.max(4, v / maxHist * 100) + "%", background: "#a97b52" } })),
                 /*#__PURE__*/React.createElement("span", { style: { fontFamily: "Fraunces,serif", fontSize: 12.5, fontWeight: 700, width: 50, textAlign: "right" } }, v));
             })),
-          /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 8 } }, "Ledger date " + (ledger.reportDate || "—") + (histDates.length < 2 ? ". Trend line appears once a second Monday's upload is recorded." : ".")));
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 10.5, color: "#a89680", marginTop: 8 } }, "Ledger date " + (ledger.reportDate || "—") + (histDates.length < 2 ? ". Trend line appears once a second dated upload is recorded." : ".")));
     var head3 = { icon: "🏬", label: "FBA stock health", value: (!ledger || !ledger.products || !ledger.products.length) ? "—" : healthCounts.ship + " of " + (healthCounts.ship + healthCounts.ok + healthCounts.idle), sub: (!ledger || !ledger.products || !ledger.products.length) ? "upload a ledger" : "FCs need refill", c: healthCounts.ship > 0 ? "#b23a2e" : "#5f7a4f" };
 
     // --- Panel 4: latest imported-report variance ------------------------

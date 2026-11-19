@@ -1,6 +1,6 @@
 # Role and Capability Matrix
 
-Status: production access policy remains unchanged; deployed backend `3.2-phase2-inventory-baseline-audit-classification.1` includes the Founder-only read-only baseline audit under `system.health.view` and retains the Founder-only historical FBA migration capability. The classification correction changes no capability; the handler continues to enforce the exact Founder role.
+Status: production access policy remains unchanged; deployed backend `3.2-phase2-inventory-baseline-audit-classification.1` includes the Founder-only read-only baseline audit under `system.health.view` and retains the Founder-only historical FBA migration capability. Local same-date snapshot candidate `3.2-phase2-fba-snapshot-supersession.1` adds no capability: it remains under `amazon.reconciliation.create`, with backend validation of the active import token and normal PIN reconfirmation.
 
 ## Enforcement model
 

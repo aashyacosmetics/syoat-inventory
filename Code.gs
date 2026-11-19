@@ -60,7 +60,7 @@ const WRITE_CONFIG = {
 };
 
 const OPERATIONS_CONFIG = {
-  VERSION:               "3.2-phase2-inventory-baseline-audit-classification.1",
+  VERSION:               "3.2-phase2-fba-snapshot-supersession.1",
   ERROR_PROPERTY_PREFIX: "SYOAT_OPERATIONAL_ERROR_",
   ERROR_RETENTION_DAYS:  90,
   MAX_ERROR_RECORDS:     100,
@@ -1927,6 +1927,78 @@ function fbaReportDateKey(value) {
   return isNaN(parsed.getTime()) ? text : Utilities.formatDate(parsed, "Asia/Kolkata", "yyyy-MM-dd");
 }
 
+const FBA_LEDGER_ACTIVE_PROPERTY_PREFIX = "SYOAT_FBA_LEDGER_ACTIVE_";
+
+function fbaLedgerActivePropertyKey(reportDate) {
+  return FBA_LEDGER_ACTIVE_PROPERTY_PREFIX + String(reportDate || "").replace(/[^0-9]/g, "");
+}
+
+function fbaSnapshotImportKey(row) {
+  var snapshotID = String(row && row.SnapshotID || "").trim();
+  var match = snapshotID.match(/^LSN-(.+)-(\d{3})$/);
+  return match ? match[1] : "";
+}
+
+function fbaVarianceImportKey(notes) {
+  var match = String(notes || "").match(/(?:^|\|)\s*import:([A-Za-z0-9_-]+)/);
+  return match ? match[1] : "";
+}
+
+function readFbaLedgerActiveImport(reportDate, rows) {
+  var property = authProperties().getProperty(fbaLedgerActivePropertyKey(reportDate));
+  if (property) {
+    try {
+      var parsed = JSON.parse(property);
+      if (parsed && parsed.importKey) return parsed;
+    } catch (e) { /* fall through to preserved snapshot evidence */ }
+  }
+
+  var batches = {};
+  (rows || []).forEach(function (row, index) {
+    if (fbaReportDateKey(row.ReportDate) !== reportDate) return;
+    var importKey = fbaSnapshotImportKey(row);
+    if (!importKey) return;
+    var uploadedAt = String(row.UploadedAt || "");
+    if (!batches[importKey]) batches[importKey] = { importKey: importKey, uploadedAt: uploadedAt, lastIndex: index, rowCount: 0 };
+    batches[importKey].rowCount++;
+    if (uploadedAt > batches[importKey].uploadedAt) batches[importKey].uploadedAt = uploadedAt;
+    batches[importKey].lastIndex = index;
+  });
+  return Object.keys(batches).map(function (key) { return batches[key]; }).sort(function (left, right) {
+    return left.uploadedAt === right.uploadedAt ? left.lastIndex - right.lastIndex : left.uploadedAt.localeCompare(right.uploadedAt);
+  }).pop() || null;
+}
+
+function isSameFbaImportKey(left, right) {
+  left = String(left || "");
+  right = String(right || "");
+  return !!left && !!right && (left === right || left.slice(0, 18) === right.slice(0, 18));
+}
+
+function activeFbaLedgerSnapshotRows(rows) {
+  var byDate = {};
+  (rows || []).forEach(function (row) {
+    var reportDate = fbaReportDateKey(row.ReportDate);
+    if (!reportDate) return;
+    (byDate[reportDate] = byDate[reportDate] || []).push(row);
+  });
+
+  var activeRows = [];
+  Object.keys(byDate).forEach(function (reportDate) {
+    var active = readFbaLedgerActiveImport(reportDate, byDate[reportDate]);
+    if (!active) return;
+    byDate[reportDate].forEach(function (row) {
+      if (!isSameFbaImportKey(fbaSnapshotImportKey(row), active.importKey)) return;
+      activeRows.push(Object.assign({}, row, {
+        ImportKey: active.importKey,
+        FileChecksum: active.fileChecksum || "",
+        IsActive: true,
+      }));
+    });
+  });
+  return activeRows;
+}
+
 // Avee is a retired external brand, not a Syoat inventory identity (D-028).
 // Keep the title/brand check as the primary rule and retain the confirmed
 // historical identifiers as a fail-safe for report formats without a title.
@@ -2045,10 +2117,15 @@ function createFbaReconciliation(body, staff) {
   if (!String(body.fileText || "").trim()) throw new Error("The original FBA report file is required for review evidence.");
 
   var existingSnapshots = sheetToObjects(SHEETS.FBA_LEDGER_SNAPSHOTS);
-  if (existingSnapshots.some(function (row) { return fbaReportDateKey(row.ReportDate) === reportDate; })) {
-    throw new Error("Invalid FBA report import: this report date was already imported. Review the existing snapshot instead of uploading it again.");
+  var previousActive = readFbaLedgerActiveImport(reportDate, existingSnapshots);
+  var fileChecksum = sha256Base64Url(String(body.fileText));
+  var importKey = sha256Base64Url(reportDate + "\n" + String(body.fileText));
+  if (previousActive && isSameFbaImportKey(previousActive.importKey, importKey)) {
+    throw new Error("Invalid FBA report import: this exact report file was already imported and is the active snapshot for " + reportDate + ". Review the existing snapshot instead of uploading it again.");
   }
-  var importKey = sha256Base64Url(reportDate + "\n" + String(body.fileText)).slice(0, 18);
+  if (previousActive && !isSameFbaImportKey(body.supersedeImportKey, previousActive.importKey)) {
+    throw new Error("Invalid FBA report import: this report date already has an active snapshot. Refresh the Amazon page and explicitly confirm replacement of import " + previousActive.importKey + ".");
+  }
 
   var driveFile = null;
   try {
@@ -2063,7 +2140,7 @@ function createFbaReconciliation(body, staff) {
     throw new Error("Invalid FBA report import: the original report could not be archived privately, so no snapshot or review row was created.");
   }
 
-  var note = "FBA report " + reportDate + " | import:" + importKey + (driveFile ? " | private-file:" + driveFile.fileId : "");
+  var note = "FBA report " + reportDate + " | import:" + importKey + " | checksum:" + fileChecksum + (driveFile ? " | private-file:" + driveFile.fileId : "");
   var pending = 0, unchanged = 0;
   items.forEach(function (it) {
     var pid = it.productID;
@@ -2094,17 +2171,16 @@ function createFbaReconciliation(body, staff) {
   });
 
   // 2026-07-24: persist the FULL per-product-per-FC breakdown of this upload —
-  // not just the products that had a delta — so week-over-week comparisons
+  // not just the products that had a delta — so dated-snapshot comparisons
   // (Locations–FC, Recommendations, Analytics) have real history to compare
   // against instead of only ever seeing the single latest snapshot. Uploads
-  // happen weekly (Monday mornings), so "history" here means one row set per
-  // Monday, not a daily series — deliberately not over-building for a
-  // cadence that doesn't exist. Snapshot writes fail closed so a partial
+  // are irregular and often weekly, so "history" here means one row set per
+  // report cutoff date, not a daily series. Snapshot writes fail closed so a partial
   // report import remains visible in the write-recovery queue.
   var snapshotSaved = 0;
+  var uploadedAt = now();
   try {
     var fcSnapshot = fcSnapshotIn;
-    var uploadedAt = now();
     fcSnapshot.forEach(function (row, index) {
       if (!row.productID || !row.fc) return;
       appendRow(SHEETS.FBA_LEDGER_SNAPSHOTS, {
@@ -2122,10 +2198,65 @@ function createFbaReconciliation(body, staff) {
     });
   } catch (e) { throw new Error("FBA report snapshot could not be saved. Review recovery status before retrying."); }
 
+  var supersededReviewCount = 0;
+  if (previousActive) {
+    var latestCounts = sheetToObjects(SHEETS.STOCK_COUNTS);
+    latestCounts.forEach(function (count, index) {
+      if (!isFbaVarianceReview(count) || count.Status !== "Pending") return;
+      if (!isSameFbaImportKey(fbaVarianceImportKey(count.Notes), previousActive.importKey)) return;
+      var countReportDateMatch = String(count.Notes || "").match(/^FBA report\s+(\d{4}-\d{2}-\d{2})/);
+      if (fbaReportDateKey(countReportDateMatch ? countReportDateMatch[1] : "") !== reportDate) return;
+      var supersededAt = now();
+      var resolution = {
+        resolution: "superseded",
+        resolutionLabel: FBA_VARIANCE_RESOLUTIONS.superseded.label,
+        evidenceReference: "same-date import " + importKey,
+        resolutionNote: "Automatically superseded by a corrected report for the same Amazon cutoff date.",
+        resolvedByEmail: staff.Email,
+        resolvedAt: supersededAt,
+        stockChanged: false,
+        supersededByImportKey: importKey,
+      };
+      var oldNotes = String(count.Notes || "").trim();
+      updateRow(SHEETS.STOCK_COUNTS, index + 2, {
+        Status: "Superseded",
+        ApprovedByEmail: staff.Email,
+        Notes: oldNotes + (oldNotes ? " | " : "") + "FBA_RESOLUTION:" + JSON.stringify(resolution),
+      });
+      recordWriteCheckpoint("StockCount", count.CountID, "same_date_evidence_superseded");
+      writeAuditTrail("createFbaReconciliation", "StockCount", count.CountID, [
+        { field: "Status", oldValue: count.Status, newValue: "Superseded" },
+        { field: "FbaVarianceResolution", oldValue: "", newValue: "superseded" },
+      ], staff, body.requestId, "Superseded by same-date import " + importKey + "; stock unchanged");
+      supersededReviewCount++;
+    });
+  }
+
+  authProperties().setProperty(fbaLedgerActivePropertyKey(reportDate), JSON.stringify({
+    reportDate: reportDate,
+    importKey: importKey,
+    fileChecksum: fileChecksum,
+    uploadedAt: uploadedAt,
+    rowCount: snapshotSaved,
+    previousImportKey: previousActive ? previousActive.importKey : "",
+  }));
+  recordWriteCheckpoint("FbaLedgerImport", importKey, "active_snapshot_committed");
+
   writeLog("createFbaReconciliation", reportDate, staff,
-    "FBA evidence import " + importKey + ": " + pending + " pending review, " + unchanged + " unchanged, " + snapshotSaved + " FC-snapshot row(s), " + aveeEvidence.rows + " Avee row(s) ignored. " + (driveFile ? "private-file:" + driveFile.fileId : "no-file"),
+    "FBA evidence import " + importKey + ": " + pending + " pending review, " + unchanged + " unchanged, " + snapshotSaved + " FC-snapshot row(s), " + supersededReviewCount + " earlier unresolved row(s) superseded, " + aveeEvidence.rows + " Avee row(s) ignored. " + (driveFile ? "private-file:" + driveFile.fileId : "no-file"),
     body.requestId);
-  return { pendingReviewCount: pending, unchanged: unchanged, snapshotSaved: snapshotSaved, ignoredAveeRows: aveeEvidence.rows, ledgerArchived: !!driveFile, importKey: importKey };
+  return {
+    pendingReviewCount: pending,
+    unchanged: unchanged,
+    snapshotSaved: snapshotSaved,
+    supersededReviewCount: supersededReviewCount,
+    supersededImportKey: previousActive ? previousActive.importKey : "",
+    ignoredAveeRows: aveeEvidence.rows,
+    ledgerArchived: !!driveFile,
+    importKey: importKey,
+    fileChecksum: fileChecksum,
+    stockChanged: false,
+  };
 }
 
 function reviewFbaVariance(body, staff) {
@@ -2253,7 +2384,7 @@ function resolveFbaVariance(body, staff) {
   };
 }
 
-// Weekly ledger history for week-over-week comparisons (Locations–FC deltas,
+// Dated ledger history for snapshot-to-snapshot comparisons (Locations–FC deltas,
 // Recommendations "did the refill happen", Analytics trend). One row per
 // product per FC per upload — see createFbaReconciliation for how rows get
 // written. Read-only, no role gate beyond normal Amazon-tab access checked
@@ -2261,7 +2392,7 @@ function resolveFbaVariance(body, staff) {
 function getFbaLedgerSnapshots(params) {
   params = params || {};
   var rows;
-  try { rows = sheetToObjects(SHEETS.FBA_LEDGER_SNAPSHOTS); } catch (e) { return []; }
+  try { rows = activeFbaLedgerSnapshotRows(sheetToObjects(SHEETS.FBA_LEDGER_SNAPSHOTS)); } catch (e) { return []; }
   if (params.productID) rows = rows.filter(function (r) { return r.ProductID === params.productID; });
   if (params.fc)         rows = rows.filter(function (r) { return r.FC === params.fc; });
   rows.sort(function (a, b) { return String(a.ReportDate).localeCompare(String(b.ReportDate)); });

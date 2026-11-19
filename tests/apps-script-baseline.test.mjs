@@ -74,7 +74,7 @@ test("local Apps Script harness executes the health route", () => {
   assert.equal(response.success, true);
   assert.equal(response.data.service, "Syoat ERP");
   assert.equal(response.data.status, "ok");
-  assert.equal(response.data.version, "3.2-phase2-inventory-baseline-audit-classification.1");
+  assert.equal(response.data.version, "3.2-phase2-fba-snapshot-supersession.1");
 });
 
 test("Founder inventory baseline audit reuses canonical stock and performs no writes", () => {
@@ -1611,6 +1611,92 @@ test("FBA report import saves evidence for review without changing stock", () =>
   assert.match(unresolved.error, /Cannot resolve unexplained FBA evidence/i);
 });
 
+test("corrected same-date FBA report supersedes only unresolved evidence and keeps one active snapshot", () => {
+  const sheets = writeReadySheets();
+  sheets.Stock_Counts = objectsToRows([], [
+    "CountID", "CountDateTime", "LocationID", "ProductID", "SystemQty",
+    "PhysicalQty", "Difference", "CountedByEmail", "ApprovedByEmail",
+    "Status", "Reason", "AdjustmentMovementID", "Notes",
+  ]);
+  sheets.FBA_Ledger_Snapshots = objectsToRows([], [
+    "SnapshotID", "ReportDate", "ProductID", "FC", "Qty", "Sold",
+    "UploadedByEmail", "UploadedAt",
+  ]);
+  const harness = createAppsScriptHarness(sheets);
+  const signedIn = login(harness).data;
+  const stockBefore = JSON.stringify(harness.call("getStock", {}));
+  const movementRowsBefore = harness.spreadsheet.getSheetByName("Movement_Headers").values.length;
+
+  const firstPayload = {
+    action: "createFbaReconciliation",
+    sessionToken: signedIn.sessionToken,
+    requestId: "req-fba-same-date-first-0001",
+    reportDate: "2026-11-18",
+    fileText: "date,asin,disposition,ending warehouse balance\n2026-11-18,TEST-ASIN,SELLABLE,3",
+    fileName: "first.csv",
+    fileMime: "text/csv",
+    items: [{ productID: "TEST-P001", ledgerQty: 3 }],
+    fcSnapshot: [{ productID: "TEST-P001", fc: "TEST_FC", qty: 3, sold: 1 }],
+  };
+  const first = post(harness, firstPayload);
+  assert.equal(first.success, true, JSON.stringify(first));
+  assert.equal(first.data.stockChanged, false);
+  assert.equal(first.data.fileChecksum.length, 43);
+
+  const correctedPayload = {
+    ...firstPayload,
+    requestId: "req-fba-same-date-second-0001",
+    fileText: "date,asin,disposition,ending warehouse balance\n2026-11-18,TEST-ASIN,SELLABLE,5",
+    fileName: "corrected.csv",
+    items: [{ productID: "TEST-P001", ledgerQty: 5 }],
+    fcSnapshot: [{ productID: "TEST-P001", fc: "TEST_FC", qty: 5, sold: 2 }],
+  };
+
+  const unconfirmed = post(harness, correctedPayload);
+  assert.equal(unconfirmed.success, false);
+  assert.match(unconfirmed.error, /explicitly confirm replacement/i);
+
+  const corrected = post(harness, {
+    ...correctedPayload,
+    requestId: "req-fba-same-date-second-0002",
+    supersedeImportKey: first.data.importKey,
+  });
+  assert.equal(corrected.success, true, JSON.stringify(corrected));
+  assert.equal(corrected.data.supersededReviewCount, 1);
+  assert.equal(corrected.data.supersededImportKey, first.data.importKey);
+  assert.equal(corrected.data.stockChanged, false);
+
+  const counts = harness.call("sheetToObjects", "Stock_Counts");
+  assert.equal(counts.length, 2);
+  assert.equal(counts[0].Status, "Superseded");
+  assert.equal(counts[0].AdjustmentMovementID, "");
+  assert.match(counts[0].Notes, /FBA_RESOLUTION:/);
+  assert.match(counts[0].Notes, new RegExp(corrected.data.importKey));
+  assert.equal(counts[1].Status, "Pending");
+  assert.equal(counts[1].PhysicalQty, 5);
+  assert.match(counts[1].Notes, /checksum:/);
+
+  const rawSnapshots = harness.call("sheetToObjects", "FBA_Ledger_Snapshots");
+  assert.equal(rawSnapshots.length, 2, "both same-date uploads remain preserved");
+  const activeSnapshots = harness.call("getFbaLedgerSnapshots", {});
+  assert.equal(activeSnapshots.length, 1);
+  assert.equal(activeSnapshots[0].Qty, 5);
+  assert.equal(activeSnapshots[0].ImportKey, corrected.data.importKey);
+  assert.equal(activeSnapshots[0].FileChecksum, corrected.data.fileChecksum);
+  assert.equal(activeSnapshots[0].IsActive, true);
+
+  const duplicate = post(harness, {
+    ...correctedPayload,
+    requestId: "req-fba-same-date-duplicate-0001",
+    supersedeImportKey: corrected.data.importKey,
+  });
+  assert.equal(duplicate.success, false);
+  assert.match(duplicate.error, /exact report file was already imported/i);
+
+  assert.equal(JSON.stringify(harness.call("getStock", {})), stockBefore);
+  assert.equal(harness.spreadsheet.getSheetByName("Movement_Headers").values.length, movementRowsBefore);
+});
+
 test("FBA report import ignores Avee rows even if a submitted product mapping exists", () => {
   const sheets = writeReadySheets();
   sheets.Products = objectsToRows([
@@ -1671,6 +1757,15 @@ test("FBA upload frontend excludes Avee before Syoat ASIN mapping", () => {
   assert.match(source, /if \(isAveeFbaRow\(a, fnsku, title, brand\)\) \{ ignoredAveeByAsin\[a\] = true; continue; \}/);
   assert.match(source, /Avee is excluded from Syoat and nothing was imported/);
   assert.match(source, /not included in Syoat counts, FC stock or analytics/);
+});
+
+test("FBA upload frontend confirms same-date snapshot supersession", () => {
+  const source = readProjectFile("syoat-app.js");
+  assert.match(source, /supersedeImportKey: sameDateImport \? sameDateImport\.importKey : ""/);
+  assert.match(source, /Replace the active " \+ reportDate \+ " snapshot/);
+  assert.match(source, /window\.confirm/);
+  assert.match(source, /stock will not change/);
+  assert.match(source, /supersededReviewCount/);
 });
 
 test("retrying a completed request returns its result without another business event", () => {
