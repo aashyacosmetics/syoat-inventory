@@ -231,7 +231,7 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 ### D-036 — Amazon FC identity is external in Phase 2 and owner-mapped before Phase 3 stock use
 
 - Date: 2026-11-18
-- Status: accepted owner decision; audit-classification correction prepared locally
+- Status: accepted and owner-released on 2026-11-19
 - Decision: `FBA_Shipments.DestinationFC`, movement `AmazonDestinationFC` and snapshot `FC` retain Amazon's external fulfilment-centre code. Phase 2 must accept a normalized future Amazon FC code without requiring it to exist in the ERP `Locations` table or requiring a deployment. The Locations–FC screen continues to read the dated Inventory Ledger snapshot by its external `FC` value. A new code may be surfaced for owner review, but it is not automatically a stock-holding ERP location and adding or observing the code has no stock effect.
 - Consequence: the Phase 2 audit validates that a shipment FC is present and syntactically usable, not that it matches an internal `LocationID`. Aggregate `AMAZON_FBA` remains the snapshot-controlled quantity authority under D-033. Before Phase 3 uses individual FC stock locations, the owner must verify each external code and activate an explicit external-code-to-internal-location mapping; mapping creation itself cannot move stock. Historical FC formatting differences normalize under D-026, while the source code remains preserved as evidence.
 

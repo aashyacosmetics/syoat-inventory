@@ -2,24 +2,26 @@
 
 Captured: 2026-11-13
 
-Status: Work Package 2 read-only baseline in progress. This record contains schema, counts and sanitized aggregate diagnostics only. It does not authorize a live correction.
+Status: P0-4 refreshed read-only baseline accepted in production on 2026-11-19. This record contains schema, counts and sanitized aggregate diagnostics only. It does not authorize a live correction.
 
-## 2026-11-18 refreshed-baseline candidate
+## 2026-11-19 refreshed baseline accepted in production
 
 P0-3 is production-accepted and canonical `FBA_TRANSIT` is now 811, exactly 40 preserved Avee units plus 771 newer genuine-shipment units. The older 2026-11-13 workbook figures below remain historical evidence and must not be treated as the current baseline.
 
 Backend `3.2-phase2-inventory-baseline-audit.1` added Founder-only `getInventoryBaselineAudit`. The read reuses `getStockFromRows()` and reports every replayed product/location balance, location totals, negatives, duplicate identifiers/business keys, orphan movement lines, invalid movement/count/shipment states, stock-count arithmetic mismatches, shipment-link integrity, approved-line UnitCost gaps and tracking-policy gaps. It returns `writesPerformed:0`, has no frontend caller and performs no append, update or Script Property mutation.
 
-The owner deployed that candidate and captured the live read-only result on 2026-11-18. It proved `FBA_TRANSIT:811`, `AMAZON_FBA:1701`, `MAIN_WH:15438`, `RETURNS:4`, zero negative balances and zero writes. The first classifier incorrectly counted 29 legitimate external Amazon destination FC codes as absent internal Locations and counted rejected non-posting lines `MOV-002-L001` / `MOV-003-L001` as blocking missing-product references. Local correction candidate `3.2-phase2-inventory-baseline-audit-classification.1` applies D-036: external FC codes remain independent of the Locations master, while missing products on Rejected/Reversed movements remain visible as known historical exceptions rather than blocking stock integrity. It changes no quantity and does not alter the Locations–FC snapshot screen.
+The owner deployed that candidate and captured the first live read-only result on 2026-11-18. It proved `FBA_TRANSIT:811`, `AMAZON_FBA:1701`, `MAIN_WH:15438`, `RETURNS:4`, zero negative balances and zero writes. The first classifier incorrectly counted 29 legitimate external Amazon destination FC codes as absent internal Locations and counted rejected non-posting lines `MOV-002-L001` / `MOV-003-L001` as blocking missing-product references. Backend `3.2-phase2-inventory-baseline-audit-classification.1` applies D-036: external FC codes remain independent of the Locations master, while missing products on Rejected/Reversed movements remain visible as known historical exceptions rather than blocking stock integrity. It changes no quantity and does not alter the Locations–FC snapshot screen.
 
-Production proof still required after protected review and owner deployment:
+The owner merged PR #18, deployed the correction and reran the authenticated Founder audit on 2026-11-19. Production acceptance evidence is:
 
-1. run `getInventoryBaselineAudit` through an authenticated Founder session;
-2. preserve the complete JSON result as owner review evidence without copying credentials or private file references;
-3. after deploying the classification correction, reconfirm `writesPerformed:0`, current `FBA_TRANSIT:811`, zero negative balances and zero blocking integrity exceptions;
-4. classify every reported UnitCost or tracking-policy gap under the legacy effective-date/exception rules rather than bulk-editing history;
-5. rerun `auditPhase2SystemHealth()` and require empty recovery/error arrays;
-6. update this document with the refreshed row counts, exact location totals and accepted exception disposition.
+- audit version `phase2-inventory-baseline-v1.1` and status `baseline-valid-with-known-data-quality-exceptions`;
+- `writesPerformed:0`, `blockingExceptionCount:0`, zero negative balances, zero orphan movement lines and zero shipment issues;
+- exact location totals `FBA_TRANSIT:811`, `AMAZON_FBA:1701`, `MAIN_WH:15438`, `RETURNS:4`;
+- two visible non-posting historical exceptions for `MOV-002-L001` / `MOV-003-L001`;
+- 356 approved-line UnitCost gaps and 739 batch/expiry tracking gaps retained as known historical data-quality exceptions, not bulk-edited or treated as stock faults;
+- final `auditPhase2SystemHealth()` at 2026-11-19 14:41:31 IST returned `recoveryRequired:[]` and `unresolvedErrors:[]`.
+
+P0-4 requires no further production action. Future audits remain read-only evidence and never authorize automatic correction.
 
 No baseline result authorizes reversal or supersession of the 29 legacy Amazon FBA snapshot adjustments. That remains a separate same-date, non-posting design after this proof is accepted.
 
