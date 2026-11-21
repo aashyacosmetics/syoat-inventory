@@ -224,7 +224,7 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 ### D-035 — FBA variance resolution closes evidence, not inventory
 
 - Date: 2026-11-17
-- Status: accepted Phase 2 rule; local implementation prepared for protected review
+- Status: accepted and owner-released on 2026-11-17
 - Decision: Imported Amazon variance evidence is first classified by an authorized Amazon manager and remains `Pending`. A different authorized Amazon manager may then record an evidence reference and checker note to close the row as `Resolved`, or supersede it with identified later evidence as `Superseded`. The classifier cannot resolve their own row, an `Unexplained` classification cannot close, and a stale review timestamp fails closed.
 - Consequence: Resolution never changes stock, creates an adjustment movement or alters Approved history. Any genuine Transit clearance, loss, damage, removal or other inventory correction remains a separate evidence-backed movement under its own maker-checker, idempotency, recovery and audit controls. The dedicated resolution action provides the missing evidence lifecycle without turning Amazon snapshots into a second stock ledger.
 
@@ -238,7 +238,7 @@ Accepted decisions are binding until the owner explicitly changes them. Add new 
 ### D-037 — A corrected same-date FBA file supersedes only its active unresolved evidence
 
 - Date: 2026-11-19
-- Status: accepted Phase 2 rule; local implementation prepared for protected review
+- Status: accepted and owner-released on 2026-11-21
 - Decision: the full report checksum and report cutoff date identify an FBA Inventory Ledger import. An exact retry of the active file is rejected. A different file for the same cutoff can replace the active snapshot only after the authenticated uploader explicitly confirms the currently active import key. The new import creates the corrected Pending evidence and becomes the sole active batch returned to FC views. Pending rows from the immediately previous active batch become non-posting `Superseded` evidence; resolved, rejected and already superseded rows remain immutable.
 - Consequence: raw snapshot rows, private source files, checksums, cutoff/upload timestamps, count history and audit events are preserved. Supersession creates no movement and changes neither Warehouse, Transit nor Amazon FBA quantities. The date-specific active-import property is written last as the commit marker; an interrupted multi-row write remains visible through write recovery rather than being silently retried. This special import replacement does not weaken D-035's different-person rule for manual evidence classification/resolution and does not reverse, net or rewrite the 29 legacy Amazon adjustment movements.
 

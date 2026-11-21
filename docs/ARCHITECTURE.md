@@ -17,7 +17,7 @@ Code.gs business logic
     +--> Google Drive (attachments and reports)
 ```
 
-The active frontend is `index.html` plus `syoat-app.js`. The redesign-named HTML/JS files are archived test artifacts and are excluded from the active architecture. `Code.gs` is the version-controlled canonical Apps Script backend source; the latest owner-confirmed production deployment is `3.2-phase2-inventory-baseline-audit-classification.1`, while local candidate `3.2-phase2-fba-snapshot-supersession.1` adds same-date snapshot replacement without posting stock. Source control does not deploy Apps Script: deployment and production configuration remain explicit owner actions.
+The active frontend is `index.html` plus `syoat-app.js`. The redesign-named HTML/JS files are archived test artifacts and are excluded from the active architecture. `Code.gs` is the version-controlled canonical Apps Script backend source; the latest owner-confirmed production deployment is `3.2-phase2-fba-snapshot-supersession.1`, paired with frontend build `20261119-fba-snapshot-supersession.1`. Same-date snapshot replacement is production-accepted and does not post stock. Source control does not deploy Apps Script: deployment and production configuration remain explicit owner actions.
 
 ## Target near-term system
 
