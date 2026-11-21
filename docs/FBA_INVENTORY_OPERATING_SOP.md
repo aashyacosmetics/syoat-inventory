@@ -247,9 +247,11 @@ Production backend `3.2-phase2-fba-variance-resolution.1` and frontend `20261117
 
 P0-3 cleared 3,380 remaining historical receipt units and 720 historical freebie units through reviewed Drafts and different-account approval. Earlier Approved clearances plus those movements brought `FBA_TRANSIT` to 811: exactly 40 preserved Avee units plus 771 newer genuine-shipment units. Warehouse and Amazon FBA remained unchanged.
 
-P0-4 audit `phase2-inventory-baseline-v1.1` then confirmed `MAIN_WH:15438`, `FBA_TRANSIT:811`, `AMAZON_FBA:1701` and `RETURNS:4` with zero writes, zero blockers and zero negative balances. The 29 legacy Amazon snapshot adjustments remain immutable evidence until the separately reviewed P1 supersession design exists.
+P0-4 audit `phase2-inventory-baseline-v1.1` then confirmed `MAIN_WH:15438`, `FBA_TRANSIT:811`, `AMAZON_FBA:1701` and `RETURNS:4` with zero writes, zero blockers and zero negative balances. The 29 legacy Amazon snapshot adjustments remain immutable evidence and are not reversed or netted by P1 supersession.
 
-### P1 - Same-date snapshot replacement
+### Completed - P1 same-date snapshot replacement
+
+Backend `3.2-phase2-fba-snapshot-supersession.1` and frontend `20261119-fba-snapshot-supersession.1` were owner-released and production-accepted on 2026-11-21. The genuine corrected-file test left one active batch, superseded only the prior active Pending evidence, rejected an exact duplicate and created no movement or stock change. Final write-recovery and system-health checks were clean.
 
 When a corrected file has the same report cutoff date as the active upload:
 

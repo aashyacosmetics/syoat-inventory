@@ -1,17 +1,19 @@
 # Current Status and Handoff
 
-Last updated: 2026-11-19
+Last updated: 2026-11-21
 
-### 2026-11-19 — P1 same-date Amazon FBA snapshot supersession prepared locally
+### 2026-11-21 — P1 same-date Amazon FBA snapshot supersession accepted in production
 
-- Status: local backend/frontend candidate complete; production remains unchanged. No Google Sheet row, stock quantity, movement, private file, Script Property, Apps Script deployment or frontend publication was changed by this task.
+- Status: complete and production-accepted. The owner merged PR #20, deployed backend `3.2-phase2-fba-snapshot-supersession.1` through the existing web-app deployment, published frontend build `20261119-fba-snapshot-supersession.1` and backed up the workbook before live validation.
 - Behavior: backend `3.2-phase2-fba-snapshot-supersession.1` binds every dated Inventory Ledger to a full SHA-256 checksum/import key. An exact active duplicate fails without writes. A corrected same-date file requires the currently active import key, creates the corrected Pending evidence, marks only the prior active Pending batch `Superseded`, preserves resolved/rejected history and raw snapshot rows, then commits the new active marker last. Current FC/history reads expose one active batch per cutoff date.
 - Frontend: build `20261119-fba-snapshot-supersession.1` detects an existing active same-date import, explains the evidence-only effect, requires explicit replacement confirmation, sends the active import token, reports superseded rows and reloads ledger history. Remaining Monday-only labels were corrected to irregular dated-snapshot language.
-- Inventory boundary: supersession creates no movement and changes neither Warehouse, Transit nor Amazon FBA. The accepted baseline remains `MAIN_WH:15438`, `FBA_TRANSIT:811`, `AMAZON_FBA:1701`, `RETURNS:4`; the 29 legacy Amazon adjustment movements remain untouched. D-037 records the import-specific exception to ordinary manual evidence resolution.
-- Files changed: `Code.gs`, `syoat-app.js`, `index.html`, `tests/apps-script-baseline.test.mjs`, `tests/phase-2-performance.test.mjs`, `README.md`, `docs/ARCHITECTURE.md`, `docs/DATA_AND_INTEGRATIONS.md`, `docs/DECISIONS.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, `docs/PHASE_2_PLAN.md`, `docs/ROLE_CAPABILITIES.md`, `docs/CHANGELOG.md` and this handoff.
-- Checks performed: backend/frontend syntax passed; full repository suite passed 104/104 including exact-duplicate denial, explicit-token replacement, one active corrected snapshot, preserved raw history, Pending-only supersession, zero stock/movement effect, API/catalogue consistency, environment isolation and localhost staging isolation; whitespace validation passed.
-- Production actions still required: protected review/merge; owner deployment of `Code.gs`; owner publication of `index.html` and `syoat-app.js`; verify ping/backend and frontend build versions; back up the workbook; use only the next genuine corrected same-date Amazon Inventory Ledger (never dummy evidence) to confirm replacement, exact-duplicate denial, one active FC snapshot, prior Pending rows `Superseded`, unchanged location totals and clean write-recovery/system-health results.
-- Risks and next recommended task: interrupted multi-row writes intentionally stop in recovery before the active marker changes; inspect and resolve recovery rather than retrying blindly. Do not use P1 to reverse/net the 29 historical adjustments or reopen resolved/rejected evidence. After genuine production acceptance, proceed to P1 marketplace daily-event reconciliation.
+- Production evidence: the owner completed the genuine corrected same-date upload flow. The corrected batch became the sole active snapshot for its cutoff, only the previous active Pending evidence became `Superseded`, preserved history remained available and an exact duplicate of the active 2026-11-14 report was rejected without writes.
+- Inventory boundary: supersession created no movement and changed neither Warehouse, Transit nor Amazon FBA. The accepted baseline remains `MAIN_WH:15438`, `FBA_TRANSIT:811`, `AMAZON_FBA:1701`, `RETURNS:4`; the 29 legacy Amazon adjustment movements remain untouched. D-037 records the import-specific exception to ordinary manual evidence resolution.
+- Recovery closeout: the exact-duplicate rejection and one stale/late edit request against correct Approved `MOV-515` produced validation-only recovery markers with no checkpoints. Both were reviewed and closed `RESOLVED_NO_RETRY`; `MOV-515` remained Approved and unchanged. The temporary closeout helper was deleted without deployment, and the owner confirmed the final write-recovery and system-health checks were empty.
+- Files changed in this documentation closeout: `README.md`, `docs/ARCHITECTURE.md`, `docs/ROLE_CAPABILITIES.md`, `docs/DECISIONS.md`, `docs/PHASE_2_PLAN.md`, `docs/FBA_INVENTORY_OPERATING_SOP.md`, `docs/CHANGELOG.md` and this handoff. No application source, Sheet data, stock, private file or production configuration changed.
+- Checks performed: the documentation closeout passed backend/frontend syntax, all 104 automated tests, the 57-action API catalogue check, environment-template isolation and `git diff --check`. The localhost staging test required its normal temporary loopback listener; it passed when rerun with that permission.
+- Production actions still required for P1: none. Continue normal snapshot monitoring; do not retry exact active duplicates or edit Approved movements.
+- Risks and next recommended task: interrupted future multi-row snapshot writes must stop in recovery and be reviewed rather than retried blindly. Do not use P1 to reverse/net the 29 historical adjustments or reopen resolved/rejected evidence. Proceed to the P1 channel-neutral marketplace inventory bridge, beginning with the contract and a bounded FirstCry lifecycle slice.
 
 ### 2026-11-19 — P0-4 refreshed inventory baseline accepted in production
 
@@ -582,16 +584,16 @@ This list records the original audit baseline for history. Later releases deploy
 
 ## Next recommended task
 
-Implement evidence-derived FBA shipment status and closure enforcement so `Received` cannot precede balanced Approved receipt/exception evidence. Then complete maker-checker FBA variance resolution and the reviewed historical Transit cleanup. FBA-011 remains concluded under D-028 with permanent Avee exclusion; the 720-unit historical freebie correction remains designed but non-posting. Do not perform a production correction or historical rewrite without separate owner approval and the required safeguards.
+Define the channel-neutral marketplace inventory contract and implement the first bounded FirstCry lifecycle slice for reservation, warehouse dispatch, delivery, pre-dispatch cancellation and return/inspection. Preserve idempotency, maker-checker and recovery controls; keep marketplace inventory events independent of irregular FBA snapshots and exclude revenue/accounting.
 
 ## Production state
 
-- Source-control record: protected GitHub `main` includes the Transit-only receipt rule and Record Movement hotfix through the owner-confirmed protected merges. The original checkout's former local contents remain recoverable in stash `pre-sync-preservation-2026-11-12`.
-- Apps Script record: backend `3.2-phase2-fba-transit-clearance.1` is the latest recorded deployed version. The completed one-time historical linking apply gate remains removed.
-- Frontend record: build `20261116-record-movement-hotfix.1` is the latest recorded live frontend build.
+- Source-control record: protected GitHub `main` includes P1 same-date FBA snapshot supersession through owner-merged PR #20. The original checkout's former local contents remain recoverable in stash `pre-sync-preservation-2026-11-12`.
+- Apps Script record: backend `3.2-phase2-fba-snapshot-supersession.1` is the latest owner-confirmed deployed version. The completed one-time historical linking and Transit-cleanup gates remain removed.
+- Frontend record: build `20261119-fba-snapshot-supersession.1` is the latest owner-confirmed live frontend build.
 - Live Google Sheet: PIN hashes/salts populated, readable PIN cells cleared, and 85 movement file references normalized.
 - Live Drive: the earlier migration audit reported 187 checked and private; the later read-only folder inventory observed at least 359 owner-only/not-shared files.
-- Deployment/health: the owner deployed `3.2-phase2-fba-transit-clearance.1`, published the corrected frontend and successfully recorded/approved genuine receipt `MOV-456`. Read-only production evidence confirms the 238-unit Transit-only effect and complete audit linkage. The final historical-linking dry run had zero mutations/conflicts, the Phase 2 health audit had zero recovery/unresolved errors, and the effective login allowlist remains four authorized identities.
+- Deployment/health: the owner completed the protected P0 and P1 releases through snapshot supersession. Genuine receipt `MOV-456` retains its audited 238-unit Transit-only effect; the accepted inventory baseline remains Warehouse 15,438, Transit 811, Amazon FBA 1,701 and Returns 4. The corrected same-date snapshot flow and exact-duplicate denial were production-verified, its validation-only recovery markers were closed without retry, and the final recovery/system-health checks were clean. The effective login allowlist remains four authorized identities.
 
 ## Handoff log
 
